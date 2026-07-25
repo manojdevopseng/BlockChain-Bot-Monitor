@@ -1,0 +1,44 @@
+[Unit]
+Description=BlockChain-Bot API (FastAPI + scanners)
+Documentation=https://github.com/manojdevopseng/BlockChain-Bot-Monitor
+After=network-online.target mongod.service
+Wants=network-online.target
+# The app falls back to an in-memory store if Mongo is down, but data would not
+# persist — so treat mongod as a hard requirement.
+Requires=mongod.service
+
+[Service]
+Type=exec
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/BlockChain-Bot-Monitor/backend
+Environment=PYTHONUNBUFFERED=1
+# Emoji in log lines must not blow up on a non-UTF8 console.
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/home/ubuntu/BlockChain-Bot-Monitor/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8000 --log-level warning
+
+Restart=always
+RestartSec=5
+# Don't give up if it crash-loops during a bad deploy.
+StartLimitIntervalSec=0
+
+# Graceful stop: the app clears its run marker and sends the Telegram
+# "STOPPED" notice, so give it room before SIGKILL.
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bcbot-api
+
+# ── Hardening ──
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
