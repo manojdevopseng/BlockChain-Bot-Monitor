@@ -1,0 +1,54 @@
+"use client";
+
+import { useState } from "react";
+import { useApi } from "@/lib/api";
+import { PageHeader } from "@/components/PageHeader";
+import { StatCard } from "@/components/StatCard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { ScrollText, Info, AlertTriangle, XCircle } from "lucide-react";
+import { cn, fmtClock } from "@/lib/utils";
+
+const LEVEL: Record<string, string> = {
+  INFO: "text-accent-blue", DEBUG: "text-text-dim",
+  WARN: "text-accent-amber", ERROR: "text-accent-red",
+};
+
+export default function LogsPage() {
+  const [q, setQ] = useState("");
+  const { data: stats } = useApi<any>("/api/logs/stats", { refreshInterval: 3000 });
+  const { data } = useApi<any>(`/api/logs?limit=100${q ? `&q=${q}` : ""}`, { refreshInterval: 3000 });
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title="Logs" subtitle="Real-time logs from all services and components" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Total Logs" value={stats?.total ?? 0} icon={ScrollText} tone="purple" />
+        <StatCard label="Info" value={stats?.info ?? 0} icon={Info} tone="blue" />
+        <StatCard label="Warnings" value={stats?.warn ?? 0} icon={AlertTriangle} tone="amber" />
+        <StatCard label="Errors" value={stats?.error ?? 0} icon={XCircle} tone="red" />
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Live Stream</CardTitle>
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search logs…" className="w-56" />
+        </CardHeader>
+        <CardContent>
+          <div className="max-h-[520px] overflow-y-auto font-mono text-xs">
+            {(data?.items ?? []).map((l: any, i: number) => (
+              <div key={i} className="flex gap-3 border-b border-border-soft py-1.5">
+                <span className="shrink-0 text-text-dim">{fmtClock(l.ts)}</span>
+                <span className={cn("w-12 shrink-0 font-semibold", LEVEL[l.level] || "text-text")}>{l.level}</span>
+                <span className="w-32 shrink-0 text-brand-soft">{l.service}</span>
+                <span className="text-text-muted">{l.message}</span>
+              </div>
+            ))}
+            {(!data?.items || data.items.length === 0) && (
+              <div className="py-8 text-center text-text-dim">No logs</div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

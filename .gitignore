@@ -1,0 +1,31 @@
+# ── Python ────────────────────────────────────────────────────
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ── Secrets ───────────────────────────────────────────────────
+# Only .env.example is committed — it is a template with no values.
+backend/.env
+backend/.env.*
+!backend/.env.example
+.env.local
+# Telethon userbot login — never commit, this file IS the account session.
+*.session
+*.session-journal
+
+# ── Node / Next.js ────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+next-env.d.ts
+
+# ── Runtime output ────────────────────────────────────────────
+# Scoped to the backend root on purpose: a bare `data/` would also swallow
+# backend/app/data/seed_data.json, which is real source.
+backend/data/
+backend/logs/
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

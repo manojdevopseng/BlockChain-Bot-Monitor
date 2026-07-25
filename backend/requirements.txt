@@ -1,0 +1,26 @@
+# ── Web framework ──────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# ── Config / validation ────────────────────────────────────────
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+
+# ── Database ───────────────────────────────────────────────────
+motor>=3.4.0
+
+# ── Auth ───────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# ── HTTP / on-chain (used from Phase 3+) ───────────────────────
+aiohttp>=3.9.0
+websockets>=12.0
+web3>=6.15.0
+curl_cffi>=0.7.0
+
+# ── Telegram (used from Phase 3+) ──────────────────────────────
+telethon>=1.36.0
+python-telegram-bot>=21.0

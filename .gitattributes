@@ -1,0 +1,12 @@
+# Normalise line endings: LF in the repo, native in the working copy.
+# The project is developed on Windows and deployed on Ubuntu, so shell scripts
+# and service files must stay LF or they break on the server.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.session binary
+
+# Windows-only files keep CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf

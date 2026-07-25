@@ -1,0 +1,311 @@
+"""Database layer with a graceful in-memory fallback.
+
+If MongoDB is reachable we use Motor (async). If it is NOT (e.g. Mongo not yet
+installed during early development), we transparently fall back to a tiny
+in-memory store that mimics the subset of the Motor collection API this app
+uses — so the whole backend still runs and the dashboard is fully demoable.
+
+Swap is invisible to routers: they always call `get_collection(name)` and use
+`insert_one / find / find_one / update_one / count_documents / delete_*`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import fnmatch
+import itertools
+import re
+from typing import Any, Optional
+
+from .config import settings
+
+# Set on startup by connect(); routers can read to show DB status.
+DB_OK: bool = False
+_backend: str = "memory"  # "mongo" | "memory"
+
+_mongo_client = None
+_mongo_db = None
+
+# ── In-memory fallback ─────────────────────────────────────────────────────────
+
+
+def _matches(doc: dict, flt: dict) -> bool:
+    """Very small subset of Mongo query operators used by this app."""
+    for key, cond in (flt or {}).items():
+        val = doc.get(key)
+        if isinstance(cond, dict):
+            for op, opval in cond.items():
+                if op == "$in" and val not in opval:
+                    return False
+                if op == "$nin" and val in opval:
+                    return False
+                if op == "$gte" and not (val is not None and val >= opval):
+                    return False
+                if op == "$lte" and not (val is not None and val <= opval):
+                    return False
+                if op == "$gt" and not (val is not None and val > opval):
+                    return False
+                if op == "$lt" and not (val is not None and val < opval):
+                    return False
+                if op == "$ne" and val == opval:
+                    return False
+                if op == "$regex":
+                    flags = re.I if "i" in cond.get("$options", "") else 0
+                    if val is None or not re.search(opval, str(val), flags):
+                        return False
+        else:
+            if val != cond:
+                return False
+    return True
+
+
+class _MemCursor:
+    def __init__(self, docs: list[dict]):
+        self._docs = docs
+
+    def sort(self, key, direction: int = 1):
+        self._docs.sort(key=lambda d: (d.get(key) is None, d.get(key)),
+                        reverse=direction < 0)
+        return self
+
+    def skip(self, n: int):
+        self._docs = self._docs[n:]
+        return self
+
+    def limit(self, n: int):
+        if n:
+            self._docs = self._docs[:n]
+        return self
+
+    def __aiter__(self):
+        async def gen():
+            for d in self._docs:
+                yield d
+        return gen()
+
+    async def to_list(self, length: Optional[int] = None):
+        return self._docs[:length] if length else list(self._docs)
+
+
+class _MemCollection:
+    _seq = itertools.count(1)
+
+    def __init__(self, name: str):
+        self.name = name
+        self._docs: list[dict] = []
+
+    async def create_index(self, *a, **k):
+        return None
+
+    async def insert_one(self, doc: dict):
+        doc = dict(doc)
+        doc.setdefault("_id", f"mem-{next(self._seq)}")
+        self._docs.append(doc)
+        return type("R", (), {"inserted_id": doc["_id"]})()
+
+    async def insert_many(self, docs: list[dict]):
+        for d in docs:
+            await self.insert_one(d)
+        return type("R", (), {"inserted_ids": []})()
+
+    def find(self, flt: dict | None = None, projection=None):
+        docs = [dict(d) for d in self._docs if _matches(d, flt or {})]
+        return _MemCursor(docs)
+
+    async def find_one(self, flt: dict | None = None, projection=None):
+        for d in self._docs:
+            if _matches(d, flt or {}):
+                return dict(d)
+        return None
+
+    async def update_one(self, flt: dict, update: dict, upsert: bool = False):
+        for d in self._docs:
+            if _matches(d, flt):
+                d.update(update.get("$set", {}))
+                for k, v in update.get("$inc", {}).items():
+                    d[k] = d.get(k, 0) + v
+                return type("R", (), {"matched_count": 1, "modified_count": 1})()
+        if upsert:
+            new = dict(flt)
+            new.update(update.get("$set", {}))
+            await self.insert_one(new)
+            return type("R", (), {"matched_count": 0, "modified_count": 0,
+                                  "upserted_id": new.get("_id")})()
+        return type("R", (), {"matched_count": 0, "modified_count": 0})()
+
+    async def count_documents(self, flt: dict | None = None):
+        return sum(1 for d in self._docs if _matches(d, flt or {}))
+
+    async def delete_one(self, flt: dict):
+        for i, d in enumerate(self._docs):
+            if _matches(d, flt):
+                self._docs.pop(i)
+                return type("R", (), {"deleted_count": 1})()
+        return type("R", (), {"deleted_count": 0})()
+
+    async def delete_many(self, flt: dict | None = None):
+        before = len(self._docs)
+        self._docs = [d for d in self._docs if not _matches(d, flt or {})]
+        return type("R", (), {"deleted_count": before - len(self._docs)})()
+
+
+class _MemDB:
+    def __init__(self):
+        self._cols: dict[str, _MemCollection] = {}
+
+    def __getitem__(self, name: str) -> _MemCollection:
+        return self._cols.setdefault(name, _MemCollection(name))
+
+
+_mem_db = _MemDB()
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+
+async def connect() -> None:
+    """Try Mongo; on any failure fall back to the in-memory store."""
+    global DB_OK, _backend, _mongo_client, _mongo_db
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+
+        _mongo_client = AsyncIOMotorClient(
+            settings.mongo_uri, serverSelectionTimeoutMS=1500
+        )
+        await _mongo_client.admin.command("ping")
+        _mongo_db = _mongo_client[settings.mongo_db]
+        DB_OK = True
+        _backend = "mongo"
+    except Exception as exc:  # noqa: BLE001
+        DB_OK = False
+        _backend = "memory"
+        print(f"[db] MongoDB unavailable ({exc}); using in-memory fallback store.")
+
+
+async def close() -> None:
+    if _mongo_client is not None:
+        _mongo_client.close()
+
+
+def backend_name() -> str:
+    return _backend
+
+
+def get_collection(name: str):
+    if _backend == "mongo" and _mongo_db is not None:
+        return _mongo_db[name]
+    return _mem_db[name]
+
+
+# Collection -> retention setting name. `dt` is a BSON Date written on insert
+# (see slog / storage_repo / seed); mongod's TTL monitor deletes expired docs
+# on its own background thread, so retention costs the app nothing.
+_TTL_COLLECTIONS = {
+    "logs": "log_retention_days",
+    "alerts": "alert_retention_days",
+    "tokens": "token_retention_days",
+    "gas_alerts": "alert_retention_days",
+    "premium_archive": "archive_retention_days",
+}
+
+
+async def _ensure_ttl(name: str, days: int) -> None:
+    """Create (or re-point) the TTL index on `name`.`dt` to `days`."""
+    col = get_collection(name)
+    index_name = "dt_ttl"
+    seconds = int(days * 86400)
+
+    if days <= 0:
+        # Retention disabled — drop the TTL index if one exists.
+        try:
+            await col.drop_index(index_name)
+        except Exception:
+            pass
+        return
+
+    try:
+        await col.create_index("dt", name=index_name, expireAfterSeconds=seconds)
+    except Exception:
+        # Index exists with a different TTL — update it in place with collMod
+        # (create_index cannot change expireAfterSeconds on an existing index).
+        try:
+            await _mongo_db.command({
+                "collMod": name,
+                "index": {"name": index_name, "expireAfterSeconds": seconds},
+            })
+        except Exception as exc:  # noqa: BLE001
+            print(f"[db] could not set TTL on {name}: {exc}")
+
+
+async def ensure_indexes() -> None:
+    """Create query indexes + retention (TTL) indexes.
+
+    No-op on the in-memory backend (its create_index is a stub).
+    """
+    try:
+        await get_collection("tokens").create_index("address")
+        await get_collection("tokens").create_index([("created_at", -1)])
+        await get_collection("alerts").create_index([("created_at", -1)])
+        await get_collection("alerts").create_index([("type", 1), ("chain", 1)])
+        await get_collection("logs").create_index([("ts", -1)])
+        await get_collection("services").create_index("id")
+        await get_collection("premium_detections").create_index([("chain", 1), ("ts", -1)])
+    except Exception:
+        pass
+
+    if _backend != "mongo":
+        return
+    for coll, setting in _TTL_COLLECTIONS.items():
+        await _backfill_dt(coll)
+        await _ensure_ttl(coll, int(getattr(settings, setting, 0)))
+
+
+# Documents written before the `dt` field existed have no TTL anchor, so they
+# would never expire. Derive `dt` from the float timestamp each collection
+# already carries. Idempotent: only touches docs where `dt` is missing.
+_TS_FIELD = {
+    "logs": "ts",
+    "alerts": "created_at",
+    "tokens": "created_at",
+    "gas_alerts": "created_at",
+    "premium_archive": None,   # no float ts — fall back to "now"
+}
+
+
+async def _backfill_dt(name: str) -> None:
+    from datetime import datetime, timezone
+    col = get_collection(name)
+    try:
+        if not await col.count_documents({"dt": {"$exists": False}}, limit=1):
+            return
+        field = _TS_FIELD.get(name)
+        cursor = col.find({"dt": {"$exists": False}}, {field: 1} if field else {"_id": 1})
+        fixed = 0
+        async for doc in cursor:
+            ts = doc.get(field) if field else None
+            dt = (datetime.fromtimestamp(float(ts), timezone.utc)
+                  if isinstance(ts, (int, float)) and ts
+                  else datetime.now(timezone.utc))
+            await col.update_one({"_id": doc["_id"]}, {"$set": {"dt": dt}})
+            fixed += 1
+        if fixed:
+            print(f"[db] backfilled dt on {fixed} pre-existing {name} document(s)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[db] dt backfill skipped for {name}: {exc}")
+
+
+async def retention_policy() -> dict:
+    """Current retention settings + live doc counts (for /api/system)."""
+    out = {}
+    for coll, setting in _TTL_COLLECTIONS.items():
+        days = int(getattr(settings, setting, 0))
+        try:
+            count = await get_collection(coll).count_documents({})
+        except Exception:
+            count = 0
+        out[coll] = {
+            "retention_days": days,
+            "documents": count,
+            "policy": f"auto-deleted after {days} days" if days > 0 else "kept forever",
+        }
+    return out

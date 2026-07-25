@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme variables (space-separated RGB so Tailwind alpha modifiers work) ── */
+
+/* Light is the default; .dark on <html> switches the whole palette. */
+:root {
+  --bg: 248 250 252;
+  --bg-soft: 255 255 255;
+  --bg-card: 255 255 255;
+  --bg-hover: 241 245 249;
+
+  --border: 226 232 240;
+  --border-soft: 238 242 247;
+
+  --brand: 109 74 255;
+  --brand-soft: 124 92 255;
+
+  --accent-green: 22 163 74;
+  --accent-red: 220 38 38;
+  --accent-amber: 217 119 6;
+  --accent-blue: 37 99 235;
+  --accent-purple: 124 58 237;
+  --accent-cyan: 8 145 178;
+
+  --text: 15 23 42;
+  --text-muted: 71 85 105;
+  --text-dim: 148 163 184;
+
+  --glow: 124 92 255 / 0.06;
+  --scrollbar: 203 213 225;
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: 10 14 23;
+  --bg-soft: 15 20 32;
+  --bg-card: 17 24 39;
+  --bg-hover: 26 34 51;
+
+  --border: 31 41 55;
+  --border-soft: 22 30 46;
+
+  --brand: 124 92 255;
+  --brand-soft: 167 139 250;
+
+  --accent-green: 34 197 94;
+  --accent-red: 239 68 68;
+  --accent-amber: 245 158 11;
+  --accent-blue: 59 130 246;
+  --accent-purple: 139 92 246;
+  --accent-cyan: 6 182 212;
+
+  --text: 229 233 240;
+  --text-muted: 148 163 184;
+  --text-dim: 100 116 139;
+
+  --glow: 124 92 255 / 0.08;
+  --scrollbar: 31 41 55;
+
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-text font-sans antialiased;
+  background-image: radial-gradient(
+    1200px 600px at 80% -10%,
+    rgb(var(--glow)),
+    transparent
+  );
+}
+
+/* Thin themed scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--scrollbar)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--scrollbar));
+  border-radius: 8px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Native selects/inputs follow the theme */
+select option {
+  background: rgb(var(--bg-soft));
+  color: rgb(var(--text));
+}
