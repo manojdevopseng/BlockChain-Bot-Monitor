@@ -92,6 +92,10 @@ MONITOR_WINDOW_SECONDS   = settings.monitor_window_seconds
 FIRST_BUY_WINDOW_SECONDS = settings.first_buy_window_seconds
 MAX_GAS_MONITORS         = settings.max_gas_monitors
 GAS_ALERT_CHAT_ID        = settings.gas_alert_chat_id
+# Dedicated endpoint for the gas feature; falls back to the ETH one so an
+# upgrade with a blank value behaves exactly as before.
+GAS_RPC_WSS  = settings.gas_rpc_wss or settings.eth_rpc_wss
+GAS_RPC_HTTP = settings.gas_rpc_http or settings.eth_rpc_http
 
 # ── Health watchdog (from .env) ─────────────────────────────────
 HEALTH_ALERT_ENABLED = settings.health_alert_enabled

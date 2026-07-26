@@ -7,6 +7,7 @@ ticker. No smart-wallet layer.
 """
 
 import asyncio
+import contextlib
 from typing import Optional
 
 import aiohttp
@@ -44,6 +45,8 @@ class EthTrendingScanner:
         # ETH Gas Fees feature: every detected V2/V4 pair gets a swap monitor
         # that alerts on a high-gas early buy. Created lazily in run().
         self._gas: Optional[object] = None
+        self._gas_provider = None      # own socket only if GAS_RPC_WSS differs
+        self._gas_task: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
         if not config.ETH_RPC_WSS:
@@ -51,14 +54,31 @@ class EthTrendingScanner:
             return
         self._session = self._session_factory()
         from .gas_monitor_manager import GasMonitorManager
-        self._gas = GasMonitorManager(self._detector.provider)
+
+        # A watched pair costs one subscription and every buy costs a receipt.
+        # On its own endpoint that load cannot starve new-pair detection, so
+        # when GAS_RPC_WSS points somewhere else the gas feature gets its own
+        # socket. Same URL (or blank) = share the detector's, as before.
+        gas_wss = config.GAS_RPC_WSS
+        if gas_wss and gas_wss != config.ETH_RPC_WSS:
+            from .ws_provider import WSProvider
+            self._gas_provider = WSProvider(gas_wss, name="ETH-GAS")
+            self._gas_task = asyncio.create_task(self._gas_provider.run(), name="eth-gas-ws")
+            gas_provider = self._gas_provider
+            where = "own RPC endpoint"
+        else:
+            gas_provider = self._detector.provider
+            where = "shared ETH RPC endpoint"
+        self._gas = GasMonitorManager(gas_provider)
+
         log.info(
             f"[ETH-XCHAIN] On-chain SOL→ETH scanner started — "
             f"immediate alerts → {config.CROSS_CHAIN_CHAT_ID} (ticker match only, no smart-wallet layer)"
         )
         log.info(
             f"[GasMonitor] ETH Gas Fees armed — alert when an early buy pays "
-            f">= {config.MIN_FEE_ETH} ETH gas (V2+V4, window {config.MONITOR_WINDOW_SECONDS}s)"
+            f">= {config.MIN_FEE_ETH} ETH gas (V2+V4, window {config.MONITOR_WINDOW_SECONDS}s) "
+            f"on its {where}"
         )
         try:
             await self._detector.run()
@@ -68,6 +88,12 @@ class EthTrendingScanner:
         finally:
             if self._gas is not None:
                 await self._gas.close()
+            if self._gas_provider is not None:
+                self._gas_provider.stop()
+            if self._gas_task is not None and not self._gas_task.done():
+                self._gas_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await self._gas_task
             if self._session and not self._session.closed:
                 await self._session.close()
 

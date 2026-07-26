@@ -8,7 +8,7 @@ The receipt is fetched WS-first (same node that delivered the pair-creation log,
 avoiding cross-node replication lag) via the detector's WSProvider, falling back
 to the HTTP RPC with fast retries. Receipts are cached; concurrent lookups of
 the same tx share one request via an in-flight Future. Logic matches the
-reference; only the transport (our WSProvider.rpc + scfg.ETH_RPC_HTTP) changed.
+reference; only the transport (our WSProvider.rpc + scfg.GAS_RPC_HTTP) changed.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ class GasTracker:
                 except Exception as exc:
                     log.debug(f"WS receipt fetch failed for {tx_hash[:10]}…: {exc}")
 
-            if not config.ETH_RPC_HTTP:
+            if not config.GAS_RPC_HTTP:
                 if not fut.done():
                     fut.set_result(None)
                 return None
@@ -112,7 +112,7 @@ class GasTracker:
                 }
                 try:
                     async with session.post(
-                        config.ETH_RPC_HTTP, json=payload,
+                        config.GAS_RPC_HTTP, json=payload,
                         timeout=aiohttp.ClientTimeout(total=1),
                     ) as resp:
                         data = await resp.json(content_type=None)

@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     rbh_rpc_wss: str = ""
     sol_rpc_http: str = ""
     sol_rpc_wss: str = ""
+    # ETH Gas Fees runs on its own endpoint when these are set. It holds one
+    # subscription per watched pair and reads a receipt for every buy, so on a
+    # shared key it can eat the compute units that new-pair detection needs.
+    # Blank = share ETH_RPC_*.
+    gas_rpc_http: str = ""
+    gas_rpc_wss: str = ""
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""
@@ -168,9 +174,9 @@ class Settings(BaseSettings):
     # deployments, and a cross-chain match can come from either. Each source is
     # a separate WS subscription, so they are switched independently.
     rbh_noxa_enabled: bool = True
-    rbh_v2_enabled: bool = False
+    rbh_v2_enabled: bool = True
     rbh_v3_enabled: bool = True
-    rbh_v4_enabled: bool = False
+    rbh_v4_enabled: bool = True
 
     # ── Forwarder source channels (env-overridable, not hardcoded) ──
     source_call: str = "CallAnalyser2"
