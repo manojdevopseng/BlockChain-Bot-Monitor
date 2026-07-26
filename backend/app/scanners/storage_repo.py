@@ -178,6 +178,9 @@ async def _persist_alert(record: dict) -> None:
         "token_address": record.get("token_address"),
         "tx_hash": record.get("tx_hash"),
         "fee_eth": fee_eth,
+        # The SOL side is searchable in Recent Alerts, same as the reference
+        # dashboard — a match is only meaningful with both ends visible.
+        "sol_symbol": sol_sym,
         "sol_address": record.get("sol_address"),
         "sol_mcap_usd": record.get("sol_mcap_usd"),
         "dex": dex,

@@ -4,25 +4,10 @@ import { Bell, AlertTriangle, ShieldCheck, Eye } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { DataTable, type Column } from "@/components/DataTable";
-import { fmtClock } from "@/lib/utils";
+import { RecentAlerts } from "@/components/RecentAlerts";
 
 export default function AlertsPage() {
   const { data: stats } = useApi<any>("/api/alerts/stats");
-  const { data } = useApi<any>("/api/alerts?limit=50");
-
-  const cols: Column<any>[] = [
-    { key: "created_at", header: "Time", render: (r) => <span className="font-mono text-xs text-text-muted">{fmtClock(r.created_at)}</span> },
-    { key: "severity", header: "Severity", render: (r) => (
-      <Badge variant={r.severity === "high" ? "red" : r.severity === "medium" ? "amber" : "blue"}>{r.severity}</Badge>
-    )},
-    { key: "type", header: "Type" },
-    { key: "chain", header: "Chain", render: (r) => <Badge variant="purple">{r.chain}</Badge> },
-    { key: "message", header: "Message", render: (r) => <span className="text-text-muted">{r.message}</span> },
-    { key: "status", header: "Status", render: (r) => <Badge variant="green">{r.status}</Badge> },
-  ];
 
   return (
     <div className="space-y-5">
@@ -33,10 +18,7 @@ export default function AlertsPage() {
         <StatCard label="Medium" value={stats?.medium ?? 0} icon={Eye} tone="amber" />
         <StatCard label="Low" value={stats?.low ?? 0} icon={ShieldCheck} tone="blue" />
       </div>
-      <Card>
-        <CardHeader><CardTitle>Recent Alerts</CardTitle></CardHeader>
-        <CardContent><DataTable columns={cols} rows={data?.items ?? []} empty="No alerts" /></CardContent>
-      </Card>
+      <RecentAlerts />
     </div>
   );
 }
