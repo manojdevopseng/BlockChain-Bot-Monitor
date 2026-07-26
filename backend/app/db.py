@@ -245,16 +245,33 @@ async def ensure_indexes() -> None:
 
     No-op on the in-memory backend (its create_index is a stub).
     """
-    try:
-        await get_collection("tokens").create_index("address")
-        await get_collection("tokens").create_index([("created_at", -1)])
-        await get_collection("alerts").create_index([("created_at", -1)])
-        await get_collection("alerts").create_index([("type", 1), ("chain", 1)])
-        await get_collection("logs").create_index([("ts", -1)])
-        await get_collection("services").create_index("id")
-        await get_collection("premium_detections").create_index([("chain", 1), ("ts", -1)])
-    except Exception:
-        pass
+    # One index per query the dashboard and the scanners actually run. Each is
+    # keyed the way its query filters and sorts, so it can be served from the
+    # index instead of scanning the collection.
+    plan = [
+        ("tokens",             "address"),                          # token lookup by CA
+        ("tokens",             [("created_at", -1)]),               # newest-first list
+        ("alerts",             [("created_at", -1)]),               # newest-first feed
+        ("alerts",             [("type", 1), ("chain", 1)]),        # cross-chain panels
+        ("logs",               [("ts", -1)]),                       # log stream
+        ("services",           "id"),                               # every toggle read
+        ("premium_detections", [("chain", 1), ("ts", -1)]),         # detection panels
+        # Added after an audit found these queried on every request with no
+        # index behind them:
+        ("premium_groups",     "id"),                               # reload + toggle, ~20s
+        ("gas_alerts",         [("created_at", -1)]),               # merged into Alerts
+        ("premium_archive",    [("chain", 1), ("date", 1)]),        # History dropdown
+        ("forwarder_counters", [("scope", 1), ("day", 1), ("key", 1)]),   # every page load
+        ("chats_seen",         "id"),                               # chat-id finder
+        ("commands",           "command"),                           # per-command lookup
+    ]
+    for coll, keys in plan:
+        try:
+            await get_collection(coll).create_index(keys)
+        except Exception as exc:  # noqa: BLE001
+            # Named per collection: a silent failure here shows up much later
+            # as an unexplained slow query.
+            print(f"[db] index on {coll} {keys} failed: {exc}")
 
     if _backend != "mongo":
         return
