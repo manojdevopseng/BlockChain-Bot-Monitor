@@ -30,6 +30,7 @@ from telethon.errors import FloodWaitError
 from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
+from app import heartbeat
 from app.keywords import match_any
 from app import fwd_counters
 
@@ -658,6 +659,7 @@ class TelegramForwarder:
         if bare not in self._premium_ids:
             return
         fwd_counters.bump(fwd_counters.SOURCE, bare)
+        heartbeat.beat("premium_msg")
         await self._learn_group_name(event, bare)
         unique_id = f"{event.chat_id}_{event.id}"
         if unique_id in self._processed:

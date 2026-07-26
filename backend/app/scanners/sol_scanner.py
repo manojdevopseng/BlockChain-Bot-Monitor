@@ -16,6 +16,7 @@ from app.scanners import storage_repo as storage
 from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
+from app import heartbeat
 
 log = get_logger(__name__)
 
@@ -68,6 +69,7 @@ class SolanaScanner:
         while True:
             try:
                 await self._scan_once()
+                heartbeat.beat("sol_scan")
                 self._purge_expired()
                 self._purge_pending()
                 self._save_watchlist()

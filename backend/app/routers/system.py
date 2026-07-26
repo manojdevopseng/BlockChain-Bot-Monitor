@@ -8,7 +8,8 @@ import time
 
 from fastapi import APIRouter
 
-from .. import db, registry, supervisor
+from .. import db, heartbeat, registry, supervisor
+from ..scanners import scfg
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -68,6 +69,19 @@ async def retention():
     background sweep, so this costs the app (and the EC2 box) nothing.
     """
     return {"backend": db.backend_name(), "collections": await db.retention_policy()}
+
+
+@router.get("/activity")
+async def activity():
+    """When each part of the bot last actually did something.
+
+    A worker can be `running` and idle — the task is alive and the socket says
+    connected while no work happens. This is the difference between "the
+    process is up" and "the bot is working".
+    """
+    return {"items": heartbeat.snapshot(),
+            "quiet_after_ws_seconds": scfg.HEALTH_DOWN_SECONDS,
+            "watchdog_enabled": scfg.HEALTH_ALERT_ENABLED}
 
 
 @router.get("/services")

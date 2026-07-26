@@ -17,6 +17,7 @@ from app.scanners.sol_scanner import _launchpad_display
 from app.scanners import storage_repo as storage
 from app.scanners import scfg as config
 from app.scanners.slog import get_logger
+from app import heartbeat
 
 log = get_logger(__name__)
 
@@ -39,6 +40,7 @@ def _token_link(spec: ChainSpec, address: str) -> str:
 
 def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
                  fee_eth: float | None = None) -> None:
+    heartbeat.beat("xchain_match")
     try:
         storage.save_alert_record({
             "token_symbol":    tok.symbol,

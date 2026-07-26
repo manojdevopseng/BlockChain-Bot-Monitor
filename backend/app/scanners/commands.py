@@ -28,6 +28,7 @@ import aiohttp
 
 from app.scanners import scfg as config
 from app.scanners.slog import get_logger
+from app import heartbeat
 
 log = get_logger(__name__)
 
@@ -285,6 +286,7 @@ class TelegramCommands:
             log.debug(f"[CMD] /{cmd} is disabled — ignored")
             return
 
+        heartbeat.beat("command")
         started = time.perf_counter()
         try:
             reply = await self._reply_for(cmd)

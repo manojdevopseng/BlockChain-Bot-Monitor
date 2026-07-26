@@ -25,6 +25,7 @@ import aiohttp
 from app.scanners import scfg as config
 from app.scanners.onchain_detector import DetectedToken
 from app.scanners.slog import get_logger
+from app import heartbeat
 from app.scanners.swap_monitor import SwapMonitor
 from app.scanners.ws_provider import WSProvider
 
@@ -110,6 +111,7 @@ class GasMonitorManager:
             "created_at": now,
             "dt": datetime.fromtimestamp(now, timezone.utc),   # TTL field
         }
+        heartbeat.beat("gas_alert")
         try:
             await db.get_collection("gas_alerts").insert_one(dict(doc))
             await hub.broadcast("gas_alert", {k: v for k, v in doc.items() if k != "dt"})

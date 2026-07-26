@@ -27,6 +27,7 @@ _import_error: str = ""
 # Lazily-created shared objects (only when a scanner is first needed).
 _client = None            # GMGNClient
 _sol = None               # SolanaScanner
+_watchdog: Optional[asyncio.Task] = None   # heartbeat.watch()
 _instances: dict = {}     # logical name -> scanner instance ('eth' | 'rbh')
 _tasks: dict[str, asyncio.Task] = {}   # logical name -> task ('sol' | 'eth' | 'rbh')
 
@@ -63,8 +64,21 @@ async def start() -> None:
         return
     await reconcile()
 
+    # Watches for a component that is "running" but has stopped doing anything.
+    global _watchdog
+    from . import heartbeat
+    _watchdog = asyncio.create_task(heartbeat.watch(), name="watchdog")
+
 
 async def stop() -> None:
+    global _watchdog
+    if _watchdog is not None and not _watchdog.done():
+        _watchdog.cancel()
+        try:
+            await _watchdog
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        _watchdog = None
     for name in list(_tasks):
         await _stop_worker(name)
     global _client

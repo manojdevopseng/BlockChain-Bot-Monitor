@@ -16,6 +16,7 @@ from typing import Awaitable, Callable, Optional
 from app.scanners.ws_provider import SubscriptionSpec, WSProvider
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
+from app import heartbeat
 
 log = get_logger(__name__)
 
@@ -236,6 +237,7 @@ class OnChainDetector:
             pool_id=pool_id,
         )
         try:
+            heartbeat.beat("rbh_pair" if self._spec.name == "ROBINHOOD" else "eth_pair")
             await self._on_token(tok)
         except Exception as exc:
             log.error(f"[{self._spec.name}] on_token callback error: {exc}")

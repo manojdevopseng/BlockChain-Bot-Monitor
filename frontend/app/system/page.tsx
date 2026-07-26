@@ -13,6 +13,7 @@ export default function SystemPage() {
   const { data } = useApi<any>("/api/system/overview");
   const { data: svcs } = useApi<any>("/api/system/services");
   const { data: m } = useApi<any>("/api/system/metrics", { refreshInterval: 10000 });
+  const { data: act } = useApi<any>("/api/system/activity", { refreshInterval: 10000 });
   const { data: ret } = useApi<any>("/api/system/retention");
 
   const info = [
@@ -41,6 +42,48 @@ export default function SystemPage() {
               </div>
             ))}
         </CollapsibleSection>
+        <CollapsibleSection
+          id="sys-activity"
+          title="Last Activity"
+          count={(act?.items ?? []).filter((a: any) => a.status === "quiet").length || undefined}
+        >
+          <p className="mb-3 text-xs text-text-dim">
+            When each part of the bot last actually did something. A worker can
+            be running and idle, which is not the same as working.
+          </p>
+          <TableScroll maxHeight={360}>
+            <div className="space-y-1">
+              {(act?.items ?? []).map((a: any) => (
+                <div key={a.name} className="flex items-start justify-between gap-2 rounded-lg border border-border-soft px-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="text-text">{a.label}</div>
+                    <div className="text-[10px] text-text-dim">
+                      {a.detail || (a.kind === "event"
+                        ? "fires when the market does — silence is normal"
+                        : "checked by the watchdog")}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-text-muted">
+                      {a.age_seconds == null ? "—" : a.age_seconds < 60
+                        ? `${a.age_seconds}s ago`
+                        : `${Math.round(a.age_seconds / 60)}m ago`}
+                    </span>
+                    <Badge variant={
+                      a.status === "ok" ? "green"
+                        : a.status === "quiet" ? (a.kind === "tick" ? "red" : "gray")
+                        : "gray"
+                    }>
+                      {a.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+              {!act && <span className="text-xs text-text-dim">Loading…</span>}
+            </div>
+          </TableScroll>
+        </CollapsibleSection>
+
         <CollapsibleSection id="sys-services" title="Service Status">
           <TableScroll maxHeight={360}>
           <div className="space-y-1">
