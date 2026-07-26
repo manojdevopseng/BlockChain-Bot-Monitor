@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 from fastapi import APIRouter, Query
@@ -43,7 +44,10 @@ async def list_tokens(
     if type:
         flt["type"] = type
     if q:
-        flt["symbol"] = {"$regex": q, "$options": "i"}
+        # Escaped: an address is the obvious thing to paste in here, and "(" or
+        # "." went to Mongo as a regex — a 500 on a plain search.
+        rx = {"$regex": re.escape(q), "$options": "i"}
+        flt["$or"] = [{"symbol": rx}, {"address": rx}]
     col = db.get_collection("tokens")
     total = await col.count_documents(flt)
     docs = await col.find(flt).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)

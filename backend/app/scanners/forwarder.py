@@ -56,6 +56,9 @@ SOURCE_BUYBOT = config.SOURCE_BUYBOT
 # How often the live premium-group set is re-read from Mongo.
 PREMIUM_RELOAD_SECONDS = 20
 
+# Cap on the per-message dedup guards. ~50k ids is days of traffic.
+_DEDUP_MAX = 50000
+
 # Registry service id that gates each handler.
 GATE_CALL    = "bbcanalyser2"            # CallAnalyser2
 GATE_DEXS    = "dexsignalcall"           # dexssignal
@@ -188,8 +191,12 @@ class TelegramForwarder:
             config.TELETHON_API_ID,
             config.TELETHON_API_HASH,
         )
-        self._processed:          set  = set()
-        self._group_eth_tracker:  set  = set()
+        # Bounded, not plain sets: one entry goes in per message seen and none
+        # ever came out, so on a 24/7 userbot mirroring 100+ groups these grew
+        # without limit. FIFO eviction — an id old enough to be evicted is far
+        # past any chance of arriving again. (The reference has the same leak.)
+        self._processed:         BoundedSet = BoundedSet(_DEDUP_MAX)
+        self._group_eth_tracker: BoundedSet = BoundedSet(_DEDUP_MAX)
         self._eth_global_counter: dict = {}
         self._http: Optional[aiohttp.ClientSession] = None
 
