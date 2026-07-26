@@ -3,6 +3,8 @@ and the premium-caller address detection panels (ETH / RBH / SOL)."""
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db
@@ -104,8 +106,10 @@ async def detections_stats(chain: str = Query("eth", pattern="^(eth|rbh|sol)$"))
 async def detection_dates(chain: str = Query("eth", pattern="^(eth|rbh|sol)$")):
     """Archived dates (History dropdown) for a chain, newest first."""
     docs = await db.get_collection("premium_archive").find({"chain": chain}).to_list(400)
-    dates = sorted({d.get("date") for d in docs if d.get("date")}, reverse=True)
-    return {"dates": dates}
+    days = {d.get("date") for d in docs if d.get("date")}
+    # Parse before sorting. DD-MM-YYYY sorted as text puts 31-01 after 01-02,
+    # so the dropdown ran out of order across every month boundary.
+    return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}
 
 
 @router.get("/detections/history")

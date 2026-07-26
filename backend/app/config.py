@@ -49,9 +49,9 @@ class Settings(BaseSettings):
     # background sweep (~every 60s), so the app does zero deletion work. Set a
     # value to 0 to keep that collection forever (not recommended on EC2).
     log_retention_days: int = 15
-    alert_retention_days: int = 30
+    alert_retention_days: int = 15
     token_retention_days: int = 30
-    archive_retention_days: int = 90
+    archive_retention_days: int = 15
 
     # ── Auth ────────────────────────────────────────────────
     jwt_secret: str = "change-me"
