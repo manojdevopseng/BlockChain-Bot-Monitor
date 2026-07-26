@@ -28,14 +28,7 @@ def _day_str(ts: float) -> str:
 _SEARCH_FIELDS = ("token_symbol", "token_address", "sol_symbol", "sol_address", "message")
 
 
-@router.get("")
-async def list_alerts(
-    severity: str | None = None,
-    chain: str | None = None,
-    q: str | None = None,
-    limit: int = Query(50, le=200),
-    skip: int = 0,
-):
+def _build_filter(severity: str | None, chain: str | None, q: str | None) -> dict:
     flt: dict = {}
     if severity:
         flt["severity"] = severity
@@ -45,18 +38,88 @@ async def list_alerts(
         # Escaped: a user typing "0x…" or "." must not be read as a regex.
         rx = {"$regex": re.escape(q), "$options": "i"}
         flt["$or"] = [{f: rx} for f in _SEARCH_FIELDS]
+    return flt
+
+
+def _gas_as_alert(doc: dict) -> dict:
+    """A high-gas early buy, shaped like an alert row.
+
+    Gas hits live in their own `gas_alerts` collection (own TTL, own Detections
+    section), but the Alerts page is the "everything that fired" view, so they
+    are projected into the same shape at read time rather than written twice.
+    """
+    sym = doc.get("symbol") or "?"
+    fee = doc.get("fee_eth") or 0
+    age = doc.get("age_seconds")
+    age_txt = f", {age}s after the first buy" if age is not None else ""
+    return {
+        "type": "High Gas Early Buy",
+        "severity": "high",
+        "status": "new",
+        "chain": doc.get("chain") or "eth",
+        "message": f"{sym} — an early buy paid {float(fee):.6f} ETH in gas{age_txt}",
+        "created_at": doc.get("created_at"),
+        "token_symbol": sym,
+        "token_address": doc.get("address"),
+        "tx_hash": doc.get("tx_hash"),
+        "fee_eth": fee,
+        "dex": doc.get("dex"),
+        "source": "gas_alerts",
+    }
+
+
+async def _gas_rows(flt: dict) -> list[dict]:
+    """Gas hits matching the same filter, already in alert shape."""
+    docs = await db.get_collection("gas_alerts").find({}).to_list(2000)
+    rows = [_gas_as_alert(d) for d in docs]
+    if not flt:
+        return rows
+
+    def keeps(row: dict) -> bool:
+        if "severity" in flt and row["severity"] != flt["severity"]:
+            return False
+        if "chain" in flt and row["chain"] != flt["chain"]:
+            return False
+        if "$or" in flt:
+            # Same fields, same escaped term — reuse the compiled pattern.
+            pattern = next(iter(flt["$or"][0].values()))["$regex"]
+            rx = re.compile(pattern, re.I)
+            if not any(rx.search(str(row.get(f) or "")) for f in _SEARCH_FIELDS):
+                return False
+        return True
+
+    return [r for r in rows if keeps(r)]
+
+
+@router.get("")
+async def list_alerts(
+    severity: str | None = None,
+    chain: str | None = None,
+    q: str | None = None,
+    limit: int = Query(50, le=200),
+    skip: int = 0,
+):
+    flt = _build_filter(severity, chain, q)
     col = db.get_collection("alerts")
-    total = await col.count_documents(flt)
-    docs = await col.find(flt).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    return {"total": total, "items": clean_list(docs)}
+    # Take enough of each feed to fill the page after merging, then sort the
+    # two together — a page must not be all of one kind just because that
+    # collection happened to be read first.
+    take = skip + limit
+    docs = await col.find(flt).sort("created_at", -1).limit(take).to_list(take)
+    merged = clean_list(docs) + await _gas_rows(flt)
+    merged.sort(key=lambda d: d.get("created_at") or 0, reverse=True)
+    total = await col.count_documents(flt) + len(await _gas_rows(flt))
+    return {"total": total, "items": merged[skip:take]}
 
 
 @router.get("/stats")
 async def alert_stats():
     col = db.get_collection("alerts")
+    gas = await db.get_collection("gas_alerts").count_documents({})
     return {
-        "total": await col.count_documents({}),
-        "high": await col.count_documents({"severity": "high"}),
+        # Gas hits are always high severity, so they only move total + high.
+        "total": await col.count_documents({}) + gas,
+        "high": await col.count_documents({"severity": "high"}) + gas,
         "medium": await col.count_documents({"severity": "medium"}),
         "low": await col.count_documents({"severity": "low"}),
     }
