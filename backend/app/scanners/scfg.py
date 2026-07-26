@@ -93,6 +93,7 @@ GMGN_DEVICE_ID = settings.gmgn_device_id
 GMGN_FP_DID    = settings.gmgn_fp_did
 GMGN_CLIENT_ID = settings.gmgn_client_id
 CF_CLEARANCE   = settings.cf_clearance
+GMGN_IMPERSONATE = settings.gmgn_impersonate
 
 # ── Telethon userbot (Forwarder / flow4) — from .env ────────────
 TELETHON_API_ID   = settings.telethon_api_id

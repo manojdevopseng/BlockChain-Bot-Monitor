@@ -54,8 +54,9 @@ class GMGNClient:
         self._rate_limiter = RateLimiter(rate=rate_limit or config.API_RATE_LIMIT)
 
     async def start(self) -> None:
+        imp = config.GMGN_IMPERSONATE
         self._session = AsyncSession(
-            impersonate="chrome124",
+            impersonate=imp,
             headers={
                 "X-APIKEY":      self._api_key,
                 "Content-Type":  "application/json",
@@ -67,22 +68,26 @@ class GMGNClient:
         if config.CF_CLEARANCE:
             self._session.cookies.update({"cf_clearance": config.CF_CLEARANCE})
             log.info("GMGN API client: cf_clearance cookie injected")
-        web_cookies = {}
-        if config.CF_CLEARANCE:
-            web_cookies["cf_clearance"] = config.CF_CLEARANCE
-        self._web_session = aiohttp.ClientSession(
+
+        # The web host (gmgn.ai) fingerprints the TLS handshake, not just the
+        # headers. Plain aiohttp — and curl_cffi's older Chrome profiles — get a
+        # flat 403 from it; a current Chrome profile passes. So this session
+        # uses curl_cffi too, with the profile taken from GMGN_IMPERSONATE so a
+        # future Cloudflare change is a .env edit, not a code change.
+        self._web_session = AsyncSession(
+            impersonate=imp,
             headers=_WEB_HEADERS,
-            timeout=_WEB_TIMEOUT,
-            connector=aiohttp.TCPConnector(limit=20, ttl_dns_cache=300),
-            cookies=web_cookies,
+            timeout=15,
         )
-        log.info("GMGN API client started (openapi.gmgn.ai + Chrome impersonation)")
+        if config.CF_CLEARANCE:
+            self._web_session.cookies.update({"cf_clearance": config.CF_CLEARANCE})
+        log.info(f"GMGN API client started (openapi + web, impersonating {imp})")
 
     async def stop(self) -> None:
         if self._session:
             await self._session.close()
             log.info("GMGN API client stopped")
-        if self._web_session and not self._web_session.closed:
+        if self._web_session:
             await self._web_session.close()
 
     # ── openapi.gmgn.ai (curl_cffi) ──────────────────────────────
@@ -105,16 +110,15 @@ class GMGNClient:
             raise APIError(resp.status_code, resp.text[:200])
         return resp.json()
 
-    # ── gmgn.ai web (aiohttp) ────────────────────────────────────
+    # ── gmgn.ai web (curl_cffi — see start() for why) ────────────
     async def _web_get(self, path: str, params: dict = None) -> Any:
         return await with_retry(self._web_get_once, path, params or {})
 
     async def _web_get_once(self, path: str, params: dict) -> Any:
         await self._rate_limiter.acquire()
         assert self._web_session is not None
-        url = config.GMGN_WEB_URL + path
-        async with self._web_session.get(url, params=params) as resp:
-            return await self._parse_aiohttp(resp)
+        resp = await self._web_session.get(config.GMGN_WEB_URL + path, params=params)
+        return self._parse_cffi(resp)
 
     async def _parse_aiohttp(self, resp: aiohttp.ClientResponse) -> Any:
         if resp.status in (429, 403):

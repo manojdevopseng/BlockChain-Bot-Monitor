@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     telethon_session: str = "final_session"
     gmgn_fp_did: str = ""
     cf_clearance: str = ""
+    # Browser profile curl_cffi impersonates when talking to GMGN. gmgn.ai
+    # fingerprints the TLS handshake: older Chrome profiles (and plain aiohttp)
+    # get a flat 403, a current one passes. Bump this when Cloudflare tightens.
+    gmgn_impersonate: str = "chrome136"
 
     # ── Destination / alert chat IDs (deployment-specific — NOT hardcoded) ──
     # Empty by default; set the real values in .env. Empty = that route is
