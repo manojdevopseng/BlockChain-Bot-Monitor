@@ -6,7 +6,7 @@ import time
 
 from fastapi import APIRouter
 
-from .. import db, registry, supervisor
+from .. import db, registry, supervisor, watchlist
 from ..util import clean_list
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -25,18 +25,21 @@ async def stats():
     avg_gas = round(sum(fees) / len(fees), 5) if fees else 0.0
     gas_hits = len(fees)
 
+    # The SOL tickers actually being watched, expiry applied — same source the
+    # /watching command answers from, so the two can never disagree.
+    watching = await watchlist.count()
+
     return {
         "total_alerts": total_alerts,
         "total_tokens": total_tokens,
         "eth_gas_avg_eth": avg_gas,
         "eth_gas_hits": gas_hits,
-        "active_watchlist": await tokens.count_documents({"type": "watching"}),
+        "active_watchlist": watching,
         "cards": [
             {"key": "total_alerts", "label": "Total Alerts", "value": total_alerts},
             {"key": "total_tokens", "label": "Total Tokens", "value": total_tokens},
             {"key": "eth_gas",      "label": "High-Gas Buys", "value": gas_hits},
-            {"key": "watchlist",    "label": "Active Watchlist",
-             "value": await tokens.count_documents({"type": "watching"})},
+            {"key": "watchlist",    "label": "Active Watchlist", "value": watching},
         ],
     }
 

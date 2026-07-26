@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Coins, Plus, TrendingUp, Star, ExternalLink } from "lucide-react";
+import { Coins, Plus, Star, ExternalLink } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -49,11 +49,12 @@ export default function TokensPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Tokens" subtitle="Live token discovery across all enabled chains" />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* "Migrated" used to sit here reading a token type nothing writes, so it
+          was permanently 0. Dropped rather than left showing a fake zero. */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <StatCard label="Total Tokens" value={stats?.total ?? 0} icon={Coins} tone="amber" />
         <StatCard label="New (24h)" value={stats?.new_24h ?? 0} icon={Plus} tone="green" />
-        <StatCard label="Migrated" value={stats?.migrated ?? 0} icon={TrendingUp} tone="purple" />
-        <StatCard label="Watching" value={stats?.watching ?? 0} icon={Star} tone="cyan" />
+        <StatCard label="Watching (SOL)" value={stats?.watching ?? 0} icon={Star} tone="cyan" />
       </div>
       <Card>
         <CardHeader>

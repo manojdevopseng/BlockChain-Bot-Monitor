@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Query
 
-from .. import db
+from .. import db, watchlist
 from ..util import clean, clean_list
 
 router = APIRouter(prefix="/api/tokens", tags=["tokens"])
@@ -51,11 +53,14 @@ async def list_tokens(
 @router.get("/stats")
 async def token_stats():
     col = db.get_collection("tokens")
+    day_ago = time.time() - 86400
     return {
         "total": await col.count_documents({}),
-        "new_24h": await col.count_documents({"type": "new"}),
-        "migrated": await col.count_documents({"type": "migrated"}),
-        "watching": await col.count_documents({"type": "watching"}),
+        # Genuinely the last 24 hours. This used to count every document with
+        # type "new" — which is all of them — and label it "24h".
+        "new_24h": await col.count_documents({"created_at": {"$gte": day_ago}}),
+        # The live SOL watch list, not a `tokens` type that nothing writes.
+        "watching": await watchlist.count(),
     }
 
 

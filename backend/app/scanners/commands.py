@@ -391,12 +391,8 @@ class TelegramCommands:
 
     @staticmethod
     async def _watchlist() -> list:
-        doc = await _col("scanner_state").find_one({"name": "sol_watchlist"})
-        items = (doc or {}).get("data") or []
-        now = time.time()
-        out = [d for d in items if isinstance(d, dict) and d.get("expires_at", 0) > now]
-        out.sort(key=lambda d: d.get("expires_at", 0))
-        return out
+        from .. import watchlist
+        return await watchlist.active()
 
     async def _msg_watching(self) -> str:
         wl = await self._watchlist()
