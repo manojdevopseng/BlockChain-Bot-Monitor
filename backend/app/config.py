@@ -88,7 +88,7 @@ class Settings(BaseSettings):
 
     # ── ETH Gas Fees (high-gas early buy detection) ─────────
     # A buy whose gas fee reaches this many ETH fires the alert.
-    min_fee_eth: float = 0.0001
+    min_fee_eth: float = 0.0009
     # Hard cap on how long one token is watched, counted from detection.
     monitor_window_seconds: int = 14400      # 4h
     # Shorter window started by the first buy; whichever timer fires first wins.
