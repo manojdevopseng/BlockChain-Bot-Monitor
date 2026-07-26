@@ -39,7 +39,7 @@ async def stats():
     dsts = await dst.find({}).to_list(500)
     return {
         "total_sources": len(srcs),
-        "total_groups": 174,
+        "total_groups": await db.get_collection("premium_groups").count_documents({"enabled": {"$ne": False}}),
         "messages_today": sum(s.get("today", 0) for s in srcs),
         "forwarded_today": sum(d.get("today", 0) for d in dsts),
     }

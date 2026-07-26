@@ -38,8 +38,7 @@ export default function CommandsPage() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Commands" value={stats?.total ?? 0} icon={Terminal} tone="purple" />
         <StatCard label="Enabled" value={stats?.enabled ?? 0} icon={CheckCircle} tone="green" />
-        <StatCard label="Uses (24h)" value={fmtNum(stats?.uses_24h)} icon={Activity} tone="blue" delta={24.6} />
-        <StatCard label="Users (24h)" value="2,341" icon={Users} tone="cyan" />
+        <StatCard label="Uses (24h)" value={fmtNum(stats?.uses_24h)} icon={Activity} tone="blue" />
       </div>
       <Card>
         <CardHeader><CardTitle>Command List</CardTitle></CardHeader>

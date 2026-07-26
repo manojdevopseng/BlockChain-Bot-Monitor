@@ -32,8 +32,8 @@ async def stats():
         "eth_gas_hits": gas_hits,
         "active_watchlist": await tokens.count_documents({"type": "watching"}),
         "cards": [
-            {"key": "total_alerts", "label": "Total Alerts", "value": total_alerts, "delta": 23.5},
-            {"key": "total_tokens", "label": "Total Tokens", "value": total_tokens, "delta": 18.7},
+            {"key": "total_alerts", "label": "Total Alerts", "value": total_alerts},
+            {"key": "total_tokens", "label": "Total Tokens", "value": total_tokens},
             {"key": "eth_gas",      "label": "High-Gas Buys", "value": gas_hits},
             {"key": "watchlist",    "label": "Active Watchlist",
              "value": await tokens.count_documents({"type": "watching"})},

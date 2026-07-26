@@ -1,13 +1,12 @@
-"""Analytics routes — aggregate metrics + chart series.
+"""Analytics routes — aggregates computed from what the scanners actually stored.
 
-Phase 1 derives series from stored docs; where history is sparse it returns a
-smooth synthetic 24h series so charts render. Phase 3+ replaces synthetic points
-with real time-bucketed aggregates.
+Every number and every chart point below is counted from MongoDB. Empty
+collections give empty series rather than a synthetic curve: a flat chart here
+means nothing has happened yet, which is information in itself.
 """
 
 from __future__ import annotations
 
-import math
 import time
 
 from fastapi import APIRouter
@@ -16,43 +15,57 @@ from .. import db
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
+_HOUR = 3600
 
-def _series(points: int = 24, base: float = 200, amp: float = 120) -> list[dict]:
+
+async def _hourly(collection: str, ts_field: str, hours: int = 24) -> list[dict]:
+    """Count documents per hour for the last `hours`, oldest bucket first."""
     now = int(time.time())
-    out = []
-    for i in range(points):
-        t = now - (points - i) * 3600
-        val = base + amp * (0.5 + 0.5 * math.sin(i / 3.0)) + (i % 5) * 8
-        out.append({"t": t, "value": round(val)})
-    return out
+    start = now - hours * _HOUR
+    docs = await db.get_collection(collection).find(
+        {ts_field: {"$gte": start}}, {ts_field: 1}
+    ).to_list(20000)
+
+    buckets = {start + i * _HOUR: 0 for i in range(hours)}
+    for d in docs:
+        ts = d.get(ts_field)
+        if not isinstance(ts, (int, float)):
+            continue
+        slot = start + int((ts - start) // _HOUR) * _HOUR
+        if slot in buckets:
+            buckets[slot] += 1
+    return [{"t": t, "value": v} for t, v in sorted(buckets.items())]
 
 
 @router.get("/summary")
 async def summary():
-    tokens = await db.get_collection("tokens").count_documents({})
-    alerts = await db.get_collection("alerts").count_documents({})
+    tokens = db.get_collection("tokens")
+    alerts = db.get_collection("alerts")
+    day_ago = time.time() - 86400
     return {
-        "tokens_detected": tokens,
-        "messages_forwarded": 12548,
-        "watchlist_hits": 128,
-        "total_volume_usd": 312_480_000,
-        "avg_response_ms": 112,
+        "tokens_detected": await tokens.count_documents({}),
+        "tokens_24h": await tokens.count_documents({"created_at": {"$gte": day_ago}}),
+        "alerts_total": await alerts.count_documents({}),
+        "cross_chain_matches": await alerts.count_documents({"type": "Cross-Chain Match"}),
+        "gas_hits": await db.get_collection("gas_alerts").count_documents({}),
+        "premium_detections": await db.get_collection("premium_detections").count_documents({}),
     }
 
 
 @router.get("/activity")
 async def activity():
+    """Per-hour counts for the last 24h, straight from the collections."""
     return {
-        "tokens_detected": _series(base=300, amp=200),
-        "messages_forwarded": _series(base=250, amp=160),
-        "alerts_triggered": _series(base=150, amp=90),
-        "watchlist_hits": _series(base=80, amp=50),
+        "tokens_detected": await _hourly("tokens", "created_at"),
+        "alerts_triggered": await _hourly("alerts", "created_at"),
+        "gas_hits": await _hourly("gas_alerts", "created_at"),
+        "premium_detections": await _hourly("premium_detections", "ts"),
     }
 
 
 @router.get("/by-chain")
 async def by_chain():
-    docs = await db.get_collection("tokens").find({}).to_list(1000)
+    docs = await db.get_collection("tokens").find({}, {"chain": 1}).to_list(5000)
     counts: dict[str, int] = {}
     for t in docs:
         counts[t.get("chain", "other")] = counts.get(t.get("chain", "other"), 0) + 1

@@ -1,12 +1,12 @@
 "use client";
 
-import { Coins, Send, Eye, DollarSign, Activity } from "lucide-react";
+import { Coins, Bell, Fuel, Crosshair, ArrowRightLeft } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LineSeries, Donut } from "@/components/charts/Charts";
-import { fmtNum, fmtUsd } from "@/lib/utils";
+import { fmtNum } from "@/lib/utils";
 
 const CHAIN_COLORS: Record<string, string> = {
   solana: "#8b5cf6", ethereum: "#3b82f6", robinhood: "#22c55e",
@@ -21,8 +21,9 @@ export default function AnalyticsPage() {
   const series = (activity?.tokens_detected ?? []).map((p: any, i: number) => ({
     label: new Date(p.t * 1000).getHours() + ":00",
     tokens: p.value,
-    forwarded: activity?.messages_forwarded?.[i]?.value ?? 0,
     alerts: activity?.alerts_triggered?.[i]?.value ?? 0,
+    gas: activity?.gas_hits?.[i]?.value ?? 0,
+    premium: activity?.premium_detections?.[i]?.value ?? 0,
   }));
 
   const donut = (byChain ?? []).map((c: any) => ({
@@ -31,22 +32,23 @@ export default function AnalyticsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Analytics" subtitle="Deep insights and performance metrics across all systems" />
+      <PageHeader title="Analytics" subtitle="Counted from what the scanners actually recorded" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <StatCard label="Tokens Detected" value={fmtNum(summary?.tokens_detected)} icon={Coins} tone="green" delta={23.6} />
-        <StatCard label="Messages Fwd" value={fmtNum(summary?.messages_forwarded)} icon={Send} tone="purple" delta={18.7} />
-        <StatCard label="Watchlist Hits" value={fmtNum(summary?.watchlist_hits)} icon={Eye} tone="blue" delta={21.1} />
-        <StatCard label="Total Volume" value={fmtUsd(summary?.total_volume_usd)} icon={DollarSign} tone="amber" delta={22.6} />
-        <StatCard label="Avg Response" value={`${summary?.avg_response_ms ?? 0}ms`} icon={Activity} tone="cyan" delta={-8.2} />
+        <StatCard label="Tokens Found" value={fmtNum(summary?.tokens_detected)} icon={Coins} tone="green" />
+        <StatCard label="Tokens (24h)" value={fmtNum(summary?.tokens_24h)} icon={Coins} tone="blue" />
+        <StatCard label="Cross-Chain Matches" value={fmtNum(summary?.cross_chain_matches)} icon={ArrowRightLeft} tone="purple" />
+        <StatCard label="High-Gas Buys" value={fmtNum(summary?.gas_hits)} icon={Fuel} tone="amber" />
+        <StatCard label="Premium Detections" value={fmtNum(summary?.premium_detections)} icon={Crosshair} tone="cyan" />
       </div>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader><CardTitle>Activity Over Time</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Activity — last 24h (per hour)</CardTitle></CardHeader>
           <CardContent>
             <LineSeries data={series} keys={[
               { key: "tokens", color: "#22c55e", label: "Tokens" },
-              { key: "forwarded", color: "#8b5cf6", label: "Forwarded" },
-              { key: "alerts", color: "#f59e0b", label: "Alerts" },
+              { key: "alerts", color: "#8b5cf6", label: "Alerts" },
+              { key: "gas", color: "#f59e0b", label: "High-Gas Buys" },
+              { key: "premium", color: "#06b6d4", label: "Premium" },
             ]} />
           </CardContent>
         </Card>

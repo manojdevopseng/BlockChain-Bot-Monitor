@@ -26,8 +26,8 @@ export default function ForwarderPage() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Sources" value={stats?.total_sources ?? 0} icon={Users} tone="purple" />
         <StatCard label="Total Groups" value={stats?.total_groups ?? 0} icon={Users} tone="blue" />
-        <StatCard label="Messages Today" value={fmtNum(stats?.messages_today)} icon={MessageSquare} tone="green" delta={24.6} />
-        <StatCard label="Forwarded Today" value={fmtNum(stats?.forwarded_today)} icon={Send} tone="cyan" delta={21.3} />
+        <StatCard label="Messages Today" value={fmtNum(stats?.messages_today)} icon={MessageSquare} tone="green" />
+        <StatCard label="Forwarded Today" value={fmtNum(stats?.forwarded_today)} icon={Send} tone="cyan" />
       </div>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>

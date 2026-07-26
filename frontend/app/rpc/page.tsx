@@ -1,6 +1,6 @@
 "use client";
 
-import { Server, CheckCircle, AlertTriangle, XCircle, Clock, Fuel } from "lucide-react";
+import { Server, CheckCircle, Settings2, XCircle, Fuel } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -20,29 +20,30 @@ export default function RpcPage() {
     )},
     { key: "chain", header: "Chain", render: (r) => <Badge variant="purple">{r.chain}</Badge> },
     { key: "url", header: "Endpoint", render: (r) => <span className="font-mono text-[11px] text-text-muted">{r.url}</span> },
+    { key: "kind", header: "Type", render: (r) => <Badge variant="blue">{r.kind}</Badge> },
     { key: "status", header: "Status", render: (r) => (
-      <Badge variant={r.status === "healthy" ? "green" : r.status === "degraded" ? "amber" : r.status === "disabled" ? "gray" : "red"}>{r.status}</Badge>
+      <Badge variant={
+        r.status === "connected" ? "green"
+        : r.status === "configured" ? "blue"
+        : r.status === "disabled" ? "gray"
+        : r.status === "not configured" ? "amber" : "red"
+      }>{r.status}</Badge>
     )},
-    { key: "latency_ms", header: "Latency", render: (r) => `${r.latency_ms} ms` },
-    { key: "uptime", header: "Uptime", render: (r) => <span className="text-accent-green">{r.uptime}%</span> },
-    { key: "requests_1h", header: "Req 1h", render: (r) => fmtNum(r.requests_1h, { compact: true }) },
-    { key: "error_rate", header: "Errors", render: (r) => `${r.error_rate}%` },
   ];
 
   return (
     <div className="space-y-5">
-      <PageHeader title="RPC Monitor" subtitle="Real-time monitoring of all RPC endpoints" />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-        <StatCard label="Total" value={stats?.total ?? 0} icon={Server} tone="blue" />
-        <StatCard label="Healthy" value={stats?.healthy ?? 0} icon={CheckCircle} tone="green" />
-        <StatCard label="Degraded" value={stats?.degraded ?? 0} icon={AlertTriangle} tone="amber" />
-        <StatCard label="Down" value={stats?.down ?? 0} icon={XCircle} tone="red" />
-        <StatCard label="Avg Latency" value={`${stats?.avg_latency_ms ?? 0}ms`} icon={Clock} tone="purple" />
-        <StatCard label="ETH Gas (avg/tx)" value={fmtEth(gas?.avg_eth)} icon={Fuel} tone="cyan" muted={gas && !gas.enabled} />
+      <PageHeader title="RPC Monitor" subtitle="RPC endpoints configured in .env and their live connection state" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <StatCard label="Endpoints" value={stats?.total ?? 0} icon={Server} tone="blue" />
+        <StatCard label="Configured" value={stats?.configured ?? 0} icon={Settings2} tone="purple" />
+        <StatCard label="Connected" value={stats?.connected ?? 0} icon={CheckCircle} tone="green" />
+        <StatCard label="Not Set" value={stats?.unconfigured ?? 0} icon={XCircle} tone="amber" />
+        <StatCard label="High-Gas Buys" value={gas?.count ?? 0} icon={Fuel} tone="cyan" muted={gas && !gas.enabled} />
       </div>
       <Card>
         <CardHeader><CardTitle>Endpoint Status</CardTitle></CardHeader>
-        <CardContent><DataTable columns={cols} rows={data?.items ?? []} /></CardContent>
+        <CardContent><DataTable columns={cols} rows={data?.items ?? []} empty="No RPC endpoints configured in .env" /></CardContent>
       </Card>
     </div>
   );

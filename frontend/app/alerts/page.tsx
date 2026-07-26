@@ -28,10 +28,10 @@ export default function AlertsPage() {
     <div className="space-y-5">
       <PageHeader title="Alerts" subtitle="Real-time alerts and important events from all chains" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Alerts" value={stats?.total ?? 0} icon={Bell} tone="red" delta={23.5} />
-        <StatCard label="High Priority" value={stats?.high ?? 0} icon={AlertTriangle} tone="red" delta={12.7} />
-        <StatCard label="Medium" value={stats?.medium ?? 0} icon={Eye} tone="amber" delta={18.2} />
-        <StatCard label="Low" value={stats?.low ?? 0} icon={ShieldCheck} tone="blue" delta={-4.1} />
+        <StatCard label="Total Alerts" value={stats?.total ?? 0} icon={Bell} tone="red" />
+        <StatCard label="High Priority" value={stats?.high ?? 0} icon={AlertTriangle} tone="red" />
+        <StatCard label="Medium" value={stats?.medium ?? 0} icon={Eye} tone="amber" />
+        <StatCard label="Low" value={stats?.low ?? 0} icon={ShieldCheck} tone="blue" />
       </div>
       <Card>
         <CardHeader><CardTitle>Recent Alerts</CardTitle></CardHeader>

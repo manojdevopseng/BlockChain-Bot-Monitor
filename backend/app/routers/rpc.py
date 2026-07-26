@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .. import db, registry
+from .. import db, registry, supervisor
 from ..config import settings
+from ..scanners import scfg
 from ..util import clean_list
 
 router = APIRouter(prefix="/api/rpc", tags=["rpc"])
@@ -18,32 +19,71 @@ router = APIRouter(prefix="/api/rpc", tags=["rpc"])
 _RPC_TOGGLE = {"eth": "rpc_eth", "rbh": "rpc_rbh", "sol": "rpc_sol"}
 
 
+def _mask(url: str) -> str:
+    """Hide the API key most providers put in the path/query."""
+    if not url:
+        return ""
+    for sep in ("/v2/", "api-key=", "/v3/", "?key="):
+        if sep in url:
+            head, _, _tail = url.partition(sep)
+            return f"{head}{sep}****"
+    return url
+
+
+async def _build() -> list[dict]:
+    """Endpoints actually configured in .env — no invented latency or uptime.
+
+    `status` reflects what we truly know: whether the endpoint is configured,
+    whether its toggle is on, and (for WSS) whether the worker holding that
+    socket is currently running.
+    """
+    enabled = await registry.enabled_map()
+    live = supervisor.diagnostics().get("workers", {})
+
+    rows = [
+        ("Ethereum", "eth", "rpc_eth", "eth", scfg.ETH_RPC_HTTP, scfg.ETH_RPC_WSS),
+        ("Robinhood Chain", "rbh", "rpc_rbh", "rbh", scfg.RBH_RPC_HTTP, scfg.RBH_RPC_WSS),
+        ("Solana", "sol", "rpc_sol", "sol", scfg.SOL_RPC_HTTP, scfg.SOL_RPC_WSS),
+    ]
+
+    out = []
+    for name, chain, toggle, worker, http, wss in rows:
+        on = bool(enabled.get(toggle, True))
+        for kind, url in (("WSS", wss), ("HTTP", http)):
+            if not url:
+                status = "not configured"
+            elif not on:
+                status = "disabled"
+            elif kind == "WSS":
+                status = "connected" if live.get(worker) else "stopped"
+            else:
+                status = "configured"
+            out.append({
+                "name": f"{name} {kind}",
+                "chain": chain,
+                "kind": kind,
+                "url": _mask(url),
+                "enabled": on,
+                "configured": bool(url),
+                "status": status,
+            })
+    return out
+
+
 @router.get("/endpoints")
 async def endpoints():
-    docs = await db.get_collection("rpc_endpoints").find({}).to_list(100)
-    enabled = await registry.enabled_map()
-    for e in docs:
-        toggle = _RPC_TOGGLE.get(e.get("chain"))
-        e["enabled"] = enabled.get(toggle, True) if toggle else True
-        if not e["enabled"]:
-            e["status"] = "disabled"
-    return {"items": clean_list(docs)}
+    return {"items": clean_list(await _build())}
 
 
 @router.get("/stats")
 async def stats():
-    docs = await db.get_collection("rpc_endpoints").find({}).to_list(100)
-    healthy = sum(1 for e in docs if e.get("status") == "healthy")
-    degraded = sum(1 for e in docs if e.get("status") == "degraded")
-    down = sum(1 for e in docs if e.get("status") == "down")
-    lats = [e["latency_ms"] for e in docs if e.get("latency_ms")]
+    items = await _build()
     return {
-        "total": len(docs),
-        "healthy": healthy,
-        "degraded": degraded,
-        "down": down,
-        "avg_latency_ms": round(sum(lats) / len(lats)) if lats else 0,
-        "requests_1h": sum(e.get("requests_1h", 0) for e in docs),
+        "total": len(items),
+        "configured": sum(1 for e in items if e["configured"]),
+        "connected": sum(1 for e in items if e["status"] == "connected"),
+        "disabled": sum(1 for e in items if e["status"] == "disabled"),
+        "unconfigured": sum(1 for e in items if not e["configured"]),
     }
 
 

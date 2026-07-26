@@ -50,10 +50,10 @@ export default function TokensPage() {
     <div className="space-y-5">
       <PageHeader title="Tokens" subtitle="Live token discovery across all enabled chains" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Tokens" value={stats?.total ?? 0} icon={Coins} tone="amber" delta={18.7} />
-        <StatCard label="New (24h)" value={stats?.new_24h ?? 0} icon={Plus} tone="green" delta={24.8} />
-        <StatCard label="Migrated" value={stats?.migrated ?? 0} icon={TrendingUp} tone="purple" delta={15.2} />
-        <StatCard label="Watching" value={stats?.watching ?? 0} icon={Star} tone="cyan" delta={9.5} />
+        <StatCard label="Total Tokens" value={stats?.total ?? 0} icon={Coins} tone="amber" />
+        <StatCard label="New (24h)" value={stats?.new_24h ?? 0} icon={Plus} tone="green" />
+        <StatCard label="Migrated" value={stats?.migrated ?? 0} icon={TrendingUp} tone="purple" />
+        <StatCard label="Watching" value={stats?.watching ?? 0} icon={Star} tone="cyan" />
       </div>
       <Card>
         <CardHeader>
