@@ -141,6 +141,7 @@ class TelegramCommands:
         while True:
             try:
                 for update in await self._get_updates():
+                    await self._observe(update)
                     await self._handle(update)
             except asyncio.CancelledError:
                 return
@@ -165,8 +166,11 @@ class TelegramCommands:
     async def _get_updates(self) -> list:
         data = await self._api(
             "getUpdates",
+            # my_chat_member fires the moment the bot is added to (or removed
+            # from) a group — that is what makes a brand-new private group
+            # discoverable in Settings → Find Chat ID.
             {"offset": self._offset, "timeout": 25,
-             "allowed_updates": json.dumps(["message"])},
+             "allowed_updates": json.dumps(["message", "my_chat_member"])},
             timeout=35,
         )
         result = data.get("result", []) if isinstance(data, dict) else []
@@ -193,6 +197,28 @@ class TelegramCommands:
             return {d["command"].lstrip("/"): bool(d.get("enabled", True)) for d in docs}
         except Exception:
             return {}
+
+    @staticmethod
+    async def _observe(update: dict) -> None:
+        """Remember every chat the bot sees, for the Settings chat-id lookup.
+
+        Purely a note-to-self: nothing is subscribed to and nothing is
+        forwarded — the chat is only written down so its numeric id can be
+        copied into .env later.
+        """
+        member = update.get("my_chat_member") or {}
+        chat = (update.get("message") or {}).get("chat") or member.get("chat")
+        if not chat:
+            return
+        try:
+            from .. import chatid
+            await chatid.record_chat(chat, "bot added" if member else "message seen")
+            if member:
+                status = ((member.get("new_chat_member") or {}).get("status")) or "?"
+                log.info(f"[CMD] chat noted: {chat.get('title') or chat.get('id')} "
+                         f"({chat.get('id')}) — bot is now '{status}'")
+        except Exception:
+            pass
 
     async def _handle(self, update: dict) -> None:
         msg = update.get("message") or {}

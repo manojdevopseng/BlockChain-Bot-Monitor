@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Link2, Radio, Plus, X, Tag, KeyRound, Check, Loader2 } from "lucide-react";
-import { useApi, apiSend } from "@/lib/api";
+import {
+  Bot, Link2, Radio, Plus, X, Tag, KeyRound, Check, Loader2, Search, Hash,
+} from "lucide-react";
+import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
+import { CopyButton } from "@/components/CopyButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -144,6 +147,116 @@ function GroupManager() {
   );
 }
 
+type Chat = {
+  id: number; title: string; type: string;
+  username?: string | null; source?: string;
+};
+
+function ChatRow({ c }: { c: Chat }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border-soft px-3 py-2">
+      <div className="min-w-0">
+        <div className="truncate text-sm text-text">{c.title}</div>
+        <div className="flex items-center gap-1.5 text-[11px] text-text-dim">
+          <span className="capitalize">{c.type}</span>
+          {c.username && <span className="truncate">· @{c.username}</span>}
+          {c.source && <span className="truncate">· {c.source}</span>}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <code className="rounded bg-bg-soft px-2 py-1 font-mono text-xs text-brand-soft">
+          {c.id}
+        </code>
+        <CopyButton value={String(c.id)} />
+      </div>
+    </div>
+  );
+}
+
+function ChatIdFinder() {
+  // The "seen" list is what makes a brand-new private group findable: it has
+  // no @username, so the only way a bot learns its id is being added to it.
+  const { data: seen } = useApi<any>("/api/chat-id/seen");
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any>(null);
+
+  async function find() {
+    const query = q.trim();
+    if (!query) return;
+    setBusy(true);
+    try {
+      setRes(await apiGet(`/api/chat-id/lookup?q=${encodeURIComponent(query)}`));
+      mutate("/api/chat-id/seen");
+    } catch (e: any) {
+      setRes({ matches: [], error: String(e?.message || e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const discovery: boolean = seen?.discovery ?? false;
+  const items: Chat[] = seen?.items ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Hash size={14} /> Find Chat ID</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-3 text-xs text-text-dim">
+          Group ka naam, @username, t.me link ya numeric id daalo — sirf chat ID
+          nikalne ke liye. Yahan se kahin add nahi hota, ID copy karke{" "}
+          <code>.env</code> me paste kar lena.
+        </p>
+
+        <div className="flex gap-2">
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="My Alert Group  ·  @channel  ·  t.me/…  ·  -100123…"
+            onKeyDown={(e) => e.key === "Enter" && find()}
+          />
+          <Button variant="primary" size="sm" disabled={busy || !q.trim()} onClick={find}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Find
+          </Button>
+        </div>
+
+        {res && (
+          <div className="mt-3 space-y-1.5">
+            {res.matches?.length > 0
+              ? res.matches.map((c: Chat) => <ChatRow key={c.id} c={c} />)
+              : <p className="rounded-lg border border-accent-amber/40 px-3 py-2 text-xs text-text-muted">
+                  {res.error || "no match"}
+                </p>}
+          </div>
+        )}
+
+        <div className="mt-4 border-t border-border-soft pt-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs text-text-muted">Groups the bot is in</span>
+            <Badge variant={discovery ? "green" : "amber"}>
+              {discovery ? "listening" : "not listening"}
+            </Badge>
+          </div>
+          {!discovery && (
+            <p className="mb-2 text-[11px] text-text-dim">{seen?.note}</p>
+          )}
+          <p className="mb-2 text-[11px] text-text-dim">
+            Naya group banao → usme bot ko add karo → yahan turant naam aur ID aa jayegi.
+          </p>
+          <div className="space-y-1.5">
+            {items.map((c) => <ChatRow key={c.id} c={c} />)}
+            {items.length === 0 && (
+              <span className="text-xs text-text-dim">No groups yet</span>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function CredentialsManager() {
   const { data } = useApi<any>("/api/settings/credentials");
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -223,6 +336,7 @@ export default function SettingsPage() {
         </div>
         <div className="space-y-5">
           <KeywordManager />
+          <ChatIdFinder />
           <CredentialsManager />
           <GroupManager />
         </div>

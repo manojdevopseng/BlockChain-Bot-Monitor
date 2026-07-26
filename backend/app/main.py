@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db, notifier, registry, seed, supervisor
 from .config import settings
 from .routers import (
-    alerts, analytics, auth, chains, commands, dashboard,
+    alerts, analytics, auth, chains, chat_lookup, commands, dashboard,
     forwarder, logs, rpc, settings as settings_router, system, tokens,
 )
 from .ws_hub import hub
@@ -139,7 +139,7 @@ app.add_middleware(
 )
 
 for r in (auth, dashboard, alerts, tokens, chains, forwarder, commands,
-          analytics, logs, rpc, system, settings_router):
+          analytics, logs, rpc, system, settings_router, chat_lookup):
     app.include_router(r.router)
 
 
