@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { mutate } from "swr";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { StatusBar } from "./StatusBar";
 import { useWebSocket } from "@/lib/ws";
+import { getToken } from "@/lib/api";
 import { ThemeProvider } from "@/lib/theme";
 
 // Map a realtime WS event to the API path-prefixes whose SWR caches should
@@ -31,6 +32,10 @@ function revalidate(prefixes: string[]) {
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const [backend, setBackend] = useState<string>();
+  const router = useRouter();
+  // null until the token has been read on the client — rendering the dashboard
+  // before that would fire a screenful of requests that all 401.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   // Mobile drawer starts closed on every load; desktop collapse is remembered.
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -41,6 +46,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
       setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
     } catch {}
   }, []);
+
+  const isLogin = path === "/login";
+
+  useEffect(() => {
+    const ok = !!getToken();
+    setSignedIn(ok);
+    if (!ok && !isLogin) router.replace("/login");
+  }, [isLogin, path, router]);
 
   // Route change always closes the mobile drawer.
   useEffect(() => setMobileOpen(false), [path]);
@@ -74,6 +87,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
     const keys = EVENT_KEYS[e.type];
     if (keys) revalidate(keys);
   });
+
+  // The login page gets the theme but none of the chrome — no sidebar to
+  // navigate with and no status bar to poll while signed out.
+  if (isLogin) {
+    return <ThemeProvider>{children}</ThemeProvider>;
+  }
+
+  // Signed out, or still checking: render nothing rather than a dashboard
+  // frame that flashes and then redirects.
+  if (!signedIn) {
+    return <ThemeProvider><div className="min-h-screen bg-bg" /></ThemeProvider>;
+  }
 
   return (
     <ThemeProvider>

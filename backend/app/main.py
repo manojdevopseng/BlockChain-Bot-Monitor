@@ -16,10 +16,10 @@ import contextlib
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import db, notifier, registry, seed, supervisor
+from . import db, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
     alerts, analytics, auth, chains, chat_lookup, commands, dashboard,
@@ -138,24 +138,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in (auth, dashboard, alerts, tokens, chains, forwarder, commands,
-          analytics, logs, rpc, system, settings_router, chat_lookup):
-    app.include_router(r.router)
+# Everything behind a login. `require_user` existed from the start but nothing
+# depended on it, so /api/settings/credentials handed out the GMGN API key and
+# the Cloudflare cookie to anyone who asked, and a PATCH could stop a scanner.
+# The auth router itself stays open — the login has to be reachable.
+_PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
+              analytics, logs, rpc, system, settings_router, chat_lookup)
+
+app.include_router(auth.router)
+for r in _PROTECTED:
+    app.include_router(r.router, dependencies=[Depends(security.require_user)])
 
 
 @app.get("/api/health")
 async def health():
-    return {
-        "ok": True,
-        "db_backend": db.backend_name(),
-        "db_ok": db.DB_OK,
-        "uptime_seconds": supervisor.uptime_seconds(),
-        "scanners": supervisor.diagnostics(),
-    }
+    """Deliberately thin: this is the one unauthenticated endpoint, used by the
+    deploy check and any uptime monitor. It reports that the service is up and
+    whether the database answered — nothing about which scanners are running."""
+    return {"ok": True, "db_ok": db.DB_OK}
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(ws: WebSocket, token: str | None = None):
+    """Live push channel. Same login as the REST API.
+
+    A browser cannot set an Authorization header on a WebSocket, so the token
+    comes as a query parameter — checked before the socket is accepted, so an
+    unauthenticated client is closed rather than joined to the hub.
+    """
+    if not token or not security.decode_token(token):
+        await ws.close(code=4401)   # 4401: application-level "unauthorized"
+        return
     await hub.connect(ws)
     try:
         await ws.send_json({"type": "hello", "data": {"backend": db.backend_name()}})

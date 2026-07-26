@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Menu, Moon, Sun } from "lucide-react";
+import { LogOut, Menu, Moon, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useTheme } from "@/lib/theme";
+import { setToken } from "@/lib/api";
 
 export function Topbar({
   connected, onOpenMobile,
@@ -62,6 +63,19 @@ export function Topbar({
         </button>
 
         <NotificationBell />
+        <button
+          onClick={() => {
+            setToken(null);
+            // Full reload, not a router push: it drops every SWR cache, so no
+            // signed-in data is left on screen behind the login form.
+            window.location.href = "/login";
+          }}
+          title="Sign out"
+          aria-label="Sign out"
+          className="grid h-8 w-8 place-items-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-accent-red"
+        >
+          <LogOut size={17} />
+        </button>
 
         <Badge variant={connected ? "green" : "red"}>
           <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-accent-green animate-pulse-soft" : "bg-accent-red"}`} />

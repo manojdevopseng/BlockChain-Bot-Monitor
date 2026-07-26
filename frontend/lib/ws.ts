@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getToken } from "@/lib/api";
 
 export type WSEvent = { type: string; data: any };
 
@@ -29,7 +30,11 @@ export function useWebSocket(onEvent?: (e: WSEvent) => void) {
         (window.location.port === "3000"
           ? `${proto}://${window.location.hostname}:8000`
           : `${proto}://${window.location.host}`);
-      const ws = new WebSocket(`${base}/ws`);
+      // The hub needs the same login as the REST API. A browser cannot set an
+      // Authorization header on a WebSocket, so the token rides in the query.
+      const tok = getToken();
+      if (!tok) return;          // not signed in — nothing to listen to yet
+      const ws = new WebSocket(`${base}/ws?token=${encodeURIComponent(tok)}`);
       ref.current = ws;
       ws.onopen = () => {
         setConnected(true);
