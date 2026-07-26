@@ -1,17 +1,36 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Bell, AlertTriangle, ShieldCheck, Eye } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { DataTable, type Column } from "@/components/DataTable";
 import { fmtClock } from "@/lib/utils";
 
 export default function AlertsPage() {
+  const [q, setQ] = useState("");
+  const [query, setQuery] = useState("");
+  const [date, setDate] = useState("");
+
+  // Debounced so a fast typist doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const params = new URLSearchParams({ limit: "50" });
+  if (query) params.set("q", query);
+  if (date) params.set("date", date);
+
   const { data: stats } = useApi<any>("/api/alerts/stats");
-  const { data } = useApi<any>("/api/alerts?limit=50");
+  const { data: datesData } = useApi<any>("/api/alerts/dates");
+  // keepPreviousData holds the rows while a new query resolves, instead of
+  // blanking to "No alerts" and back.
+  const { data } = useApi<any>(`/api/alerts?${params.toString()}`, { keepPreviousData: true });
 
   const cols: Column<any>[] = [
     { key: "created_at", header: "Time", render: (r) => <span className="font-mono text-xs text-text-muted">{fmtClock(r.created_at)}</span> },
@@ -34,8 +53,21 @@ export default function AlertsPage() {
         <StatCard label="Low" value={stats?.low ?? 0} icon={ShieldCheck} tone="blue" />
       </div>
       <Card>
-        <CardHeader><CardTitle>Recent Alerts</CardTitle></CardHeader>
-        <CardContent><DataTable columns={cols} rows={data?.items ?? []} empty="No alerts" /></CardContent>
+        <CardHeader className="flex-wrap gap-2">
+          <CardTitle>Recent Alerts</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <SearchBox value={q} onChange={setQ} placeholder="token / address / message" />
+            <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
+            <Badge variant="purple">{data?.total ?? 0}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <DataTable
+            columns={cols}
+            rows={data?.items ?? []}
+            empty={query || date ? "No alerts match this filter" : "No alerts"}
+          />
+        </CardContent>
       </Card>
     </div>
   );

@@ -1,43 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Layers, History as HistoryIcon, Fuel, ExternalLink, ArrowRightLeft } from "lucide-react";
+import { Layers, Fuel, ExternalLink, ArrowRightLeft } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DetectionTable } from "@/components/DetectionTable";
 import { CrossChainTable } from "@/components/CrossChainTable";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtEth, shortAddr, timeAgo } from "@/lib/utils";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
-
-function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  return (
-    <div className="relative">
-      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-dim" />
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="h-8 w-60 pl-8 text-xs" />
-    </div>
-  );
-}
-
-function HistorySelect({ value, onChange, dates }: { value: string; onChange: (v: string) => void; dates: string[] }) {
-  return (
-    <div className="relative">
-      <select value={value} onChange={(e) => onChange(e.target.value)}
-        className="h-8 rounded-lg border border-border bg-bg-soft pl-7 pr-2 text-xs text-text focus:border-brand/60 focus:outline-none">
-        <option value="">Live</option>
-        {dates.map((d) => <option key={d} value={d}>{d}</option>)}
-      </select>
-      <HistoryIcon size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-dim" />
-    </div>
-  );
-}
 
 /* ── 1-3: premium caller detection panels (RBH / ETH / SOL) ─────────────── */
 

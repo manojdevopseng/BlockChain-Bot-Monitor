@@ -91,11 +91,17 @@ async def _gas_rows(flt: dict) -> list[dict]:
     return [r for r in rows if keeps(r)]
 
 
+# Widest window read when a whole day has to be assembled. Retention keeps the
+# feed to 30 days, so this is a guard rail rather than a real limit.
+_DAY_SCAN_CAP = 2000
+
+
 @router.get("")
 async def list_alerts(
     severity: str | None = None,
     chain: str | None = None,
     q: str | None = None,
+    date: str | None = None,        # DD-MM-YYYY (IST) — History filter
     limit: int = Query(50, le=200),
     skip: int = 0,
 ):
@@ -103,13 +109,35 @@ async def list_alerts(
     col = db.get_collection("alerts")
     # Take enough of each feed to fill the page after merging, then sort the
     # two together — a page must not be all of one kind just because that
-    # collection happened to be read first.
-    take = skip + limit
+    # collection happened to be read first. A past day cannot be served from
+    # the newest rows, so that case reads a wider window.
+    take = _DAY_SCAN_CAP if date else skip + limit
     docs = await col.find(flt).sort("created_at", -1).limit(take).to_list(take)
-    merged = clean_list(docs) + await _gas_rows(flt)
+    gas = await _gas_rows(flt)
+
+    merged = clean_list(docs) + gas
+    if date:
+        merged = [d for d in merged if _day_str(d.get("created_at") or 0) == date]
+        total = len(merged)
+    else:
+        total = await col.count_documents(flt) + len(gas)
     merged.sort(key=lambda d: d.get("created_at") or 0, reverse=True)
-    total = await col.count_documents(flt) + len(await _gas_rows(flt))
-    return {"total": total, "items": merged[skip:take]}
+    return {"total": total, "items": merged[skip:skip + limit]}
+
+
+@router.get("/dates")
+async def alert_dates():
+    """Days (IST, newest first) that have alerts — the History dropdown.
+
+    Both feeds, so a day with only high-gas buys is still offered.
+    """
+    days: set[str] = set()
+    for name in ("alerts", "gas_alerts"):
+        for d in await db.get_collection(name).find({}).to_list(_DAY_SCAN_CAP):
+            ts = d.get("created_at")
+            if ts:
+                days.add(_day_str(ts))
+    return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}
 
 
 @router.get("/stats")
