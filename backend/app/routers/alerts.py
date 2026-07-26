@@ -23,13 +23,9 @@ def _day_str(ts: float) -> str:
     return datetime.fromtimestamp(ts, IST).strftime("%d-%m-%Y")
 
 
-# Fields the Recent Alerts search box looks in — same set the reference
-# dashboard searched (token + SOL side, symbol and address).
+# Fields a search looks in — same set the reference dashboard searched
+# (token + SOL side, symbol and address), plus the message.
 _SEARCH_FIELDS = ("token_symbol", "token_address", "sol_symbol", "sol_address", "message")
-
-
-def _gmgn(chain: str | None, address: str | None) -> str | None:
-    return f"https://gmgn.ai/{(chain or 'eth').lower()}/token/{address}" if address else None
 
 
 @router.get("")
@@ -52,23 +48,7 @@ async def list_alerts(
     col = db.get_collection("alerts")
     total = await col.count_documents(flt)
     docs = await col.find(flt).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    for d in docs:
-        d["gmgn_url"] = _gmgn(d.get("chain"), d.get("token_address"))
-        d["sol_gmgn_url"] = _gmgn("sol", d.get("sol_address"))
     return {"total": total, "items": clean_list(docs)}
-
-
-@router.get("/chains")
-async def alert_chains():
-    """Chains that actually have alerts — drives the All/ETH/RBH filter."""
-    col = db.get_collection("alerts")
-    docs = await col.find({}).to_list(2000)
-    counts: dict[str, int] = {}
-    for d in docs:
-        c = str(d.get("chain") or "").lower()
-        if c:
-            counts[c] = counts.get(c, 0) + 1
-    return {"total": len(docs), "counts": counts}
 
 
 @router.get("/stats")
@@ -85,8 +65,11 @@ async def alert_stats():
 # ── Cross-chain match panels (SOL→ETH / SOL→RBH) ───────────────────────────────
 
 def _match_cc(doc: dict, q: str) -> bool:
+    # Same fields the reference dashboard searched, plus dex/message. sol_symbol
+    # matters because a match is looked up by the SOL ticker as often as by the
+    # destination-chain one.
     q = q.lower()
-    for key in ("token_symbol", "token_address", "sol_address", "dex", "message"):
+    for key in ("token_symbol", "token_address", "sol_symbol", "sol_address", "dex", "message"):
         if q in str(doc.get(key, "")).lower():
             return True
     return False
