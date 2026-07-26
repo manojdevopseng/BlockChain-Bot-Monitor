@@ -79,8 +79,61 @@ async def seed_filter_keywords() -> None:
         })
 
 
+async def seed_commands() -> None:
+    """Reconcile the `commands` collection with what the handler implements.
+
+    COMMAND_SPEC is the source of truth for which commands exist and what they
+    are called; Mongo owns only the `enabled` switch and the real usage
+    counters. So this:
+
+      • inserts commands the spec has and the DB doesn't (counters at zero)
+      • refreshes the description/category of ones already there
+      • deletes rows for commands the handler no longer implements — otherwise
+        the page would offer a switch for something that can never answer
+      • strips legacy demo fields (usage_24h) and backfills the real counters
+
+    Nothing here invents usage: every number starts at zero and only moves when
+    someone actually runs the command.
+    """
+    from .scanners.commands import COMMAND_SPEC
+    col = db.get_collection("commands")
+    known = {f"/{name}" for name, _d, _c in COMMAND_SPEC}
+
+    await col.delete_many({"command": {"$nin": list(known)}})
+
+    for name, description, category in COMMAND_SPEC:
+        cmd = f"/{name}"
+        existing = await col.find_one({"command": cmd})
+        if existing is None:
+            await col.insert_one({
+                "command": cmd,
+                "description": description,
+                "category": category,
+                "permission": "Everyone",
+                "enabled": True,
+                "uses_total": 0,
+                "errors_total": 0,
+                "last_used": None,
+                "last_ms": None,
+            })
+            continue
+        await col.update_one({"command": cmd}, {
+            "$set": {
+                "description": description,
+                "category": category,
+                "uses_total": int(existing.get("uses_total") or 0),
+                "errors_total": int(existing.get("errors_total") or 0),
+                "permission": existing.get("permission") or "Everyone",
+                "last_used": existing.get("last_used"),
+                "last_ms": existing.get("last_ms"),
+            },
+            "$unset": {"usage_24h": "", "uses_24h": ""},
+        })
+
+
 async def seed_all() -> None:
     await seed_keywords()
     await seed_premium_groups()
     await seed_otto_rules()
     await seed_filter_keywords()
+    await seed_commands()

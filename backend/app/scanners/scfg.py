@@ -31,6 +31,10 @@ RETRY_BACKOFF_BASE = settings.retry_backoff_base
 TELEGRAM_BOT_TOKEN = settings.telegram_bot_token or "placeholder"
 TELEGRAM_CHAT_ID   = settings.telegram_chat_id or "placeholder"
 TELEGRAM_ENABLED   = bool(settings.telegram_bot_token and settings.telegram_chat_id)
+# The "placeholder" fallback above keeps the ported scanners byte-faithful to
+# the reference repo, but it is truthy — so anything that must not run without
+# a real token (the /command handler) checks this instead.
+TELEGRAM_BOT_TOKEN_SET = bool(settings.telegram_bot_token)
 
 # NOTE: the reference repo also carried MIN_LIQUIDITY_USD, but nothing ever
 # read it (its own .env said "read by config (kept)"). The SOL scanner filters

@@ -100,6 +100,9 @@ async def reconcile() -> None:
     want_rbh = bool(enabled.get(_SVC_RBH)) and bool(enabled.get("chain_rbh", True))
     want_sol = want_eth or want_rbh
     want_fwd = bool(enabled.get("forwarder")) and scfg.TELETHON_ENABLED
+    # Commands ride the bot token, not the userbot session — so they can run
+    # even while the forwarder is logged out.
+    want_cmd = bool(enabled.get("bot_commands")) and scfg.TELEGRAM_BOT_TOKEN_SET
 
     want: set[str] = set()
     if want_sol:
@@ -110,6 +113,8 @@ async def reconcile() -> None:
         want.add("rbh")
     if want_fwd:
         want.add("fwd")
+    if want_cmd:
+        want.add("cmd")
 
     # Stop workers no longer wanted.
     for name in list(_tasks):
@@ -120,7 +125,7 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "fwd"):
+    for name in ("sol", "eth", "rbh", "fwd", "cmd"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -171,6 +176,13 @@ async def _start_worker(name: str) -> None:
         _instances["rbh"] = inst
         _tasks["rbh"] = asyncio.create_task(inst.run(), name="rbh-scanner")
         return
+    if name == "cmd":
+        from .scanners.commands import TelegramCommands
+        inst = TelegramCommands()
+        await inst.start()          # registers the "/" menu
+        _instances["cmd"] = inst
+        _tasks["cmd"] = asyncio.create_task(inst.run(), name="tg-commands")
+        return
     if name == "fwd":
         from .scanners.forwarder import TelegramForwarder
         inst = TelegramForwarder()
@@ -184,7 +196,7 @@ async def _stop_worker(name: str) -> None:
     task = _tasks.pop(name, None)
     inst = _instances.pop(name, None)
     # Forwarder needs a clean Telethon disconnect before its run() is cancelled.
-    if name == "fwd" and inst is not None:
+    if name in ("fwd", "cmd") and inst is not None:
         try:
             await inst.stop()
         except Exception:
@@ -198,6 +210,12 @@ async def _stop_worker(name: str) -> None:
     # If neither cross-chain scanner is running any more, drop the SOL scanner too.
     if name in ("eth", "rbh") and "eth" not in _tasks and "rbh" not in _tasks and "sol" in _tasks:
         await _stop_worker("sol")
+
+
+def instance(name: str):
+    """The live worker object, so routers can talk to a running worker
+    (e.g. re-publishing the Telegram command menu after a toggle)."""
+    return _instances.get(name)
 
 
 def uptime_seconds() -> int:
@@ -215,6 +233,7 @@ def status() -> dict[str, str]:
         _SVC_ETH: "running" if _worker_alive("eth") else "stopped",
         _SVC_RBH: "running" if _worker_alive("rbh") else "stopped",
         "forwarder": "running" if _worker_alive("fwd") else "stopped",
+        "bot_commands": "running" if _worker_alive("cmd") else "stopped",
     }
 
 
@@ -237,6 +256,7 @@ _DEPENDS_ON = {
     "rpc_eth":                "eth",
     "rpc_rbh":                "rbh",
     "rpc_sol":                "sol",
+    "bot_commands":           "cmd",
 }
 
 _WHY_DOWN = {
@@ -244,6 +264,7 @@ _WHY_DOWN = {
     "eth": "ETH RPC not reachable or not configured",
     "rbh": "Robinhood RPC not reachable or not configured",
     "sol": "Solana scanner not running",
+    "cmd": "TELEGRAM_BOT_TOKEN not set (get one from @BotFather)",
 }
 
 
@@ -273,5 +294,5 @@ def diagnostics() -> dict:
     return {
         "scanner_deps_available": _available,
         "import_error": _import_error,
-        "workers": {n: _worker_alive(n) for n in ("sol", "eth", "rbh", "fwd")},
+        "workers": {n: _worker_alive(n) for n in ("sol", "eth", "rbh", "fwd", "cmd")},
     }

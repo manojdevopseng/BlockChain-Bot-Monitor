@@ -47,6 +47,10 @@ DEFAULT_SERVICES: list[dict] = [
      "chain": "rbh", "key": "flow_robinhood",   "enabled": True},
     {"id": "forwarder",             "category": BOT, "label": "Forwarder",
      "chain": None,  "key": "flow4",            "enabled": True},
+    # Telegram slash commands (/status, /alerts, …). Runs on the bot token, so
+    # it is independent of the forwarder's userbot session.
+    {"id": "bot_commands",          "category": BOT, "label": "Bot Commands",
+     "chain": None,  "key": "commands",         "enabled": True},
 
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth",

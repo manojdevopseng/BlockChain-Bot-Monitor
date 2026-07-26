@@ -29,3 +29,6 @@ backend/logs/
 # ── OS ────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# Next.js / TS build artefacts
+frontend/tsconfig.tsbuildinfo

@@ -3,9 +3,10 @@
 Run (from backend/):
     uvicorn app.main:app --reload --port 8000
 
-Startup wires the DB (Mongo or in-memory fallback), seeds demo data, starts the
-supervisor (owns background workers), and launches a heartbeat that pushes live
-stats over the WebSocket hub.
+Startup wires the DB (Mongo or in-memory fallback), seeds *configuration* only
+(services, groups, keywords, command definitions — never fake activity), starts
+the supervisor (owns background workers), and launches a heartbeat that pushes
+live stats over the WebSocket hub.
 """
 
 from __future__ import annotations
