@@ -72,16 +72,23 @@ async def retention():
 
 @router.get("/services")
 async def services():
-    """Every registered service with its live run status."""
+    """Every registered service with its real run state.
+
+    Resolved through supervisor.service_states so this page and the dashboard
+    always agree — an enabled toggle whose worker is dead reports "stopped"
+    with the reason, never "running".
+    """
     svcs = await registry.list_services()
-    st = supervisor.status()
+    states = supervisor.service_states({s["id"]: bool(s["enabled"]) for s in svcs})
     out = []
     for s in svcs:
+        st = states.get(s["id"], {"status": "unknown", "reason": "", "depends_on": None})
         out.append({
             "id": s["id"],
             "label": s["label"],
             "category": s["category"],
             "enabled": s["enabled"],
-            "status": st.get(s["id"], "stopped" if not s["enabled"] else "running"),
+            "status": st["status"],
+            "reason": st["reason"],
         })
     return {"items": out}

@@ -210,12 +210,63 @@ def _worker_alive(name: str) -> bool:
 
 
 def status() -> dict[str, str]:
-    """service_id -> 'running' | 'stopped' for the dashboard/system page."""
+    """service_id -> 'running' | 'stopped' for the workers we own directly."""
     return {
         _SVC_ETH: "running" if _worker_alive("eth") else "stopped",
         _SVC_RBH: "running" if _worker_alive("rbh") else "stopped",
         "forwarder": "running" if _worker_alive("fwd") else "stopped",
     }
+
+
+# Every registry service maps to the worker that actually does its work. A
+# toggle being on says nothing about whether that worker is alive — the
+# forwarder's four sub-features are all dead if the userbot never logged in,
+# and the gas monitor rides the ETH socket.
+_DEPENDS_ON = {
+    "sol_to_eth":             "eth",
+    "sol_to_rbh":             "rbh",
+    "eth_gas_fees":           "eth",
+    "forwarder":              "fwd",
+    "premium_callers_signal": "fwd",
+    "dexsignalcall":          "fwd",
+    "bbcanalyser2":           "fwd",
+    "eth_otto_group":         "fwd",
+    "chain_eth":              "eth",
+    "chain_rbh":              "rbh",
+    "chain_sol":              "sol",
+    "rpc_eth":                "eth",
+    "rpc_rbh":                "rbh",
+    "rpc_sol":                "sol",
+}
+
+_WHY_DOWN = {
+    "fwd": "Telegram userbot not logged in (no .session)",
+    "eth": "ETH RPC not reachable or not configured",
+    "rbh": "Robinhood RPC not reachable or not configured",
+    "sol": "Solana scanner not running",
+}
+
+
+def service_states(enabled: dict[str, bool]) -> dict[str, dict]:
+    """service_id -> {status, reason, depends_on} using real worker state.
+
+    Single source of truth so the dashboard and the system page can never
+    disagree about whether something is actually up.
+    """
+    workers = diagnostics().get("workers", {})
+    out: dict[str, dict] = {}
+    for sid, on in enabled.items():
+        dep = _DEPENDS_ON.get(sid)
+        if not on:
+            status_, reason = "disabled", "turned off in Settings"
+        elif dep is None:
+            status_, reason = "running", ""
+        elif workers.get(dep):
+            status_, reason = "running", ""
+        else:
+            status_, reason = "stopped", _WHY_DOWN.get(dep, "worker not running")
+        out[sid] = {"status": status_, "reason": reason, "depends_on": dep}
+    return out
 
 
 def diagnostics() -> dict:

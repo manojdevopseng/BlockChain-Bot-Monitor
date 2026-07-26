@@ -47,10 +47,20 @@ export default function SystemPage() {
           <CardHeader><CardTitle>Service Status</CardTitle></CardHeader>
           <CardContent className="space-y-1">
             {(svcs?.items ?? []).map((s: any) => (
-              <div key={s.id} className="flex items-center justify-between rounded-lg border border-border-soft px-3 py-2 text-sm">
-                <span className="text-text">{s.label}</span>
-                <Badge variant={s.status === "running" && s.enabled ? "green" : "gray"}>
-                  {s.enabled ? s.status : "disabled"}
+              <div key={s.id} className="flex items-start justify-between gap-2 rounded-lg border border-border-soft px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="text-text">{s.label}</div>
+                  {/* Why it's down, so the row is actionable */}
+                  {s.status === "stopped" && s.reason && (
+                    <div className="text-[10px] text-accent-red">{s.reason}</div>
+                  )}
+                </div>
+                <Badge variant={
+                  s.status === "running" ? "green"
+                    : s.status === "stopped" ? "red"
+                    : "gray"
+                }>
+                  {s.status}
                 </Badge>
               </div>
             ))}
