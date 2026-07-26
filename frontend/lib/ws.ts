@@ -32,8 +32,16 @@ export function useWebSocket(onEvent?: (e: WSEvent) => void) {
           : `${proto}://${window.location.host}`);
       // The hub needs the same login as the REST API. A browser cannot set an
       // Authorization header on a WebSocket, so the token rides in the query.
+      //
+      // Keep waiting if there is no token yet rather than giving up: the Shell
+      // wraps the login page too, so this effect first runs while signed out.
+      // Bailing out left the socket dead for the whole session — the topbar
+      // read "Offline" until a manual reload.
       const tok = getToken();
-      if (!tok) return;          // not signed in — nothing to listen to yet
+      if (!tok) {
+        timer = setTimeout(connect, 1000);
+        return;
+      }
       const ws = new WebSocket(`${base}/ws?token=${encodeURIComponent(tok)}`);
       ref.current = ws;
       ws.onopen = () => {

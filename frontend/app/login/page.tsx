@@ -1,14 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Lock } from "lucide-react";
 import { login } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -20,8 +18,11 @@ export default function LoginPage() {
     setError("");
     try {
       await login(username, password);
-      // replace, not push: the login page should not be in the back history.
-      router.replace("/");
+      // A full load, not router.replace: the Shell — and its WebSocket — is
+      // already mounted around the login page, so a client-side navigation
+      // would leave the socket connected as "signed out". This also drops any
+      // SWR cache from before signing in.
+      window.location.href = "/";
     } catch {
       setError("Invalid username or password");
       setBusy(false);
