@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Users, MessageSquare, Send, Radio } from "lucide-react";
+import { Users, MessageSquare, Send, Radio, Plus, Loader2, Trash2 } from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -12,6 +12,8 @@ import { SearchBox } from "@/components/SectionFilters";
 import { TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { fmtNum } from "@/lib/utils";
 
 type Source = {
@@ -33,7 +35,11 @@ type Dest = {
   today: number;
 };
 
-function SourceRow({ s, onToggle }: { s: Source; onToggle: (s: Source, v: boolean) => void }) {
+function SourceRow({ s, onToggle, onRemove }: {
+  s: Source;
+  onToggle: (s: Source, v: boolean) => void;
+  onRemove?: (s: Source) => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border-soft px-3 py-2.5">
       <div className="min-w-0">
@@ -48,7 +54,64 @@ function SourceRow({ s, onToggle }: { s: Source; onToggle: (s: Source, v: boolea
           {fmtNum(s.today)}
         </span>
         <Switch checked={s.enabled} onCheckedChange={(v) => onToggle(s, v)} />
+        {onRemove && (
+          <button
+            onClick={() => onRemove(s)}
+            title="Remove this group"
+            className="grid h-6 w-6 place-items-center rounded text-text-dim transition-colors hover:bg-bg-hover hover:text-accent-red"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+// Add by whatever the user has to hand: the group's name, its @username, a
+// t.me link, or the raw chat id. Resolution happens server-side through the
+// userbot, which is the only thing that can see a private group.
+function AddGroup() {
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function add() {
+    const value = val.trim();
+    if (!value) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r: any = await apiSend("/api/forwarder/groups", "POST", { value });
+      setVal("");
+      setMsg({ ok: true, text: `Added ${r.name || r.id} — live now` });
+      mutate("/api/forwarder/sources");
+      mutate("/api/forwarder/stats");
+    } catch (e: any) {
+      setMsg({ ok: false, text: String(e?.message || e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="flex gap-2">
+        <Input
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder="Group name  ·  @username  ·  t.me/…  ·  -100123…"
+          onKeyDown={(e) => e.key === "Enter" && add()}
+        />
+        <Button variant="primary" size="sm" disabled={busy || !val.trim()} onClick={add}>
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
+        </Button>
+      </div>
+      {msg && (
+        <p className={`mt-1.5 text-[11px] ${msg.ok ? "text-accent-green" : "text-accent-red"}`}>
+          {msg.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -64,6 +127,13 @@ export default function ForwarderPage() {
     mutate("/api/forwarder/sources");
     // A channel row flips a registry service, so Settings must agree.
     if (s.kind === "channel") mutate("/api/settings/services");
+  }
+
+  async function remove(s: Source) {
+    if (!confirm(`Stop mirroring "${s.name}"?`)) return;
+    await apiSend(`/api/forwarder/groups/${s.chat_id}`, "DELETE");
+    mutate("/api/forwarder/sources");
+    mutate("/api/forwarder/stats");
   }
 
   const all: Source[] = sources?.items ?? [];
@@ -114,13 +184,16 @@ export default function ForwarderPage() {
         controls={<SearchBox value={q} onChange={setQ} placeholder="group name / id" />}
       >
         <p className="mb-3 text-xs text-text-dim">
-          Every group the userbot mirrors, with its chat id under the name.
-          Names are seeded from the reference bot; a group's live Telegram
-          title replaces it the first time that group posts.
+          Every group the userbot mirrors, with its chat id under the name. The
+          name is worked out on its own — the group's live Telegram title as
+          soon as it posts, otherwise the seeded one.
         </p>
+        <AddGroup />
         <TableScroll>
           <div className="space-y-1">
-            {groups.map((s) => <SourceRow key={s.key} s={s} onToggle={toggle} />)}
+            {groups.map((s) => (
+              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove} />
+            ))}
             {groups.length === 0 && (
               <span className="text-xs text-text-dim">
                 {needle ? "No group matches this search" : "No premium groups"}

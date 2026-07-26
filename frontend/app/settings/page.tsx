@@ -111,43 +111,6 @@ function KeywordManager() {
   );
 }
 
-function GroupManager() {
-  const { data } = useApi<any>("/api/settings/groups");
-  const [val, setVal] = useState("");
-  const items = data?.items ?? [];
-
-  async function add() {
-    if (!val.trim()) return;
-    await apiSend("/api/settings/groups", "POST", { action: "add", value: val.trim() });
-    setVal(""); mutate("/api/settings/groups");
-  }
-
-  return (
-    <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><Plus size={14} /> Forwarder Groups</CardTitle></CardHeader>
-      <CardContent>
-        <p className="mb-3 text-xs text-text-dim">Add by @username, t.me link, or numeric chat ID.</p>
-        <div className="flex gap-2">
-          <Input value={val} onChange={(e) => setVal(e.target.value)}
-            placeholder="@channel  ·  t.me/…  ·  -100123…" onKeyDown={(e) => e.key === "Enter" && add()} />
-          <Button variant="primary" size="sm" onClick={add}><Plus size={14} /> Add</Button>
-        </div>
-        <div className="mt-3 space-y-1.5">
-          {items.map((g: any, i: number) => (
-            <div key={i} className="flex items-center justify-between rounded-lg border border-border-soft px-3 py-2 text-sm">
-              <div>
-                <div className="text-text">{g.name}</div>
-                <div className="text-[11px] text-text-dim">{g.subtitle}</div>
-              </div>
-              <Badge variant={g.status === "connected" ? "green" : "amber"}>{g.status}</Badge>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 type Chat = {
   id: number; title: string; type: string;
   username?: string | null; source?: string;
@@ -401,7 +364,6 @@ export default function SettingsPage() {
           <KeywordManager />
           <ChatIdFinder />
           <CredentialsManager />
-          <GroupManager />
         </div>
       </div>
     </div>

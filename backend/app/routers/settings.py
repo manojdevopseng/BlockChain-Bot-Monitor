@@ -4,8 +4,10 @@
   PATCH /api/settings/services/{id}        -> flip a toggle (live via supervisor)
   GET  /api/settings/keywords              -> forwarder detection keywords
   POST /api/settings/keywords              -> add/remove (whole-word match only)
-  GET  /api/settings/groups                -> forwarder source groups
-  POST /api/settings/groups                -> add by @username/t.me link OR chat id
+
+Adding a forwarder group lives on the Forwarder page now — it writes straight
+into `premium_groups`, the collection the forwarder reads, instead of a pending
+row here that a watcher had to pick up.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ from fastapi import APIRouter, Body, HTTPException
 
 from .. import db, envfile, registry, supervisor
 from ..keywords import compile_keyword, keyword_matches
-from ..util import clean_list
 from ..ws_hub import hub
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -123,53 +124,3 @@ async def test_keyword(payload: dict = Body(...)):
     word = str(payload.get("word") or "")
     text = str(payload.get("text") or "")
     return {"word": word, "text": text, "match": keyword_matches(word, text)}
-
-
-# ── Forwarder source groups (add by username/link or chat id) ───────────────────
-
-_CHATID_RE = re.compile(r"^-?\d{5,}$")
-_USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{4,}$")
-_TME_RE = re.compile(r"(?:https?://)?t\.me/(?:\+)?([A-Za-z0-9_+\-]+)")
-
-
-def parse_group_ref(value: str) -> dict:
-    """Classify a group reference the user typed: chat id vs username/invite link."""
-    value = value.strip()
-    if _CHATID_RE.match(value):
-        return {"kind": "chat_id", "value": int(value)}
-    m = _TME_RE.search(value)
-    if m:
-        return {"kind": "invite" if value.find("+") != -1 else "username", "value": m.group(1)}
-    if _USERNAME_RE.match(value):
-        return {"kind": "username", "value": value.lstrip("@")}
-    raise HTTPException(400, "value must be a @username, a t.me link, or a numeric chat id")
-
-
-@router.get("/groups")
-async def get_groups():
-    docs = await db.get_collection("forwarder_sources").find({}).to_list(500)
-    return {"items": clean_list(docs)}
-
-
-@router.post("/groups")
-async def manage_group(payload: dict = Body(...)):
-    action = payload.get("action")
-    value = str(payload.get("value") or "").strip()
-    if action not in ("add", "remove") or not value:
-        raise HTTPException(400, "action must be add/remove with a value")
-
-    col = db.get_collection("forwarder_sources")
-    if action == "add":
-        ref = parse_group_ref(value)
-        # Phase 3: Telethon resolves username -> chat_id. For now we store the ref.
-        await col.insert_one({
-            "name": ref["value"] if ref["kind"] != "chat_id" else str(ref["value"]),
-            "subtitle": f"added via {ref['kind']}",
-            "type": "Channel", "status": "pending", "today": 0, "enabled": True,
-            "ref_kind": ref["kind"], "ref_value": ref["value"], "added_at": time.time(),
-        })
-    else:
-        await col.delete_many({"name": value})
-
-    docs = await col.find({}).to_list(500)
-    return {"items": clean_list(docs)}

@@ -6,16 +6,31 @@ import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { fmtDateTime, shortAddr, timeAgo } from "@/lib/utils";
 
+export type GroupEntry = {
+  chat_id?: number;
+  name?: string;
+  username?: string | null;
+  message_id?: number | null;
+};
+
 export type Detection = {
   symbol?: string;
   name?: string;
   address: string;
   groups?: string[];
+  group_entries?: GroupEntry[];
   keyword?: string;
   count?: number;
   ts?: number;
   gmgn_url?: string;
 };
+
+// Records written before group_entries existed only carry plain names; show
+// those as non-clickable chips rather than dropping them.
+function groupEntries(d: Detection): GroupEntry[] {
+  if (d.group_entries?.length) return d.group_entries;
+  return (d.groups || []).map((name) => ({ name }));
+}
 
 export function DetectionTable(
   { items, maxHeight }: { items: Detection[]; maxHeight?: number | false },
@@ -69,12 +84,35 @@ export function DetectionTable(
                     )}
                   </div>
                 </td>
-                {/* Groups */}
+                {/* Groups — each chip opens that group's actual message */}
                 <td className="px-3 py-3">
                   <div className="flex flex-wrap gap-1">
-                    {(d.groups || []).map((g, j) => (
-                      <Badge key={j} variant="gray">{g}</Badge>
-                    ))}
+                    {groupEntries(d).map((e, j, arr) => {
+                      // Entries are newest-first, so the last one is the group
+                      // that called it first.
+                      const first = arr.length > 1 && j === arr.length - 1;
+                      const label = `${first ? "🥇 " : ""}${e.name || "?"}`;
+                      const url = e.username && e.message_id
+                        ? `https://t.me/${e.username}/${e.message_id}`
+                        : null;
+                      if (!url) {
+                        return (
+                          <Badge key={j} variant="gray"
+                            title={first ? "First caller" : "Private group — no message link"}>
+                            {label}
+                          </Badge>
+                        );
+                      }
+                      return (
+                        <a key={j} href={url} target="_blank" rel="noopener noreferrer"
+                          title={first ? "First caller — open this call on Telegram"
+                                       : "Open this call on Telegram"}
+                          className="inline-flex items-center gap-1 rounded-md border border-border bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted transition-colors hover:border-brand/40 hover:text-brand-soft">
+                          {label}
+                        </a>
+                      );
+                    })}
+                    {groupEntries(d).length === 0 && <span className="text-text-dim">—</span>}
                   </div>
                 </td>
                 {/* Keyword */}

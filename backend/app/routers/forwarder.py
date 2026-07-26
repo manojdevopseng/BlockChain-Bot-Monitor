@@ -3,6 +3,7 @@ and the premium-caller address detection panels (ETH / RBH / SOL)."""
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException, Query
@@ -147,6 +148,133 @@ async def toggle_source(key: str, payload: dict = Body(...)):
     if not res.matched_count:
         raise HTTPException(404, f"unknown premium group '{key}'")
     return {"key": key, "kind": "group", "enabled": enabled}
+
+
+# ── Adding / removing premium groups ────────────────────────────────────────────
+
+def _userbot():
+    """The running Telethon client, or None. Resolving a name or @username
+    needs the userbot — the bot API cannot see groups it is not in."""
+    from .. import supervisor
+    fwd = supervisor.instance("fwd")
+    client = getattr(fwd, "_client", None) if fwd is not None else None
+    return client if client is not None and client.is_connected() else None
+
+
+async def _resolve_group(value: str) -> dict:
+    """Turn whatever was typed into {id, name, username}.
+
+    Accepts a numeric chat id, an @username, a t.me link, or the group's plain
+    name — the last one by searching the userbot's own dialog list, which is
+    the only place a private group's title can be looked up.
+    """
+    from ..chatid import parse_ref
+    ref = parse_ref(value)
+    kind, val = ref["kind"], ref["value"]
+
+    if kind == "empty":
+        raise HTTPException(400, "type a group name, @username, t.me link or chat id")
+    if kind == "invite":
+        raise HTTPException(
+            400, "a private invite link cannot be resolved — open the group in "
+                 "Telegram and add it by name, or paste its chat id")
+
+    if kind == "chat_id":
+        # bare_key, not string trimming: lstrip("100") strips *characters*, so
+        # -1001000000123 would come out as 23.
+        return {"id": int(fwd_counters.bare_key(val)), "name": None, "username": None}
+
+    client = _userbot()
+    if client is None:
+        raise HTTPException(
+            503, "the Telegram userbot is not connected, so a name or @username "
+                 "cannot be resolved — paste the numeric chat id instead")
+
+    if kind == "username":
+        try:
+            ent = await client.get_entity(val)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(404, f"Telegram could not find '@{val}': {exc}")
+        return {"id": abs(int(ent.id)), "name": getattr(ent, "title", None) or val,
+                "username": getattr(ent, "username", None)}
+
+    # Plain name — match against the groups this account is actually in.
+    needle = val.strip().lower()
+    hits = []
+    try:
+        async for dialog in client.iter_dialogs(limit=500):
+            title = str(dialog.name or "")
+            if needle in title.lower():
+                hits.append((dialog, title))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"could not read the userbot's group list: {exc}")
+
+    exact = [h for h in hits if h[1].lower() == needle]
+    if exact:
+        hits = exact
+    if not hits:
+        raise HTTPException(404, f"no group named '{val}' in this Telegram account")
+    if len(hits) > 1:
+        names = ", ".join(t for _d, t in hits[:6])
+        raise HTTPException(409, f"'{val}' matches several groups ({names}) — "
+                                 f"use the exact name, @username or chat id")
+
+    dialog, title = hits[0]
+    return {"id": abs(int(dialog.id)), "name": title,
+            "username": getattr(getattr(dialog, "entity", None), "username", None)}
+
+
+@router.post("/groups")
+async def add_group(payload: dict = Body(...)):
+    """Add a premium group by name, @username, t.me link or chat id.
+
+    It goes straight into `premium_groups` — the collection the forwarder
+    reads — and the running userbot is told at once, so it is live without a
+    restart. This used to write a 'pending' row into forwarder_sources and
+    wait for a watcher to notice.
+    """
+    value = str(payload.get("value") or "").strip()
+    resolved = await _resolve_group(value)
+    gid = resolved["id"]
+
+    col = db.get_collection("premium_groups")
+    if await col.find_one({"id": gid}):
+        raise HTTPException(409, f"that group is already in the list ({gid})")
+
+    await col.insert_one({
+        "id": gid,
+        # A missing name is left empty on purpose: the forwarder writes the
+        # real Telegram title the first time the group posts.
+        "name": resolved["name"],
+        "username": resolved["username"],
+        "builtin": False, "enabled": True, "added_at": time.time(),
+    })
+
+    live = None
+    from .. import supervisor
+    fwd = supervisor.instance("fwd")
+    if fwd is not None:
+        try:
+            live = await fwd.reload_premium_ids()
+        except Exception:
+            pass
+    return {"added": True, "id": gid, "name": resolved["name"],
+            "username": resolved["username"], "live_groups": live}
+
+
+@router.delete("/groups/{gid}")
+async def remove_group(gid: int):
+    res = await db.get_collection("premium_groups").delete_one({"id": gid})
+    if not res.deleted_count:
+        raise HTTPException(404, f"no premium group with id {gid}")
+    from .. import supervisor
+    fwd = supervisor.instance("fwd")
+    if fwd is not None:
+        try:
+            await fwd.reload_premium_ids()
+        except Exception:
+            pass
+    return {"removed": True, "id": gid}
 
 
 # ── Premium-caller address detections (ETH / RBH / SOL panels) ──────────────────

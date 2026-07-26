@@ -53,6 +53,9 @@ SOURCE_DEXS   = config.SOURCE_DEXS
 SOURCE_CALL   = config.SOURCE_CALL
 SOURCE_BUYBOT = config.SOURCE_BUYBOT
 
+# How often the live premium-group set is re-read from Mongo.
+PREMIUM_RELOAD_SECONDS = 20
+
 # Registry service id that gates each handler.
 GATE_CALL    = "bbcanalyser2"            # CallAnalyser2
 GATE_DEXS    = "dexsignalcall"           # dexssignal
@@ -294,49 +297,40 @@ class TelegramForwarder:
     # ── Watchers ───────────────────────────────────────────────────────────────
 
     async def _premium_watcher(self) -> None:
-        """Resolve dashboard-added groups (forwarder_sources 'pending' docs) via
-        Telethon and add them to the live premium set — no restart needed."""
+        """Keep the live premium set in step with the `premium_groups` collection.
+
+        It used to only resolve dashboard-added 'pending' rows, which left a
+        gap: the set was built once at start, so switching a group off in the
+        dashboard did nothing until the next restart. Re-reading the collection
+        covers adds, removals and toggles the same way.
+
+        One find over ~100 tiny documents every RELOAD_SECONDS — cheap enough
+        to be worth not having to invalidate anything.
+        """
         while True:
             try:
-                await asyncio.sleep(5)
-                pending = await _col("forwarder_sources").find(
-                    {"status": "pending", "ref_kind": {"$ne": None}}
-                ).to_list(50)
-                for src in pending:
-                    ref_kind = src.get("ref_kind")
-                    ref_val  = src.get("ref_value")
-                    try:
-                        if ref_kind == "chat_id":
-                            bid = _bare_id(ref_val)
-                            title = str(ref_val)
-                        else:
-                            ent = await self._client.get_entity(str(ref_val).lstrip("@"))
-                            bid = _bare_id(ent.id)
-                            title = getattr(ent, "title", None) or str(ref_val)
-                        self._premium_ids.add(bid)
-                        # Persist the added group in the SAME collection as the
-                        # built-ins, so it survives restarts (nothing hardcoded).
-                        await _col("premium_groups").update_one(
-                            {"id": bid},
-                            {"$set": {"id": bid, "name": title, "username": ref_val,
-                                      "builtin": False, "enabled": True, "added_at": time.time()}},
-                            upsert=True,
-                        )
-                        await _col("forwarder_sources").update_one(
-                            {"name": src.get("name")},
-                            {"$set": {"status": "connected", "resolved_id": bid, "name": title}},
-                        )
-                        log.info(f"[PREMIUM+] Added group: {title} ({bid}) — live now")
-                    except Exception as exc:
-                        await _col("forwarder_sources").update_one(
-                            {"name": src.get("name")},
-                            {"$set": {"status": "error", "error": str(exc)[:200]}},
-                        )
-                        log.warning(f"[PREMIUM+] Could not resolve '{ref_val}': {exc}")
+                await asyncio.sleep(PREMIUM_RELOAD_SECONDS)
+                await self.reload_premium_ids()
             except asyncio.CancelledError:
                 return
-            except Exception as exc:
-                log.debug(f"[PREMIUM+] watcher error: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                log.debug(f"[PREMIUM] reload failed: {exc}")
+
+    async def reload_premium_ids(self) -> int:
+        """Re-read the enabled premium groups. Returns the live count.
+
+        Called on a timer and directly by the dashboard when a group is added,
+        so a new group is live immediately rather than up to a cycle later.
+        """
+        fresh = await _load_premium_ids()
+        if fresh != self._premium_ids:
+            added = len(fresh - self._premium_ids)
+            removed = len(self._premium_ids - fresh)
+            self._premium_ids = fresh
+            if added or removed:
+                log.info(f"[PREMIUM] Group list updated — {len(fresh)} live "
+                         f"(+{added} / -{removed})")
+        return len(self._premium_ids)
 
     async def _daily_rollover_watcher(self) -> None:
         """At IST midnight, archive both detection panels into premium_archive
