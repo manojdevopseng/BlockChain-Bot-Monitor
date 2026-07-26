@@ -14,6 +14,10 @@ const SEEN_KEY = "notif_seen_ts";
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [seenTs, setSeenTs] = useState<number>(0);
+  // What counted as unread when the panel was opened. Opening clears the badge
+  // straight away, but the rows keep their highlight while you are looking at
+  // them — otherwise the panel would tell you nothing about what was new.
+  const [openedAt, setOpenedAt] = useState<number>(0);
   const [ready, setReady] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -49,10 +53,22 @@ export function NotificationBell() {
     try { localStorage.setItem(SEEN_KEY, String(now)); } catch {}
   }
 
+  function toggle() {
+    setOpen((wasOpen) => {
+      if (!wasOpen) {
+        // Reading them is what marks them read — clicking the bell used to open
+        // the panel and leave the count sitting there.
+        setOpenedAt(seenTs);
+        markAllRead();
+      }
+      return !wasOpen;
+    });
+  }
+
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="relative grid h-8 w-8 place-items-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
         aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
       >
@@ -83,10 +99,12 @@ export function NotificationBell() {
               <div className="px-4 py-8 text-center text-xs text-text-dim">No notifications</div>
             ) : (
               items.map((a, i) => {
-                const isUnread = (a.created_at ?? 0) > seenTs;
+                const isUnread = (a.created_at ?? 0) > openedAt;
                 return (
                   <div
-                    key={i}
+                    // Keyed by the alert, not the array index: a new one arriving
+                    // at the top otherwise rewrites every visible row.
+                    key={`${a.created_at ?? i}-${a.token_address ?? a.message ?? i}`}
                     className={cn(
                       "flex gap-3 border-b border-border-soft px-4 py-2.5 last:border-0",
                       isUnread && "bg-brand/5"
