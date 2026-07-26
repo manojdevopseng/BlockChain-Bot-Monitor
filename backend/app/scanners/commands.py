@@ -93,9 +93,21 @@ class TelegramCommands:
 
     def __init__(self) -> None:
         self._token = config.TELEGRAM_BOT_TOKEN if config.TELEGRAM_BOT_TOKEN_SET else ""
+        # The only chat commands are answered in. Blank = answer anywhere.
+        self._chat_id = str(config.COMMAND_CHAT_ID or "").strip()
         self._session: Optional[aiohttp.ClientSession] = None
         self._offset = 0
         self._boot_at = time.time()
+
+    def allowed(self, chat_id) -> bool:
+        """Is this the chat we answer in?
+
+        Chat ids are compared as strings so -1003946098130 from .env matches the
+        int Telegram sends.
+        """
+        if not self._chat_id:
+            return True
+        return str(chat_id) == self._chat_id
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -123,6 +135,10 @@ class TelegramCommands:
 
         Called at startup and again whenever a toggle changes, so switching a
         command off in the dashboard really removes it from the menu.
+
+        When COMMAND_CHAT_ID is set the menu is published *scoped to that chat*
+        and the default scope is emptied, so no other group or DM even sees a
+        "/" list — matching the handler, which ignores them anyway.
         """
         try:
             enabled = await self._enabled_map()
@@ -131,13 +147,33 @@ class TelegramCommands:
                 for name, menu, _cat in COMMAND_SPEC
                 if enabled.get(name, True)
             ]
-            await self._api("setMyCommands", {"commands": json.dumps(cmds)})
-            log.info(f"[CMD] Menu published — {len(cmds)} command(s) enabled")
+            payload = json.dumps(cmds)
+
+            if self._chat_id:
+                scope = json.dumps({"type": "chat", "chat_id": self._chat_id})
+                res = await self._api("setMyCommands",
+                                      {"commands": payload, "scope": scope})
+                if not res.get("ok"):
+                    # Usually "chat not found" — the bot is not in that group yet.
+                    log.warning(f"[CMD] menu for chat {self._chat_id} rejected: "
+                                f"{res.get('description')}. Add the bot to that group.")
+                # Empty everywhere else, so the "/" popup is blank in other chats.
+                await self._api("setMyCommands",
+                                {"commands": "[]",
+                                 "scope": json.dumps({"type": "default"})})
+                log.info(f"[CMD] Menu published — {len(cmds)} command(s) enabled, "
+                         f"only in chat {self._chat_id}")
+            else:
+                await self._api("setMyCommands", {"commands": payload})
+                log.info(f"[CMD] Menu published — {len(cmds)} command(s) enabled "
+                         f"(no COMMAND_CHAT_ID set: answers in every chat)")
         except Exception as exc:  # noqa: BLE001
             log.warning(f"[CMD] setMyCommands failed: {exc}")
 
     async def run(self) -> None:
-        log.info("[CMD] Command handler started — long-polling getUpdates")
+        where = f"answering only in chat {self._chat_id}" if self._chat_id \
+                else "answering in every chat (COMMAND_CHAT_ID not set)"
+        log.info(f"[CMD] Command handler started — long-polling getUpdates, {where}")
         while True:
             try:
                 for update in await self._get_updates():
@@ -227,6 +263,14 @@ class TelegramCommands:
             return
         chat_id = (msg.get("chat") or {}).get("id")
         if chat_id is None:
+            return
+
+        # Commands are answered in one group only. Everywhere else the bot says
+        # nothing at all — no reply, no error, and the usage counter is not
+        # touched, so the dashboard shows only real use.
+        if not self.allowed(chat_id):
+            log.debug(f"[CMD] ignored '{text.split()[0]}' from chat {chat_id} "
+                      f"(only {self._chat_id} is allowed)")
             return
 
         # "/status@MyBot arg" -> "status"

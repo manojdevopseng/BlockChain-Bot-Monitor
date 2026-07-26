@@ -1,9 +1,12 @@
 "use client";
 
-import { Terminal, CheckCircle, Activity, Radio, AlertTriangle } from "lucide-react";
+import {
+  Terminal, CheckCircle, Activity, Radio, AlertTriangle, MessageSquare,
+} from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
+import { CopyButton } from "@/components/CopyButton";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +61,23 @@ export default function CommandsPage() {
         title="Commands"
         subtitle="Telegram slash commands, their real usage and per-command switches"
       />
+
+      {stats?.chat_id && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-2 pt-4 text-sm">
+            <MessageSquare size={15} className="shrink-0 text-brand-soft" />
+            <span className="text-text-muted">Answers only in chat</span>
+            <code className="rounded bg-bg-soft px-2 py-0.5 font-mono text-xs text-brand-soft">
+              {stats.chat_id}
+            </code>
+            <CopyButton value={String(stats.chat_id)} />
+            <span className="text-xs text-text-dim">
+              — har dusre group aur DM me bot chup rehta hai, &ldquo;/&rdquo; menu bhi
+              nahi dikhta. Badalna ho to <code>COMMAND_CHAT_ID</code> in <code>.env</code>.
+            </span>
+          </CardContent>
+        </Card>
+      )}
 
       {!running && (
         <Card className="border-accent-amber/40">

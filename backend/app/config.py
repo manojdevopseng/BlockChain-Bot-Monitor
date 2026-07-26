@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     health_chat_id: str = ""
     # BlockChainBot group — errors + start/stop/restart notices go here.
     alert_chat_id: str = ""
+    # Where the bot answers /commands. Blank = same group as ALERT_CHAT_ID.
+    # Anywhere else the bot stays silent and shows no "/" menu at all.
+    command_chat_id: str = ""
     # "High Gas Early Activity" alerts (ETH Gas Fees feature).
     gas_alert_chat_id: str = ""
     # Repeat of the same error is re-sent at most once per this many seconds.

@@ -36,6 +36,10 @@ TELEGRAM_ENABLED   = bool(settings.telegram_bot_token and settings.telegram_chat
 # a real token (the /command handler) checks this instead.
 TELEGRAM_BOT_TOKEN_SET = bool(settings.telegram_bot_token)
 
+# The one chat the /command handler answers in. Defaults to the alert group so
+# commands, errors and start/stop notices all live in the same place.
+COMMAND_CHAT_ID = (settings.command_chat_id or settings.alert_chat_id or "").strip()
+
 # NOTE: the reference repo also carried MIN_LIQUIDITY_USD, but nothing ever
 # read it (its own .env said "read by config (kept)"). The SOL scanner filters
 # on SOL_MIN_MCAP + SOL_MIN_FEES instead, so it is not carried over here.

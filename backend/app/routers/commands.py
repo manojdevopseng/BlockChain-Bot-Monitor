@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import db, registry, supervisor
+from ..scanners import scfg
 from ..util import clean_list
 
 router = APIRouter(prefix="/api/commands", tags=["commands"])
@@ -48,6 +49,8 @@ async def stats():
         "success_rate": round((uses - errs) / uses * 100, 2) if uses else None,
         "handler_running": _handler_running(),
         "handler_enabled": await registry.is_enabled("bot_commands"),
+        # The one chat the bot answers in — blank means "every chat".
+        "chat_id": scfg.COMMAND_CHAT_ID or None,
     }
 
 
