@@ -4,7 +4,8 @@ import { Server, Clock, Activity, Database } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { fmtUptime } from "@/lib/utils";
 
@@ -32,20 +33,17 @@ export default function SystemPage() {
         <StatCard label="DB Backend" value={data?.db_backend ?? "—"} icon={Database} tone="cyan" />
       </div>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>System Information</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
+        <CollapsibleSection id="sys-info" title="System Information" bodyClass="space-y-2">
             {info.map(([k, v]) => (
               <div key={k} className="flex justify-between border-b border-border-soft py-1.5 text-sm">
                 <span className="text-text-muted">{k}</span>
                 <span className="font-mono text-text">{v ?? "—"}</span>
               </div>
             ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>Service Status</CardTitle></CardHeader>
-          <CardContent className="space-y-1">
+        </CollapsibleSection>
+        <CollapsibleSection id="sys-services" title="Service Status">
+          <TableScroll maxHeight={360}>
+          <div className="space-y-1">
             {(svcs?.items ?? []).map((s: any) => (
               <div key={s.id} className="flex items-start justify-between gap-2 rounded-lg border border-border-soft px-3 py-2 text-sm">
                 <div className="min-w-0">
@@ -64,12 +62,11 @@ export default function SystemPage() {
                 </Badge>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+          </TableScroll>
+        </CollapsibleSection>
 
-        <Card>
-          <CardHeader><CardTitle>Host Resources</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
+        <CollapsibleSection id="sys-host" title="Host Resources" bodyClass="space-y-2">
             {[
               ["CPU", m?.cpu_percent != null ? `${m.cpu_percent}%` : "—"],
               ["Memory", m?.ram_used_gb != null ? `${m.ram_used_gb} / ${m.ram_total_gb} GB (${m.ram_percent}%)` : "—"],
@@ -81,12 +78,9 @@ export default function SystemPage() {
                 <span className="font-mono text-text">{v}</span>
               </div>
             ))}
-          </CardContent>
-        </Card>
+        </CollapsibleSection>
 
-        <Card>
-          <CardHeader><CardTitle>Data Retention</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
+        <CollapsibleSection id="sys-retention" title="Data Retention" bodyClass="space-y-2">
             <p className="mb-2 text-xs text-text-dim">
               Enforced by MongoDB TTL indexes — mongod expires old documents itself.
             </p>
@@ -101,8 +95,7 @@ export default function SystemPage() {
                 </span>
               </div>
             ))}
-          </CardContent>
-        </Card>
+        </CollapsibleSection>
       </div>
     </div>
   );

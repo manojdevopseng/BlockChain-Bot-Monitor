@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 
 export type Column<T> = {
   key: string;
@@ -8,19 +9,18 @@ export type Column<T> = {
 };
 
 export function DataTable<T extends Record<string, any>>({
-  columns, rows, empty = "No data",
+  columns, rows, empty = "No data", maxHeight,
 }: {
   columns: Column<T>[];
   rows: T[];
   empty?: string;
+  maxHeight?: number | false;
 }) {
   return (
-    // min-w keeps columns readable on phones: the table scrolls sideways
-    // instead of squeezing every cell into a tall wrapped block.
-    <div className="overflow-x-auto">
+    <TableScroll maxHeight={maxHeight}>
       <table className="w-full min-w-[640px] text-sm">
         <thead>
-          <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-text-dim">
+          <tr className={cn(STICKY_HEAD, "border-b border-border")}>
             {columns.map((c) => (
               <th key={c.key} className={cn("px-3 py-2.5 font-medium", c.className)}>
                 {c.header}
@@ -48,6 +48,6 @@ export function DataTable<T extends Record<string, any>>({
           )}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }

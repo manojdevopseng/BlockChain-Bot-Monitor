@@ -2,6 +2,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
+import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { fmtDateTime, shortAddr, timeAgo } from "@/lib/utils";
 
@@ -16,12 +17,14 @@ export type Detection = {
   gmgn_url?: string;
 };
 
-export function DetectionTable({ items }: { items: Detection[] }) {
+export function DetectionTable(
+  { items, maxHeight }: { items: Detection[]; maxHeight?: number | false },
+) {
   return (
-    <div className="overflow-x-auto">
+    <TableScroll maxHeight={maxHeight}>
       <table className="w-full min-w-[900px] text-sm">
         <thead>
-          <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-text-dim">
+          <tr className={`${STICKY_HEAD} border-b border-border`}>
             <th className="px-3 py-2.5 font-medium">Symbol</th>
             <th className="px-3 py-2.5 font-medium">Name</th>
             <th className="px-3 py-2.5 font-medium">Address</th>
@@ -97,6 +100,6 @@ export function DetectionTable({ items }: { items: Detection[] }) {
           )}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }

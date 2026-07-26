@@ -2,6 +2,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
+import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { fmtDateTime, fmtUsd, shortAddr, timeAgo } from "@/lib/utils";
 
@@ -22,12 +23,14 @@ export type CrossChainMatch = {
 // No gas-fee column: a cross-chain match is a ticker match, and nothing in that
 // path reads a receipt, so the value was always "—". High-gas buys are their own
 // feature with their own section.
-export function CrossChainTable({ items }: { items: CrossChainMatch[] }) {
+export function CrossChainTable(
+  { items, maxHeight }: { items: CrossChainMatch[]; maxHeight?: number | false },
+) {
   return (
-    <div className="overflow-x-auto">
+    <TableScroll maxHeight={maxHeight}>
       <table className="w-full min-w-[880px] text-sm">
         <thead>
-          <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-text-dim">
+          <tr className={`${STICKY_HEAD} border-b border-border`}>
             <th className="px-3 py-2.5 font-medium">Symbol</th>
             <th className="px-3 py-2.5 font-medium">SOL Address</th>
             <th className="px-3 py-2.5 font-medium">Matched Address</th>
@@ -92,6 +95,6 @@ export function CrossChainTable({ items }: { items: CrossChainMatch[] }) {
           )}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }

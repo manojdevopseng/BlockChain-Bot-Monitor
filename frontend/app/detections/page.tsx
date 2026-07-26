@@ -4,37 +4,17 @@ import { useState } from "react";
 import { Search, Layers, History as HistoryIcon, Fuel, ExternalLink, ArrowRightLeft } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DetectionTable } from "@/components/DetectionTable";
 import { CrossChainTable } from "@/components/CrossChainTable";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtEth, shortAddr, timeAgo } from "@/lib/utils";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
-
-function SectionHead({
-  title, icon, count, children,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  count?: number;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3">
-      <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
-        {icon}{title}
-      </h3>
-      <div className="flex flex-wrap items-center gap-2">
-        {children}
-        {count !== undefined && <Badge variant="purple">{count}</Badge>}
-      </div>
-    </div>
-  );
-}
 
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
@@ -74,19 +54,21 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
   const data = date ? hist.data : live.data;
 
   return (
-    <Card>
-      <SectionHead title={title} count={data?.total ?? 0}>
+    <CollapsibleSection
+      id={`premium-${chain}`}
+      title={title}
+      count={data?.total ?? 0}
+      controls={<>
         <SearchBox value={q} onChange={setQ} placeholder="symbol / name / address / group" />
         <Button size="sm" variant={multi ? "primary" : "outline"} onClick={() => setMulti((v) => !v)}
           title="Only tokens called by 2+ groups">
           <Layers size={13} /> Multi 2+
         </Button>
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
-      </SectionHead>
-      <CardContent className="pt-0">
-        <DetectionTable items={data?.items ?? []} />
-      </CardContent>
-    </Card>
+      </>}
+    >
+      <DetectionTable items={data?.items ?? []} />
+    </CollapsibleSection>
   );
 }
 
@@ -99,12 +81,12 @@ function GasSection() {
   const items = data?.items ?? [];
 
   return (
-    <Card>
-      <SectionHead
-        title="ETH Gas Fees — High-Gas Early Buys"
-        icon={<Fuel size={14} />}
-        count={items.length}
-      >
+    <CollapsibleSection
+      id="gas"
+      title="ETH Gas Fees — High-Gas Early Buys"
+      icon={<Fuel size={14} />}
+      count={items.length}
+      controls={<>
         <SearchBox value={q} onChange={setQ} placeholder="symbol / address / tx" />
         <span className="text-xs text-text-dim">
           threshold <span className="text-text">{fmtEth(summary?.min_fee_eth)}</span>
@@ -113,16 +95,16 @@ function GasSection() {
           max <span className="text-text">{fmtEth(summary?.max_eth)}</span>
         </span>
         <Badge variant={summary?.enabled ? "green" : "gray"}>{summary?.enabled ? "on" : "off"}</Badge>
-      </SectionHead>
-      <CardContent className="pt-0">
+      </>}
+    >
         <p className="mb-3 text-xs text-text-dim">
           Every new V2/V4 pair is watched; a buy paying ≥ {fmtEth(summary?.min_fee_eth)} gas means
           someone is sniping — it fires one alert and the watch stops.
         </p>
-        <div className="overflow-x-auto">
+        <TableScroll>
           <table className="w-full min-w-[820px] text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-text-dim">
+              <tr className={`${STICKY_HEAD} border-b border-border`}>
                 <th className="px-3 py-2.5 font-medium">Symbol</th>
                 <th className="px-3 py-2.5 font-medium">Name</th>
                 <th className="px-3 py-2.5 font-medium">CA</th>
@@ -179,9 +161,8 @@ function GasSection() {
               ))}
             </tbody>
           </table>
-        </div>
-      </CardContent>
-    </Card>
+        </TableScroll>
+    </CollapsibleSection>
   );
 }
 
@@ -196,15 +177,18 @@ function CrossChainSection({ flow, title }: { flow: "eth" | "rbh"; title: string
   );
 
   return (
-    <Card>
-      <SectionHead title={title} icon={<ArrowRightLeft size={14} />} count={data?.total ?? 0}>
+    <CollapsibleSection
+      id={`xchain-${flow}`}
+      title={title}
+      icon={<ArrowRightLeft size={14} />}
+      count={data?.total ?? 0}
+      controls={<>
         <SearchBox value={q} onChange={setQ} placeholder="symbol / address / dex" />
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
-      </SectionHead>
-      <CardContent className="pt-0">
-        <CrossChainTable items={data?.items ?? []} />
-      </CardContent>
-    </Card>
+      </>}
+    >
+      <CrossChainTable items={data?.items ?? []} />
+    </CollapsibleSection>
   );
 }
 

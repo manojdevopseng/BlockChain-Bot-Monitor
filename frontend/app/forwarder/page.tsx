@@ -5,7 +5,7 @@ import { useApi, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { fmtNum } from "@/lib/utils";
@@ -30,9 +30,8 @@ export default function ForwarderPage() {
         <StatCard label="Forwarded Today" value={fmtNum(stats?.forwarded_today)} icon={Send} tone="cyan" />
       </div>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>Source Status</CardTitle></CardHeader>
-          <CardContent className="space-y-1">
+        <CollapsibleSection id="fwd-sources" title="Source Status"
+          bodyClass="space-y-1">
             {(sources?.items ?? []).map((s: any) => (
               <div key={s.name} className="flex items-center justify-between rounded-lg border border-border-soft px-3 py-2.5">
                 <div>
@@ -45,11 +44,9 @@ export default function ForwarderPage() {
                 </div>
               </div>
             ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>Destination Groups</CardTitle></CardHeader>
-          <CardContent className="space-y-1">
+        </CollapsibleSection>
+        <CollapsibleSection id="fwd-dests" title="Destination Groups"
+          bodyClass="space-y-1">
             {(dests?.items ?? []).map((d: any) => (
               <div key={d.group} className="flex items-center justify-between rounded-lg border border-border-soft px-3 py-2.5">
                 <div>
@@ -62,8 +59,7 @@ export default function ForwarderPage() {
                 <span className="text-xs text-text-muted">{fmtNum(d.today)}</span>
               </div>
             ))}
-          </CardContent>
-        </Card>
+        </CollapsibleSection>
       </div>
     </div>
   );
