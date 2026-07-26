@@ -54,7 +54,10 @@ def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
             "alert_timestamp": time.time(),
         })
     except Exception as exc:
-        log.debug(f"record_alert failed: {exc}")
+        # Not debug: this is the only thing that puts a fired match on the
+        # dashboard. A silent failure here is how a NameError in the storage
+        # layer went unnoticed while alerts kept reaching Telegram.
+        log.error(f"record_alert failed — match not saved to the dashboard: {exc}")
 
 
 async def send_telegram(

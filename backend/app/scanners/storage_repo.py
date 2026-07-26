@@ -18,6 +18,9 @@ import time
 from typing import Any
 
 from .bounded_set import BoundedSet
+from .slog import get_logger
+
+log = get_logger(__name__)
 
 # ── In-memory caches (preloaded from Mongo before scanners construct) ───────────
 _sets: dict[str, set] = {}
@@ -38,6 +41,28 @@ _PENDING_SAFETY_CAP = 6000
 # the file-based version cannot recur).
 _latest_state: dict[str, tuple[str, Any]] = {}
 _state_writer_active: set[str] = set()
+
+
+# Background tasks are held here: asyncio only keeps a weak reference to a
+# bare create_task(), so without this a write can be garbage-collected mid-flight.
+_bg_tasks: set = set()
+
+
+def _schedule(coro) -> None:
+    """Run a write on the event loop without making the caller wait.
+
+    The scanners are synchronous at the point they record an alert or a token,
+    so the coroutine is handed to the loop instead of awaited. With no loop
+    running (imports, tests) the coroutine is closed rather than left dangling.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        coro.close()
+        return
+    task = loop.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
 
 
 def _queue_state(name: str, kind: str, data: Any) -> None:
@@ -209,8 +234,8 @@ async def _persist_alert(record: dict) -> None:
             "alert",
             {k: v for k, v in alert_doc.items() if k not in ("_id", "dt")},
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.error(f"could not save cross-chain alert {sym} ({chain}): {exc}")
 
 
 # ── Reference API compatibility (unused by the 3 scanners, kept for parity) ─────
