@@ -78,11 +78,13 @@ ROBINHOOD_CHAT_ID  = settings.robinhood_chat_id
 NOXA_FACTORY_ADDRESS      = settings.noxa_factory_address
 NOXA_TOKEN_CREATED_TOPIC0 = settings.noxa_token_created_topic0
 
-# Robinhood detection-source toggles (overlaid from the registry at runtime).
-RBH_NOXA_ENABLED = True
-RBH_V2_ENABLED   = False
-RBH_V3_ENABLED   = False
-RBH_V4_ENABLED   = False
+# Which sources the Robinhood detector subscribes to, from .env. Each is its own
+# WS subscription: with only noxa on, a token launched through Uniswap on
+# Robinhood is never seen, so a SOL ticker matching it can never fire.
+RBH_NOXA_ENABLED = settings.rbh_noxa_enabled
+RBH_V2_ENABLED   = settings.rbh_v2_enabled
+RBH_V3_ENABLED   = settings.rbh_v3_enabled
+RBH_V4_ENABLED   = settings.rbh_v4_enabled
 
 # ── ETH Gas Fees: high-gas early buy detection (from .env) ──────
 MIN_FEE_ETH              = settings.min_fee_eth
@@ -136,8 +138,14 @@ def refresh_from_registry(enabled: dict[str, bool]) -> None:
     Robinhood source toggles here (the master on/off for a whole scanner is
     handled by the supervisor deciding whether to start the task at all).
     """
-    global RBH_NOXA_ENABLED
-    # There is one master RBH toggle in the registry (sol_to_rbh); noxa follows it
-    # by default. V2/V3/V4 stay off unless explicitly turned on via env later.
+    global RBH_NOXA_ENABLED, RBH_V2_ENABLED, RBH_V3_ENABLED, RBH_V4_ENABLED
+    # The registry's sol_to_rbh switch is the master: off means no Robinhood
+    # source at all. Which sources run when it is on comes from .env. Applying
+    # it to all four keeps them consistent — switching the flow off used to
+    # silence noxa while leaving V2/V3/V4 armed.
     if "sol_to_rbh" in enabled:
-        RBH_NOXA_ENABLED = bool(enabled["sol_to_rbh"])
+        on = bool(enabled["sol_to_rbh"])
+        RBH_NOXA_ENABLED = on and settings.rbh_noxa_enabled
+        RBH_V2_ENABLED   = on and settings.rbh_v2_enabled
+        RBH_V3_ENABLED   = on and settings.rbh_v3_enabled
+        RBH_V4_ENABLED   = on and settings.rbh_v4_enabled

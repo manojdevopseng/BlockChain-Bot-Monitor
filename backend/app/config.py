@@ -163,6 +163,15 @@ class Settings(BaseSettings):
     noxa_factory_address: str = ""
     noxa_token_created_topic0: str = ""
 
+    # ── Which sources the Robinhood detector listens to ──
+    # Robinhood Chain carries both noxa.fun launches and ordinary Uniswap
+    # deployments, and a cross-chain match can come from either. Each source is
+    # a separate WS subscription, so they are switched independently.
+    rbh_noxa_enabled: bool = True
+    rbh_v2_enabled: bool = False
+    rbh_v3_enabled: bool = True
+    rbh_v4_enabled: bool = False
+
     # ── Forwarder source channels (env-overridable, not hardcoded) ──
     source_call: str = "CallAnalyser2"
     source_buybot: str = "BuyBotTracker"
