@@ -202,7 +202,7 @@ function CrossChainSection({ flow, title }: { flow: "eth" | "rbh"; title: string
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
       </SectionHead>
       <CardContent className="pt-0">
-        <CrossChainTable items={data?.items ?? []} showFee={flow === "eth"} />
+        <CrossChainTable items={data?.items ?? []} />
       </CardContent>
     </Card>
   );

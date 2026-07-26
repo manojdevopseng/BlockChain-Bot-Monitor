@@ -3,7 +3,7 @@
 import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { Badge } from "@/components/ui/badge";
-import { fmtDateTime, fmtEth, fmtUsd, shortAddr, timeAgo } from "@/lib/utils";
+import { fmtDateTime, fmtUsd, shortAddr, timeAgo } from "@/lib/utils";
 
 export type CrossChainMatch = {
   token_symbol?: string;
@@ -11,7 +11,6 @@ export type CrossChainMatch = {
   sol_address?: string;
   sol_mcap_usd?: number;
   dex?: string;
-  fee_eth?: number | null;
   created_at?: number;
   gmgn_url?: string;
   sol_gmgn_url?: string;
@@ -19,7 +18,11 @@ export type CrossChainMatch = {
 
 // SOL→ETH / SOL→RBH ticker matches: the SOL side and the destination-chain side
 // side by side, both copyable and linked to GMGN.
-export function CrossChainTable({ items, showFee }: { items: CrossChainMatch[]; showFee?: boolean }) {
+//
+// No gas-fee column: a cross-chain match is a ticker match, and nothing in that
+// path reads a receipt, so the value was always "—". High-gas buys are their own
+// feature with their own section.
+export function CrossChainTable({ items }: { items: CrossChainMatch[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[880px] text-sm">
@@ -30,7 +33,6 @@ export function CrossChainTable({ items, showFee }: { items: CrossChainMatch[]; 
             <th className="px-3 py-2.5 font-medium">Matched Address</th>
             <th className="px-3 py-2.5 font-medium">DEX</th>
             <th className="px-3 py-2.5 font-medium">SOL MCap</th>
-            {showFee && <th className="px-3 py-2.5 font-medium">Gas Fee</th>}
             <th className="px-3 py-2.5 font-medium">Timestamp</th>
             <th className="px-3 py-2.5 font-medium">When</th>
           </tr>
@@ -38,7 +40,7 @@ export function CrossChainTable({ items, showFee }: { items: CrossChainMatch[]; 
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={showFee ? 8 : 7} className="px-3 py-10 text-center text-text-dim">
+              <td colSpan={7} className="px-3 py-10 text-center text-text-dim">
                 No cross-chain matches yet
               </td>
             </tr>
@@ -77,13 +79,6 @@ export function CrossChainTable({ items, showFee }: { items: CrossChainMatch[]; 
                 </td>
                 <td className="px-3 py-3"><Badge variant="purple">{r.dex || "—"}</Badge></td>
                 <td className="px-3 py-3 text-text-muted">{fmtUsd(r.sol_mcap_usd)}</td>
-                {showFee && (
-                  <td className="px-3 py-3">
-                    <span className="font-mono text-xs text-accent-cyan">
-                      {r.fee_eth ? fmtEth(r.fee_eth) : "—"}
-                    </span>
-                  </td>
-                )}
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">
                     {r.created_at ? fmtDateTime(r.created_at) : "—"}
