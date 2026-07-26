@@ -20,9 +20,15 @@ export function useWebSocket(onEvent?: (e: WSEvent) => void) {
     const connect = () => {
       if (closed) return;
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      // In production the page is served by nginx, which proxies /ws to the
+      // API — so use the same origin. Hard-coding :8000 broke this on the
+      // server, where that port is deliberately not exposed. Only local dev
+      // (Next on :3000, API on :8000) needs the explicit port.
       const base =
         process.env.NEXT_PUBLIC_WS_BASE ||
-        `${proto}://${window.location.hostname}:8000`;
+        (window.location.port === "3000"
+          ? `${proto}://${window.location.hostname}:8000`
+          : `${proto}://${window.location.host}`);
       const ws = new WebSocket(`${base}/ws`);
       ref.current = ws;
       ws.onopen = () => {

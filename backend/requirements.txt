@@ -8,6 +8,9 @@ pydantic>=2.6.0
 pydantic-settings>=2.2.0
 python-dotenv>=1.0.0
 
+# ── Host metrics (status bar) ──────────────────────────────────
+psutil>=5.9.0
+
 # ── Database ───────────────────────────────────────────────────
 motor>=3.4.0
 

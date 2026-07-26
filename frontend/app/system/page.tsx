@@ -11,6 +11,8 @@ import { fmtUptime } from "@/lib/utils";
 export default function SystemPage() {
   const { data } = useApi<any>("/api/system/overview");
   const { data: svcs } = useApi<any>("/api/system/services");
+  const { data: m } = useApi<any>("/api/system/metrics", { refreshInterval: 10000 });
+  const { data: ret } = useApi<any>("/api/system/retention");
 
   const info = [
     ["Hostname", data?.hostname],
@@ -50,6 +52,43 @@ export default function SystemPage() {
                 <Badge variant={s.status === "running" && s.enabled ? "green" : "gray"}>
                   {s.enabled ? s.status : "disabled"}
                 </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Host Resources</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {[
+              ["CPU", m?.cpu_percent != null ? `${m.cpu_percent}%` : "—"],
+              ["Memory", m?.ram_used_gb != null ? `${m.ram_used_gb} / ${m.ram_total_gb} GB (${m.ram_percent}%)` : "—"],
+              ["Disk", m?.disk_percent != null ? `${m.disk_percent}% used · ${m.disk_free_gb} GB free` : "—"],
+              ["Network", m?.net_recv_mb != null ? `↓ ${Math.round(m.net_recv_mb)} MB · ↑ ${Math.round(m.net_sent_mb ?? 0)} MB` : "—"],
+            ].map(([k, v]) => (
+              <div key={k as string} className="flex justify-between border-b border-border-soft py-1.5 text-sm">
+                <span className="text-text-muted">{k}</span>
+                <span className="font-mono text-text">{v}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Data Retention</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <p className="mb-2 text-xs text-text-dim">
+              Enforced by MongoDB TTL indexes — mongod expires old documents itself.
+            </p>
+            {Object.entries(ret?.collections ?? {}).map(([name, c]: [string, any]) => (
+              <div key={name} className="flex justify-between border-b border-border-soft py-1.5 text-sm">
+                <span className="text-text-muted">{name}</span>
+                <span className="text-text">
+                  {c.documents} docs
+                  <span className="ml-2 text-text-dim">
+                    {c.retention_days > 0 ? `${c.retention_days}d` : "kept"}
+                  </span>
+                </span>
               </div>
             ))}
           </CardContent>

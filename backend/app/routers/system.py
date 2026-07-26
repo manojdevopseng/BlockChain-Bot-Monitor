@@ -28,6 +28,38 @@ async def overview():
     }
 
 
+@router.get("/metrics")
+async def metrics():
+    """Live host metrics for the status bar.
+
+    Read from the machine via psutil; if it isn't available the fields come
+    back null so the UI can show a dash rather than a made-up number.
+    """
+    out: dict = {"cpu_percent": None, "ram_used_gb": None, "ram_total_gb": None,
+                 "ram_percent": None, "disk_percent": None, "disk_free_gb": None,
+                 "net_sent_mb": None, "net_recv_mb": None}
+    try:
+        import psutil
+    except ImportError:
+        return out
+    try:
+        # interval=None → since the previous call, so it never blocks the loop.
+        out["cpu_percent"] = round(psutil.cpu_percent(interval=None), 1)
+        vm = psutil.virtual_memory()
+        out["ram_used_gb"] = round((vm.total - vm.available) / 1024**3, 2)
+        out["ram_total_gb"] = round(vm.total / 1024**3, 2)
+        out["ram_percent"] = round(vm.percent, 1)
+        du = psutil.disk_usage("/")
+        out["disk_percent"] = round(du.percent, 1)
+        out["disk_free_gb"] = round(du.free / 1024**3, 1)
+        net = psutil.net_io_counters()
+        out["net_sent_mb"] = round(net.bytes_sent / 1024**2, 1)
+        out["net_recv_mb"] = round(net.bytes_recv / 1024**2, 1)
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = str(exc)[:120]
+    return out
+
+
 @router.get("/retention")
 async def retention():
     """Data-retention policy + live counts.
