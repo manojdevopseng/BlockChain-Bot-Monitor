@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import db, envfile, registry
+from .. import db, envfile, registry, supervisor
 from ..keywords import compile_keyword, keyword_matches
 from ..util import clean_list
 from ..ws_hub import hub
@@ -54,16 +54,17 @@ async def get_credentials():
 async def set_credential(key: str, payload: dict = Body(...)):
     """Write a new value into .env (old one replaced) and apply it live.
 
-    Used when the GMGN web fingerprint expires — paste the fresh CLIENT_ID here
-    instead of SSH-ing into the server. Takes effect on the next GMGN request.
+    Covers the GMGN fingerprint that expires plus the detection thresholds, so
+    they can be tuned without SSH-ing into the server. Most take effect on the
+    next read; a field whose value is only consumed when a scanner is built
+    (RBH_V3_ENABLED) restarts just that scanner.
     """
     key = key.upper()
-    value = str(payload.get("value") or "").strip()
-    if not value:
-        raise HTTPException(400, "value is required")
+    if "value" not in payload:
+        raise HTTPException(400, "body must include 'value'")
     try:
-        envfile.update(key, value)
-        envfile.apply_runtime(key, value)
+        coerced = envfile.update(key, payload["value"])
+        envfile.apply_runtime(key, coerced)
     except KeyError:
         raise HTTPException(404, f"'{key}' is not an editable setting")
     except ValueError as exc:
@@ -71,12 +72,20 @@ async def set_credential(key: str, payload: dict = Body(...)):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"could not write .env: {exc}")
 
+    note = "applied live"
+    worker = envfile.worker_for(key)
+    if worker:
+        restarted = await supervisor.restart_worker(worker)
+        note = f"{worker} scanner restarted" if restarted else \
+               f"{worker} scanner is not running — will use the new value when it starts"
+
     await db.get_collection("logs").insert_one({
         "level": "INFO", "service": "Settings",
-        "message": f"{key} updated from dashboard (.env rewritten, applied live)",
+        "message": f"{key} set to {coerced} from dashboard (.env rewritten, {note})",
         "ts": time.time(), "dt": datetime.now(timezone.utc),
     })
-    return {"key": key, "updated": True, "items": envfile.read_values()}
+    return {"key": key, "value": coerced, "updated": True,
+            "note": note, "items": envfile.read_values()}
 
 
 # ── Keywords (whole-word / exact match only — see app.keywords) ────────────────

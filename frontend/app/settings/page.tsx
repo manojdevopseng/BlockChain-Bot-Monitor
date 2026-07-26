@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Bot, Link2, Radio, Plus, X, Tag, KeyRound, Check, Loader2, Search, Hash,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
@@ -257,67 +258,129 @@ function ChatIdFinder() {
   );
 }
 
-function CredentialsManager() {
-  const { data } = useApi<any>("/api/settings/credentials");
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
-  const items: Record<string, any> = data?.items ?? {};
+const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
+  "GMGN Credentials": {
+    icon: KeyRound,
+    blurb:
+      "GMGN ka fingerprint expire ho jaye to yahin naya paste karo — .env me purana " +
+      "replace hoke save hoga aur turant apply bhi ho jayega (restart nahi chahiye).",
+  },
+  "Detection Tuning": {
+    icon: SlidersHorizontal,
+    blurb:
+      "Detection thresholds. Ye bhi .env me likhe jate hain, to server restart hone " +
+      "par bhi bane rehte hain.",
+  },
+};
 
-  async function save(key: string) {
-    const value = (draft[key] ?? "").trim();
-    if (!value) return;
-    setBusy(key);
+function EnvField({ envKey, meta }: { envKey: string; meta: any }) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(value: string | boolean) {
+    setBusy(true);
+    setError("");
     try {
-      await apiSend(`/api/settings/credentials/${key}`, "PUT", { value });
-      setDraft((d) => ({ ...d, [key]: "" }));
-      setSaved(key);
-      setTimeout(() => setSaved(null), 2000);
+      await apiSend(`/api/settings/credentials/${envKey}`, "PUT", { value });
+      setDraft("");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
       mutate("/api/settings/credentials");
+    } catch (e: any) {
+      setError(String(e?.message || e));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  return (
-    <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><KeyRound size={14} /> GMGN Credentials</CardTitle></CardHeader>
-      <CardContent>
-        <p className="mb-3 text-xs text-text-dim">
-          GMGN ka fingerprint expire ho jaye to yahin naya paste karo — <code>.env</code> me
-          purana replace hoke save hoga aur turant apply bhi ho jayega (restart nahi chahiye).
-        </p>
-        <div className="space-y-3">
-          {Object.entries(items).map(([key, meta]: [string, any]) => (
-            <div key={key}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-xs text-text-muted">{meta.label}</span>
-                <Badge variant={meta.set ? "green" : "gray"}>{meta.set ? "set" : "empty"}</Badge>
-              </div>
-              {meta.set && (
-                <div className="mb-1 truncate font-mono text-[11px] text-text-dim">
-                  current: {meta.value || "—"}
-                </div>
-              )}
-              <div className="flex gap-2">
-                <Input
-                  value={draft[key] ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
-                  placeholder={`New ${meta.label}…`}
-                  onKeyDown={(e) => e.key === "Enter" && save(key)}
-                  className="font-mono text-xs"
-                />
-                <Button variant="primary" size="sm" disabled={busy === key || !(draft[key] ?? "").trim()}
-                  onClick={() => save(key)}>
-                  {busy === key ? <Loader2 size={14} className="animate-spin" />
-                    : saved === key ? <Check size={14} /> : "Save"}
-                </Button>
-              </div>
-            </div>
-          ))}
+  // A switch writes on click; text/number fields need an explicit Save so a
+  // half-typed number is never applied.
+  if (meta.kind === "bool") {
+    return (
+      <div className="rounded-lg border border-border-soft px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-text">{meta.label}</span>
+          <Switch
+            checked={meta.value === "true"}
+            disabled={busy}
+            onCheckedChange={(v) => save(v)}
+          />
         </div>
-      </CardContent>
-    </Card>
+        {meta.help && <p className="mt-1 text-[11px] text-text-dim">{meta.help}</p>}
+        {error && <p className="mt-1 text-[11px] text-accent-red">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs text-text-muted">{meta.label}</span>
+        <Badge variant={meta.set ? "green" : "gray"}>{meta.set ? "set" : "empty"}</Badge>
+      </div>
+      {meta.set && (
+        <div className="mb-1 truncate font-mono text-[11px] text-text-dim">
+          current: {meta.value || "—"}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          inputMode={meta.kind === "text" ? undefined : "decimal"}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={meta.kind === "text" ? `New ${meta.label}…` : meta.value || "value"}
+          onKeyDown={(e) => e.key === "Enter" && draft.trim() && save(draft.trim())}
+          className="font-mono text-xs"
+        />
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy || !draft.trim()}
+          onClick={() => save(draft.trim())}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : "Save"}
+        </Button>
+      </div>
+      {meta.help && <p className="mt-1 text-[11px] text-text-dim">{meta.help}</p>}
+      {error && <p className="mt-1 text-[11px] text-accent-red">{error}</p>}
+    </div>
+  );
+}
+
+function CredentialsManager() {
+  const { data } = useApi<any>("/api/settings/credentials");
+  const items: Record<string, any> = data?.items ?? {};
+
+  const groups: Record<string, [string, any][]> = {};
+  for (const [key, meta] of Object.entries(items)) {
+    (groups[meta.group ?? "Other"] ||= []).push([key, meta]);
+  }
+
+  return (
+    <>
+      {Object.entries(groups).map(([group, fields]) => {
+        const Icon = GROUP_META[group]?.icon ?? KeyRound;
+        return (
+          <Card key={group}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Icon size={14} /> {group}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {GROUP_META[group]?.blurb && (
+                <p className="mb-3 text-xs text-text-dim">{GROUP_META[group].blurb}</p>
+              )}
+              <div className="space-y-3">
+                {fields.map(([key, meta]) => (
+                  <EnvField key={key} envKey={key} meta={meta} />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </>
   );
 }
 

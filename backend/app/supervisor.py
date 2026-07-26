@@ -212,6 +212,20 @@ async def _stop_worker(name: str) -> None:
         await _stop_worker("sol")
 
 
+async def restart_worker(name: str) -> bool:
+    """Stop a worker and let reconcile bring it back.
+
+    Some settings are only read when a scanner builds its chain spec (which
+    Uniswap versions to subscribe to, for one), so changing them needs that
+    worker recreated — not the whole process.
+    """
+    if not _available:
+        return False
+    await _stop_worker(name)
+    await reconcile()
+    return _worker_alive(name)
+
+
 def instance(name: str):
     """The live worker object, so routers can talk to a running worker
     (e.g. re-publishing the Telegram command menu after a toggle)."""
