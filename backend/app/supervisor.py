@@ -75,6 +75,12 @@ async def stop() -> None:
             pass
         _client = None
     try:
+        # Counts buffered since the last flush would otherwise be lost on stop.
+        from . import fwd_counters
+        await fwd_counters.flush()
+    except Exception:
+        pass
+    try:
         from .scanners.gas_tracker import gas_tracker
         await gas_tracker.close()
     except Exception:

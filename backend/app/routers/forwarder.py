@@ -7,7 +7,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from .. import db
+from .. import db, fwd_counters, registry
+from ..scanners import scfg
 from ..util import clean_list
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
@@ -21,42 +22,124 @@ def _gmgn_url(chain: str, address: str) -> str:
     return f"https://gmgn.ai/{slug}/token/{address}"
 
 
+# The four signal channels the userbot listens to, and the registry switch that
+# gates each one. Names come from .env — nothing hardcoded.
+def _signal_channels() -> list[tuple[str, str, str]]:
+    """(channel name, registry service id, what it feeds)"""
+    return [
+        (scfg.SOURCE_CALL,   "bbcanalyser2",           "first-call signals → DEST_SIGNALS"),
+        (scfg.SOURCE_BUYBOT, "forwarder",              "new-group signals → DEST_SIGNALS"),
+        (scfg.SOURCE_DEXS,   "dexsignalcall",          "DEX signals → DEST_DEXS"),
+        (scfg.SOURCE_OTTO,   "eth_otto_group",         "Otto deployments → DEST_OTTO"),
+    ]
+
+
+def _destinations() -> list[tuple[str, str, str]]:
+    """(env key, chat id, what gets sent there)"""
+    return [
+        ("DEST_OTTO",               scfg.DEST_OTTO,               "Otto method/function hash matches"),
+        ("DEST_SIGNALS",            scfg.DEST_SIGNALS,            "CallAnalyser2 first-calls + BuyBotTracker"),
+        ("DEST_DEXS",               scfg.DEST_DEXS,               "DEX signals from dexssignal"),
+        ("DEST_PREMIUM_ETH_CALLER", scfg.DEST_PREMIUM_ETH_CALLER, "ETH addresses seen in premium groups"),
+        ("DEST_PREMIUM_ALL",        scfg.DEST_PREMIUM_ALL,        "Raw mirror of every premium message"),
+    ]
+
+
 @router.get("/sources")
 async def sources():
-    docs = await db.get_collection("forwarder_sources").find({}).to_list(500)
-    return {"items": clean_list(docs)}
+    """What the userbot actually reads: the four signal channels plus every
+    enabled premium group.
+
+    This used to list the `forwarder_sources` collection, which only ever holds
+    groups added from the dashboard — so it was empty while the userbot was
+    reading 111 groups, and its toggle wrote to a field nothing consumed.
+    """
+    counts = await fwd_counters.today(fwd_counters.SOURCE)
+    enabled = await registry.enabled_map()
+
+    items = [
+        {
+            "key": name, "name": name, "kind": "channel",
+            "subtitle": feeds,
+            "enabled": bool(enabled.get(service, True)),
+            "service": service,
+            "today": counts.get(name, 0),
+        }
+        for name, service, feeds in _signal_channels() if name
+    ]
+
+    for g in await db.get_collection("premium_groups").find({}).to_list(5000):
+        gid = g.get("id")
+        if gid is None:
+            continue
+        items.append({
+            "key": str(gid), "kind": "group",
+            "name": g.get("name") or str(gid),
+            "subtitle": f"@{g['username']}" if g.get("username") else str(gid),
+            "enabled": g.get("enabled", True) is not False,
+            "today": counts.get(fwd_counters.bare_key(gid), 0),
+        })
+    return {"items": items}
 
 
 @router.get("/destinations")
 async def destinations():
-    docs = await db.get_collection("forwarder_dests").find({}).to_list(500)
-    return {"items": clean_list(docs)}
+    """Where the userbot forwards, straight from .env."""
+    counts = await fwd_counters.today(fwd_counters.DEST)
+    return {"items": [
+        {
+            "key": key, "chat_id": cid, "purpose": purpose,
+            "configured": bool(cid),
+            "today": counts.get(fwd_counters.bare_key(cid), 0) if cid else 0,
+        }
+        for key, cid, purpose in _destinations()
+    ]}
 
 
 @router.get("/stats")
 async def stats():
-    src = db.get_collection("forwarder_sources")
-    dst = db.get_collection("forwarder_dests")
-    srcs = await src.find({}).to_list(500)
-    dsts = await dst.find({}).to_list(500)
+    src_counts = await fwd_counters.today(fwd_counters.SOURCE)
+    dst_counts = await fwd_counters.today(fwd_counters.DEST)
+    groups = await db.get_collection("premium_groups").count_documents({"enabled": {"$ne": False}})
+    channels = len([n for n, _s, _f in _signal_channels() if n])
     return {
-        "total_sources": len(srcs),
-        "total_groups": await db.get_collection("premium_groups").count_documents({"enabled": {"$ne": False}}),
-        "messages_today": sum(s.get("today", 0) for s in srcs),
-        "forwarded_today": sum(d.get("today", 0) for d in dsts),
+        "total_sources": groups + channels,
+        "total_groups": groups,
+        "messages_today": sum(src_counts.values()),
+        "forwarded_today": sum(dst_counts.values()),
+        "destinations": len([c for _k, c, _p in _destinations() if c]),
     }
 
 
-@router.patch("/sources/{name}")
-async def toggle_source(name: str, payload: dict = Body(...)):
+@router.patch("/sources/{key}")
+async def toggle_source(key: str, payload: dict = Body(...)):
+    """Switch a source off where the forwarder actually looks.
+
+    A premium group flips `premium_groups.enabled` — the field `_load_premium_ids`
+    reads. A signal channel flips its registry service, the same switch as
+    Settings → Bots, so the two can never disagree.
+    """
     if "enabled" not in payload:
         raise HTTPException(400, "body must include 'enabled'")
-    res = await db.get_collection("forwarder_sources").update_one(
-        {"name": name}, {"$set": {"enabled": bool(payload["enabled"])}}
+    enabled = bool(payload["enabled"])
+
+    for name, service, _feeds in _signal_channels():
+        if name and key == name:
+            svc = await registry.set_enabled(service, enabled)
+            if svc is None:
+                raise HTTPException(404, f"unknown service '{service}'")
+            return {"key": key, "kind": "channel", "enabled": enabled}
+
+    try:
+        gid = int(key)
+    except ValueError:
+        raise HTTPException(404, f"unknown source '{key}'")
+    res = await db.get_collection("premium_groups").update_one(
+        {"id": gid}, {"$set": {"enabled": enabled}}
     )
     if not res.matched_count:
-        raise HTTPException(404, f"unknown source '{name}'")
-    return {"name": name, "enabled": bool(payload["enabled"])}
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    return {"key": key, "kind": "group", "enabled": enabled}
 
 
 # ── Premium-caller address detections (ETH / RBH / SOL panels) ──────────────────

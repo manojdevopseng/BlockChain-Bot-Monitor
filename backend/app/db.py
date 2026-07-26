@@ -206,6 +206,9 @@ _TTL_COLLECTIONS = {
     "tokens": "token_retention_days",
     "gas_alerts": "alert_retention_days",
     "premium_archive": "archive_retention_days",
+    # Per-day forwarder counters — tiny, but no reason to keep them longer
+    # than the logs they correspond to.
+    "forwarder_counters": "log_retention_days",
 }
 
 

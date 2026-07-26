@@ -31,6 +31,7 @@ from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
 from app.keywords import match_any
+from app import fwd_counters
 
 log = get_logger(__name__)
 
@@ -119,7 +120,9 @@ async def _safe_send(chat_id, coro_factory, limiter: "_ChatRateLimiter", tag: st
     for attempt in (1, 2):
         await limiter.acquire(key)
         try:
-            return await coro_factory()
+            sent = await coro_factory()
+            fwd_counters.bump(fwd_counters.DEST, key)
+            return sent
         except FloodWaitError as exc:
             wait = int(getattr(exc, "seconds", 30)) + 1
             limiter.penalise(key, wait)
@@ -189,6 +192,8 @@ class TelegramForwarder:
 
         # Loaded from Mongo in start() (seeded from seed_data.json, user-editable).
         self._premium_ids: set = set()
+        # Groups whose title we have already written back.
+        self._named: set = set()
         self._call_keywords: list = []
         self._buybot_keywords: list = []
         self._method_ids: set = set()
@@ -360,6 +365,28 @@ class TelegramForwarder:
                 return
             except Exception as exc:
                 log.debug(f"[DAILY-ROLLOVER] watcher error: {exc}")
+
+    async def _learn_group_name(self, event, bare: int) -> None:
+        """Fill in a premium group's title the first time it speaks.
+
+        The seeded rows carry ids only, so the dashboard would list 111
+        anonymous numbers. The userbot already has the chat object here.
+        """
+        if bare in self._named:
+            return
+        self._named.add(bare)
+        try:
+            chat = await event.get_chat()
+            title = getattr(chat, "title", None) or getattr(chat, "username", None)
+            if not title:
+                return
+            await _col("premium_groups").update_one(
+                {"id": {"$in": [bare, -bare, int(f"-100{bare}")]}},
+                {"$set": {"name": title,
+                          "username": getattr(chat, "username", None)}},
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[FWD] could not read group title for {bare}: {exc}")
 
     # ── Keyword detection (whole-word, from Mongo) ─────────────────────────────
 
@@ -565,6 +592,7 @@ class TelegramForwarder:
     # ── Handlers (logic verbatim; toggle gate added at the top of each) ────────
 
     async def _call_handler(self, event) -> None:
+        fwd_counters.bump(fwd_counters.SOURCE, SOURCE_CALL)
         if not self._on(GATE_CALL):
             return
         unique_id = f"{event.chat_id}_{event.id}"
@@ -582,6 +610,7 @@ class TelegramForwarder:
                 log.error(f"[CALL] Forward error: {exc}")
 
     async def _buybot_handler(self, event) -> None:
+        fwd_counters.bump(fwd_counters.SOURCE, SOURCE_BUYBOT)
         if not self._on("forwarder"):
             return
         unique_id = f"{event.chat_id}_{event.id}"
@@ -599,6 +628,7 @@ class TelegramForwarder:
                 log.error(f"[BUYBOT] Forward error: {exc}")
 
     async def _dexs_handler(self, event) -> None:
+        fwd_counters.bump(fwd_counters.SOURCE, SOURCE_DEXS)
         if not self._on(GATE_DEXS):
             return
         unique_id = f"{event.chat_id}_{event.id}"
@@ -623,8 +653,11 @@ class TelegramForwarder:
     async def _premium_handler(self, event) -> None:
         if not self._on(GATE_PREMIUM):
             return
-        if _bare_id(event.chat_id) not in self._premium_ids:
+        bare = _bare_id(event.chat_id)
+        if bare not in self._premium_ids:
             return
+        fwd_counters.bump(fwd_counters.SOURCE, bare)
+        await self._learn_group_name(event, bare)
         unique_id = f"{event.chat_id}_{event.id}"
         if unique_id in self._processed:
             return
