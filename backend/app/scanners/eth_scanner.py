@@ -18,6 +18,7 @@ from app.scanners import storage_repo as storage
 from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
+from app import tgbuttons
 
 log = get_logger(__name__)
 
@@ -34,6 +35,7 @@ class EthTrendingScanner:
             name           = "ETH",
             gmgn_slug      = "eth",
             wss_url        = config.ETH_RPC_WSS,
+            wss_endpoints  = tuple(config.ETH_WSS_ENDPOINTS),
             http_rpc       = config.ETH_RPC_HTTP,
             base_addrs     = frozenset({config.ETH_WETH.lower(), NATIVE_ZERO}),
             v2_factory     = (config.ETH_V2_FACTORY or "").lower() or None,
@@ -128,6 +130,14 @@ class EthTrendingScanner:
             f"SOL {sol_data['address'][:8]}… ETH {addr[:8]}… ({tok.dex}) | immediate alert"
         )
 
+        if await tgbuttons.is_muted("token", addr):
+            log.info(f"[CROSS-CHAIN] {symbol} muted — alert suppressed")
+            return
+
         text = format_immediate_lean_alert(sol_data, tok, self._spec)
-        await send_telegram(self._session, config.CROSS_CHAIN_CHAT_ID, text, tag="ETH-XCHAIN")
+        await send_telegram(
+            self._session, config.CROSS_CHAIN_CHAT_ID, text, tag="ETH-XCHAIN",
+            buttons=tgbuttons.keyboard(chain=self._spec.gmgn_slug, address=tok.address,
+                                       symbol=tok.symbol),
+        )
         record_alert(sol_data, tok, self._spec)

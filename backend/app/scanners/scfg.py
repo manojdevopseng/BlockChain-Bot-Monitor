@@ -60,6 +60,9 @@ CROSS_CHAIN_CHAT_ID = settings.cross_chain_chat_id
 
 # ── Ethereum on-chain (SOL→ETH) — from .env ─────────────────────
 ETH_RPC_WSS        = settings.eth_rpc_wss
+# Ordered endpoint list the WS provider rotates through.
+ETH_WSS_ENDPOINTS  = [u for u in (settings.eth_rpc_wss,
+                                  settings.eth_rpc_wss_fallback) if u]
 ETH_RPC_HTTP       = settings.eth_rpc_http
 ETH_V2_FACTORY     = settings.eth_v2_factory
 ETH_V3_FACTORY     = settings.eth_v3_factory
@@ -68,6 +71,8 @@ ETH_WETH           = settings.eth_weth
 
 # ── Robinhood Chain on-chain (SOL→Robinhood) — from .env ────────
 RBH_RPC_WSS        = settings.rbh_rpc_wss
+RBH_WSS_ENDPOINTS  = [u for u in (settings.rbh_rpc_wss,
+                                  settings.rbh_rpc_wss_fallback) if u]
 RBH_RPC_HTTP       = settings.rbh_rpc_http
 RBH_V2_FACTORY     = settings.rbh_v2_factory
 RBH_V3_FACTORY     = settings.rbh_v3_factory
@@ -96,6 +101,10 @@ GAS_ALERT_CHAT_ID        = settings.gas_alert_chat_id
 # upgrade with a blank value behaves exactly as before.
 GAS_RPC_WSS  = settings.gas_rpc_wss or settings.eth_rpc_wss
 GAS_RPC_HTTP = settings.gas_rpc_http or settings.eth_rpc_http
+
+# ── Daily digest (from .env) ────────────────────────────────────
+DIGEST_ENABLED = settings.digest_enabled
+DIGEST_HOUR    = settings.digest_hour
 
 # ── Health watchdog (from .env) ─────────────────────────────────
 HEALTH_ALERT_ENABLED = settings.health_alert_enabled

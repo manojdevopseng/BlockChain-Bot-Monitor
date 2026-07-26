@@ -28,6 +28,8 @@ _import_error: str = ""
 _client = None            # GMGNClient
 _sol = None               # SolanaScanner
 _watchdog: Optional[asyncio.Task] = None   # heartbeat.watch()
+_outcomes: Optional[asyncio.Task] = None   # outcomes.watch()
+_digest: Optional[asyncio.Task] = None     # digest.watch()
 _instances: dict = {}     # logical name -> scanner instance ('eth' | 'rbh')
 _tasks: dict[str, asyncio.Task] = {}   # logical name -> task ('sol' | 'eth' | 'rbh')
 
@@ -70,16 +72,24 @@ async def start() -> None:
     await heartbeat.load()      # so a restart does not blank "last activity"
     _watchdog = asyncio.create_task(heartbeat.watch(), name="watchdog")
 
+    # Follows each fired alert forward and records what the price did.
+    global _outcomes, _digest
+    from . import digest, outcomes
+    _outcomes = asyncio.create_task(outcomes.watch(), name="outcomes")
+    _digest = asyncio.create_task(digest.watch(), name="digest")
+
 
 async def stop() -> None:
-    global _watchdog
-    if _watchdog is not None and not _watchdog.done():
-        _watchdog.cancel()
-        try:
-            await _watchdog
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
-        _watchdog = None
+    global _watchdog, _outcomes, _digest
+    for attr in ("_watchdog", "_outcomes", "_digest"):
+        task = globals().get(attr)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        globals()[attr] = None
     for name in list(_tasks):
         await _stop_worker(name)
     global _client

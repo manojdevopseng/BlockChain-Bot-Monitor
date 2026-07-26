@@ -45,6 +45,9 @@ class ChainSpec:
     http_rpc: str = ""
     noxa_factory: Optional[str] = None
     noxa_topic: Optional[str] = None
+    # Ordered failover list. Empty = just wss_url, which is every existing
+    # caller — wss_url stays the primary and is what gets logged.
+    wss_endpoints: tuple = ()
 
 
 @dataclass
@@ -71,7 +74,8 @@ class OnChainDetector:
     def __init__(self, spec: ChainSpec, on_token: OnTokenCallback) -> None:
         self._spec = spec
         self._on_token = on_token
-        self._provider = WSProvider(spec.wss_url, name=spec.name)
+        self._provider = WSProvider(list(spec.wss_endpoints) or spec.wss_url,
+                                    name=spec.name)
         self._seen: BoundedSet = BoundedSet(_SEEN_MAX)
 
         self._filters: list = []

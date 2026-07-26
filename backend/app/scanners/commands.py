@@ -177,7 +177,10 @@ class TelegramCommands:
             try:
                 for update in await self._get_updates():
                     await self._observe(update)
-                    await self._handle(update)
+                    if update.get("callback_query"):
+                        await self._handle_button(update["callback_query"])
+                    else:
+                        await self._handle(update)
             except asyncio.CancelledError:
                 return
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
@@ -205,7 +208,8 @@ class TelegramCommands:
             # from) a group — that is what makes a brand-new private group
             # discoverable in Settings → Find Chat ID.
             {"offset": self._offset, "timeout": 25,
-             "allowed_updates": json.dumps(["message", "my_chat_member"])},
+             "allowed_updates": json.dumps(["message", "my_chat_member",
+                                            "callback_query"])},
             timeout=35,
         )
         result = data.get("result", []) if isinstance(data, dict) else []
@@ -242,7 +246,8 @@ class TelegramCommands:
         copied into .env later.
         """
         member = update.get("my_chat_member") or {}
-        chat = (update.get("message") or {}).get("chat") or member.get("chat")
+        cb_chat = ((update.get("callback_query") or {}).get("message") or {}).get("chat")
+        chat = (update.get("message") or {}).get("chat") or member.get("chat") or cb_chat
         if not chat:
             return
         try:
@@ -254,6 +259,30 @@ class TelegramCommands:
                          f"({chat.get('id')}) — bot is now '{status}'")
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[CMD] could not note chat {chat.get('id')}: {exc}")
+
+    async def _handle_button(self, cb: dict) -> None:
+        """A button press on an alert.
+
+        Telegram keeps showing a spinner until answerCallbackQuery is sent, so
+        that goes out whatever happens. Buttons are honoured from the alert
+        chats too, not only the command chat — the whole point is acting on the
+        alert where it arrived.
+        """
+        from .. import tgbuttons
+        text, show_alert = "", False
+        try:
+            text, show_alert = await tgbuttons.handle_callback(cb)
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"[CMD] button {cb.get('data')!r} failed: {exc}")
+            text = "Could not do that"
+        try:
+            await self._api("answerCallbackQuery", {
+                "callback_query_id": cb.get("id"),
+                "text": text[:200],
+                "show_alert": "true" if show_alert else "false",
+            })
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[CMD] answerCallbackQuery failed: {exc}")
 
     async def _handle(self, update: dict) -> None:
         msg = update.get("message") or {}

@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     # Max tokens watched for swaps at once (each holds a WS subscription).
     max_gas_monitors: int = 150
 
+    # ── Daily digest ────────────────────────────────────────
+    # One summary message a day to ALERT_CHAT_ID: what fired and how it did.
+    digest_enabled: bool = True
+    digest_hour: int = 9          # IST hour
+
     # ── Health watchdog ─────────────────────────────────────
     health_alert_enabled: bool = True
     # Alert if a chain's WebSocket stays down longer than this (seconds).
@@ -114,6 +119,11 @@ class Settings(BaseSettings):
     # Blank = share ETH_RPC_*.
     gas_rpc_http: str = ""
     gas_rpc_wss: str = ""
+    # Second endpoint per chain. One provider having a bad hour stopped
+    # detection outright before, with nothing to fall back to. Blank = no
+    # failover, exactly as before.
+    eth_rpc_wss_fallback: str = ""
+    rbh_rpc_wss_fallback: str = ""
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

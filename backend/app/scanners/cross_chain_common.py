@@ -17,7 +17,7 @@ from app.scanners import storage_repo as storage
 from app.scanners import scfg as config
 from app.scanners.slog import get_logger
 from app.util import esc
-from app import heartbeat
+from app import heartbeat, outcomes
 
 log = get_logger(__name__)
 
@@ -37,6 +37,12 @@ def _token_link(spec: ChainSpec, address: str) -> str:
 def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
                  fee_eth: float | None = None) -> None:
     heartbeat.beat("xchain_match")
+    chain = spec.gmgn_slug or spec.name.lower()
+    storage._schedule(outcomes.track(
+        source=outcomes.SRC_XCHAIN_RBH if chain == "robinhood" else outcomes.SRC_XCHAIN_ETH,
+        chain=chain, address=tok.address, symbol=tok.symbol,
+        sol_symbol=sol_data.get("symbol"), dex=tok.dex,
+    ))
     try:
         storage.save_alert_record({
             "token_symbol":    tok.symbol,
@@ -59,7 +65,8 @@ def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
 
 
 async def send_telegram(
-    session: aiohttp.ClientSession, chat_id, text: str, tag: str = "XCHAIN"
+    session: aiohttp.ClientSession, chat_id, text: str, tag: str = "XCHAIN",
+    buttons: dict | None = None,
 ) -> bool:
     if not config.TELEGRAM_ENABLED:
         log.info(f"[DRY-RUN] {tag} alert (Telegram disabled) → chat {chat_id}")
@@ -71,6 +78,8 @@ async def send_telegram(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if buttons:
+        payload["reply_markup"] = buttons
     try:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:

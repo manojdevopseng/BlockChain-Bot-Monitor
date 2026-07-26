@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LineSeries, Donut } from "@/components/charts/Charts";
+import { OutcomeSummary, GroupLeaderboard } from "@/components/Performance";
 import { fmtNum } from "@/lib/utils";
 
 const CHAIN_COLORS: Record<string, string> = {
@@ -40,6 +41,8 @@ export default function AnalyticsPage() {
         <StatCard label="High-Gas Buys" value={fmtNum(summary?.gas_hits)} icon={Fuel} tone="amber" />
         <StatCard label="Premium Detections" value={fmtNum(summary?.premium_detections)} icon={Crosshair} tone="cyan" />
       </div>
+      <OutcomeSummary />
+      <GroupLeaderboard />
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader><CardTitle>Activity — last 24h (per hour)</CardTitle></CardHeader>

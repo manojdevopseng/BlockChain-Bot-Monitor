@@ -10,6 +10,7 @@ import { DetectionTable } from "@/components/DetectionTable";
 import { CrossChainTable } from "@/components/CrossChainTable";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HistorySelect, SearchBox } from "@/components/SectionFilters";
+import { DownloadCsv } from "@/components/Performance";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtEth, shortAddr, timeAgo } from "@/lib/utils";
@@ -42,6 +43,8 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
           <Layers size={13} /> Multi 2+
         </Button>
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
+        <DownloadCsv path={`/api/forwarder/detections/export.csv?chain=${chain}`}
+          filename={`detections-${chain}.csv`} />
       </>}
     >
       <DetectionTable items={data?.items ?? []} />

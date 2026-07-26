@@ -25,7 +25,8 @@ from app.scanners import scfg as config
 from app.scanners.onchain_detector import DetectedToken
 from app.scanners.slog import get_logger
 from app.util import esc
-from app import heartbeat
+from app import heartbeat, outcomes, tgbuttons
+from app.scanners import storage_repo as storage
 from app.scanners.swap_monitor import SwapMonitor
 from app.scanners.ws_provider import WSProvider
 
@@ -112,6 +113,10 @@ class GasMonitorManager:
             "dt": datetime.fromtimestamp(now, timezone.utc),   # TTL field
         }
         heartbeat.beat("gas_alert")
+        storage._schedule(outcomes.track(
+            source=outcomes.SRC_GAS, chain="eth", address=token.address,
+            symbol=token.symbol, fee_eth=fee_eth,
+        ))
         try:
             await db.get_collection("gas_alerts").insert_one(dict(doc))
             await hub.broadcast("gas_alert", {k: v for k, v in doc.items() if k != "dt"})
@@ -133,7 +138,9 @@ class GasMonitorManager:
             async with self._session.post(
                 f"{TELEGRAM_API}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
                 json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                      "disable_web_page_preview": True},
+                      "disable_web_page_preview": True,
+                      "reply_markup": tgbuttons.keyboard(
+                          chain="eth", address=token.address, symbol=token.symbol)},
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status == 200:

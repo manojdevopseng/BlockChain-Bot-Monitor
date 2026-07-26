@@ -8,6 +8,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { HistorySelect, SearchBox } from "@/components/SectionFilters";
+import { DownloadCsv } from "@/components/Performance";
 import { DataTable, type Column } from "@/components/DataTable";
 import { fmtClock } from "@/lib/utils";
 
@@ -58,6 +59,7 @@ export default function AlertsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <SearchBox value={q} onChange={setQ} placeholder="token / address / message" />
             <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
+            <DownloadCsv path="/api/alerts/export.csv?days=15" filename="alerts.csv" />
             <Badge variant="purple">{data?.total ?? 0}</Badge>
           </div>
         </CardHeader>

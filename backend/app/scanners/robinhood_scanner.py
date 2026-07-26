@@ -20,6 +20,7 @@ from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
 from app.util import IST, ist_day
+from app import tgbuttons
 
 log = get_logger(__name__)
 
@@ -38,6 +39,7 @@ class RobinhoodScanner:
             name               = "ROBINHOOD",
             gmgn_slug          = "robinhood",
             wss_url            = config.RBH_RPC_WSS,
+            wss_endpoints      = tuple(config.RBH_WSS_ENDPOINTS),
             http_rpc           = config.RBH_RPC_HTTP,
             base_addrs         = frozenset({config.RBH_WETH.lower(), NATIVE_ZERO}),
             v2_factory         = ((config.RBH_V2_FACTORY or "").lower() or None)     if config.RBH_V2_ENABLED else None,
@@ -106,6 +108,14 @@ class RobinhoodScanner:
             f"SOL {sol_data['address'][:8]}… RBH {addr[:8]}… ({tok.dex}) | immediate alert"
         )
 
+        if await tgbuttons.is_muted("token", addr):
+            log.info(f"[CROSS-CHAIN] {symbol} muted — alert suppressed")
+            return
+
         text = format_immediate_lean_alert(sol_data, tok, self._spec)
-        await send_telegram(self._session, config.ROBINHOOD_CHAT_ID, text, tag="RBH-XCHAIN")
+        await send_telegram(
+            self._session, config.ROBINHOOD_CHAT_ID, text, tag="RBH-XCHAIN",
+            buttons=tgbuttons.keyboard(chain=self._spec.gmgn_slug, address=tok.address,
+                                       symbol=tok.symbol),
+        )
         record_alert(sol_data, tok, self._spec)

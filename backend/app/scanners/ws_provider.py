@@ -29,8 +29,14 @@ class SubscriptionSpec:
 
 
 class WSProvider:
-    def __init__(self, wss_url: str, name: str = "") -> None:
-        self.wss_url = wss_url
+    def __init__(self, wss_url: str | list[str], name: str = "") -> None:
+        # One endpoint or several. With more than one, a run of failed connects
+        # rotates to the next — a single provider having a bad hour used to stop
+        # detection outright, with nothing to fall back to.
+        urls = [wss_url] if isinstance(wss_url, str) else list(wss_url)
+        self._urls: list[str] = [u for u in urls if u]
+        self._url_idx = 0
+        self.wss_url = self._urls[0] if self._urls else ""
         self.name = name or "ws"
         self._ws: Optional[Any] = None
         self._running = False
@@ -73,15 +79,27 @@ class WSProvider:
     async def rpc(self, method: str, params: list, timeout: float = 6.0):
         return await self._rpc(method, params, timeout=timeout)
 
+    def _rotate(self) -> bool:
+        """Move to the next endpoint. Returns True if there was one to move to."""
+        if len(self._urls) < 2:
+            return False
+        self._url_idx = (self._url_idx + 1) % len(self._urls)
+        self.wss_url = self._urls[self._url_idx]
+        log.warning(f"[{self.name}] switching to RPC endpoint "
+                    f"#{self._url_idx + 1}/{len(self._urls)}")
+        return True
+
     async def run(self) -> None:
         self._running = True
         backoff = 1.0
         attempt = 0
+        fails = 0                # consecutive failures on the current endpoint
 
         while self._running:
             attempt += 1
             try:
-                log.info(f"[{self.name}] WebSocket connecting (attempt {attempt})…")
+                log.info(f"[{self.name}] WebSocket connecting (attempt {attempt}, "
+                         f"endpoint {self._url_idx + 1}/{max(1, len(self._urls))})…")
                 async with websockets.connect(
                     self.wss_url,
                     ping_interval=30,
@@ -91,6 +109,7 @@ class WSProvider:
                 ) as ws:
                     self._ws = ws
                     backoff = 1.0
+                    fails = 0
                     self.connected = True
                     self._down_since = None
                     log.info(f"[{self.name}] WebSocket connected ✓")
@@ -132,6 +151,14 @@ class WSProvider:
 
             if not self._running:
                 break
+
+            # Two failures in a row on one endpoint is enough to suspect the
+            # endpoint rather than the network, so try the next one and start
+            # its backoff fresh.
+            fails += 1
+            if fails >= 2 and self._rotate():
+                fails = 0
+                backoff = 1.0
 
             log.info(f"[{self.name}] Reconnecting in {backoff:.1f}s…")
             await asyncio.sleep(backoff)

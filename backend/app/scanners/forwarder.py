@@ -32,7 +32,7 @@ from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
 from app import heartbeat
 from app.keywords import match_any
-from app import fwd_counters
+from app import fwd_counters, outcomes
 from app.util import bare_chat_id, ist_day
 
 log = get_logger(__name__)
@@ -478,6 +478,14 @@ class TelegramForwarder:
                     "ts": time.time(),
                 }
                 await _col("premium_detections").insert_one(record)
+                # Follow it forward, tagged with the calling group, so the
+                # Forwarder page can rank groups by how their calls did.
+                await outcomes.track(
+                    source=outcomes.SRC_PREMIUM,
+                    chain={"ETH": "eth", "RBH": "robinhood", "SOL": "sol"}.get(label, "eth"),
+                    address=token_addr, symbol=record.get("symbol") or "",
+                    groups=[group], keyword=keyword,
+                )
                 from ..ws_hub import hub
                 await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
                 log.info(f"[PREMIUM-{label}] Captured {record['symbol'] or token_addr[:10]} from {group} | "
