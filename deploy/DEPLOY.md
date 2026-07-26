@@ -145,11 +145,71 @@ the app does no cleanup work:
 | Collection | Kept | Env var |
 |---|---|---|
 | `logs` | 15 days | `LOG_RETENTION_DAYS` |
-| `alerts`, `gas_alerts` | 30 days | `ALERT_RETENTION_DAYS` |
+| `alerts`, `gas_alerts` | 15 days | `ALERT_RETENTION_DAYS` |
 | `tokens` | 30 days | `TOKEN_RETENTION_DAYS` |
-| `premium_archive` | 90 days | `ARCHIVE_RETENTION_DAYS` |
+| `premium_archive` | 15 days | `ARCHIVE_RETENTION_DAYS` |
+| `forwarder_counters` | 15 days | `LOG_RETENTION_DAYS` |
 
 Change a value, restart the API, and the TTL index is updated in place.
+
+## Backups
+
+Retention deletes old rows on purpose; a backup is for the things that cannot
+be rebuilt from the repo:
+
+| | Why it matters |
+|---|---|
+| MongoDB | premium groups, keywords, otto rules, service toggles, command counters |
+| `backend/.env` | bot token, GMGN keys, RPC URLs, every chat id |
+| `backend/*.session` | the Telethon authorization — the only file here with no other way back than logging the userbot in again |
+
+`deploy/backup.sh` packs all three into one timestamped `.tar.gz`, verifies the
+archive is readable, and keeps the last 14.
+
+```bash
+sudo cp deploy/backup.sh /usr/local/bin/bcbot-backup
+sudo chmod +x /usr/local/bin/bcbot-backup
+( crontab -l 2>/dev/null; echo "17 3 * * * /usr/local/bin/bcbot-backup >/dev/null 2>&1" ) | crontab -
+```
+
+Runs nightly at 03:17 UTC. Output goes to `/home/ubuntu/backups/backup.log`.
+
+The archive contains live credentials and a Telegram authorization, so the
+directory is `0700` and every file `0600`. Keep it that way — a readable copy of
+the session file is as good as handing over the account.
+
+### These live on the instance
+
+If the instance is lost, so are they. Copy them off periodically:
+
+```bash
+scp -i your-key.pem ubuntu@YOUR_IP:/home/ubuntu/backups/bcbot-*.tar.gz ./
+```
+
+### Restoring
+
+```bash
+tar -xzf bcbot-YYYYMMDD-HHMMSS.tar.gz -C /tmp/restore
+```
+
+Then, with the API stopped (`sudo systemctl stop blockchain-bot-api`):
+
+```bash
+mongorestore --archive=/tmp/restore/mongo.archive --gzip --drop
+```
+
+Put `.env` back at `backend/.env` and each `*.session` next to it, `chmod 600`
+both, and start the API again.
+
+To check an archive without touching the live database, restore it under a
+different name and compare — this is how the script's output was verified:
+
+```bash
+mongorestore --archive=/tmp/restore/mongo.archive --gzip --nsFrom='blockchain_bot.*' --nsTo='bcbot_check.*'
+```
+
+`logs` will differ by a few rows: the app keeps writing between the dump and the
+comparison. Every other collection should match exactly.
 
 ## Troubleshooting
 
@@ -158,6 +218,6 @@ Change a value, restart the API, and the TTL index is updated in place.
 | `mongod` won't start | Kernel ≥ 6.19 → you're on Ubuntu 26.04. Rebuild on 24.04. |
 | Dashboard loads, no data | `journalctl -u blockchain-bot-api -n 50`. Usually a missing RPC URL. |
 | `[SOL] Scanner error: HTTP 403` | gmgn.ai blocked this IP, or the GMGN fingerprint expired. Refresh it in Settings → GMGN Credentials. |
-| Forwarder never starts | No `.session` file — run `scripts/telethon_login.py`. |
+| Forwarder never starts | No `.session` file — run `scripts/telethon_login.py`, or restore one from a backup. |
 | WebSocket keeps reconnecting | nginx `/ws` block missing or timeouts too low — re-copy `deploy/nginx.conf`. |
 | No Telegram messages | `TELEGRAM_BOT_TOKEN` blank, or that route's chat id is blank (both are logged as DRY-RUN). |
