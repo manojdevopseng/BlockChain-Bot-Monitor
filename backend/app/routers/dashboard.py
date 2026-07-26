@@ -41,18 +41,69 @@ async def stats():
     }
 
 
+# Which supervisor worker each service actually depends on. A toggle being on
+# says nothing about whether the thing behind it is alive — the forwarder
+# sub-features, for instance, are all dead if the userbot never logged in.
+_DEPENDS_ON = {
+    "sol_to_eth":             "eth",
+    "sol_to_rbh":             "rbh",
+    "eth_gas_fees":           "eth",   # swap monitors ride the ETH socket
+    "forwarder":              "fwd",
+    "premium_callers_signal": "fwd",
+    "dexsignalcall":          "fwd",
+    "bbcanalyser2":           "fwd",
+    "eth_otto_group":         "fwd",
+    "chain_eth":              "eth",
+    "chain_rbh":              "rbh",
+    "chain_sol":              "sol",
+}
+
+_WHY_DOWN = {
+    "fwd": "Telegram userbot not logged in (no .session)",
+    "eth": "ETH RPC not reachable or not configured",
+    "rbh": "Robinhood RPC not reachable or not configured",
+    "sol": "Solana scanner not running",
+}
+
+
 @router.get("/overview")
 async def overview():
-    """System overview panel — component connection health (from registry)."""
+    """Real component state — the toggle AND whether its worker is alive.
+
+    Reporting a service as connected just because its switch is on hides
+    exactly the failure you need to see (the forwarder toggle stays on while
+    the userbot is logged out, and then no message is ever sent).
+    """
     svcs = await registry.list_services()
-    components = [
-        {"name": s["label"], "status": "connected" if s["enabled"] else "disabled"}
-        for s in svcs if s["category"] in ("bot", "chain")
-    ]
-    connected = sum(1 for c in components if c["status"] == "connected")
-    health = round(connected / len(components) * 100) if components else 0
+    workers = supervisor.diagnostics().get("workers", {})
+
+    components = []
+    for s in svcs:
+        if s["category"] not in ("bot", "chain"):
+            continue
+        dep = _DEPENDS_ON.get(s["id"])
+        if not s["enabled"]:
+            status, reason = "disabled", "turned off in Settings"
+        elif dep is None:
+            status, reason = "running", ""          # nothing to depend on
+        elif workers.get(dep):
+            status, reason = "running", ""
+        else:
+            status, reason = "stopped", _WHY_DOWN.get(dep, "worker not running")
+        components.append({
+            "name": s["label"], "id": s["id"],
+            "status": status, "reason": reason, "depends_on": dep,
+        })
+
+    # Health = of the services you asked for, how many are actually working.
+    wanted = [c for c in components if c["status"] != "disabled"]
+    running = sum(1 for c in wanted if c["status"] == "running")
+    health = round(running / len(wanted) * 100) if wanted else 100
+
     return {
         "overall_health": health,
+        "running": running,
+        "expected": len(wanted),
         "components": components,
         "uptime_seconds": supervisor.uptime_seconds(),
         "db_backend": db.backend_name(),
