@@ -19,6 +19,8 @@ type Source = {
   kind: "channel" | "group";
   name: string;
   subtitle?: string;
+  chat_id?: number | null;
+  named?: boolean;
   enabled: boolean;
   today: number;
 };
@@ -36,7 +38,10 @@ function SourceRow({ s, onToggle }: { s: Source; onToggle: (s: Source, v: boolea
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border-soft px-3 py-2.5">
       <div className="min-w-0">
         <div className="truncate text-sm text-text">{s.name}</div>
-        <div className="truncate text-[11px] text-text-dim">{s.subtitle}</div>
+        <div className="flex items-center gap-1 text-[11px] text-text-dim">
+          <span className="truncate">{s.subtitle}</span>
+          {s.chat_id != null && <CopyButton value={String(s.chat_id)} />}
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <span className="text-xs text-text-muted" title="messages seen today">
@@ -109,8 +114,9 @@ export default function ForwarderPage() {
         controls={<SearchBox value={q} onChange={setQ} placeholder="group name / id" />}
       >
         <p className="mb-3 text-xs text-text-dim">
-          Every group the userbot mirrors. Names fill in the first time a group
-          posts — until then a group shows as its chat id.
+          Every group the userbot mirrors, with its chat id under the name.
+          Names are seeded from the reference bot; a group's live Telegram
+          title replaces it the first time that group posts.
         </p>
         <TableScroll>
           <div className="space-y-1">

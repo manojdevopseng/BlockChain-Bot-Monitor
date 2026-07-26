@@ -48,12 +48,36 @@ async def seed_premium_groups() -> None:
     land in this same collection, so the built-ins are just a starting point."""
     if await _empty("premium_groups"):
         ids = _seed_data().get("premium_groups", [])
+        names = _seed_data().get("premium_group_names", {})
         if ids:
             await db.get_collection("premium_groups").insert_many([
-                {"id": int(g), "name": None, "username": None,
+                {"id": int(g), "name": names.get(str(g)), "username": None,
                  "builtin": True, "enabled": True, "added_at": _NOW()}
                 for g in ids
             ])
+
+
+async def seed_premium_group_names() -> None:
+    """Fill in names for groups seeded before the name map existed.
+
+    Only where the name is still empty — a title the forwarder learned from
+    Telegram is the live one and must not be overwritten by a seed value.
+    """
+    names = _seed_data().get("premium_group_names", {})
+    if not names:
+        return
+    col = db.get_collection("premium_groups")
+    filled = 0
+    for doc in await col.find({}).to_list(5000):
+        gid = doc.get("id")
+        if gid is None or doc.get("name"):
+            continue
+        name = names.get(str(gid))
+        if name:
+            await col.update_one({"id": gid}, {"$set": {"name": name}})
+            filled += 1
+    if filled:
+        print(f"[seed] named {filled} premium group(s) from seed_data.json")
 
 
 async def seed_otto_rules() -> None:
@@ -134,6 +158,7 @@ async def seed_commands() -> None:
 async def seed_all() -> None:
     await seed_keywords()
     await seed_premium_groups()
+    await seed_premium_group_names()
     await seed_otto_rules()
     await seed_filter_keywords()
     await seed_commands()

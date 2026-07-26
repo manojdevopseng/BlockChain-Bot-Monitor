@@ -72,10 +72,17 @@ async def sources():
         gid = g.get("id")
         if gid is None:
             continue
+        # The chat id is always on the row, next to the name — knowing which
+        # group an id belongs to is the whole point of showing the name.
+        subtitle = str(gid)
+        if g.get("username"):
+            subtitle = f"@{g['username']} · {gid}"
         items.append({
             "key": str(gid), "kind": "group",
             "name": g.get("name") or str(gid),
-            "subtitle": f"@{g['username']}" if g.get("username") else str(gid),
+            "chat_id": gid,
+            "subtitle": subtitle,
+            "named": bool(g.get("name")),
             "enabled": g.get("enabled", True) is not False,
             "today": counts.get(fwd_counters.bare_key(gid), 0),
         })
