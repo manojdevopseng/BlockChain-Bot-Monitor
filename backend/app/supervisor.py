@@ -67,6 +67,7 @@ async def start() -> None:
     # Watches for a component that is "running" but has stopped doing anything.
     global _watchdog
     from . import heartbeat
+    await heartbeat.load()      # so a restart does not blank "last activity"
     _watchdog = asyncio.create_task(heartbeat.watch(), name="watchdog")
 
 
@@ -90,8 +91,9 @@ async def stop() -> None:
         _client = None
     try:
         # Counts buffered since the last flush would otherwise be lost on stop.
-        from . import fwd_counters
+        from . import fwd_counters, heartbeat
         await fwd_counters.flush()
+        await heartbeat.save()
     except Exception:
         pass
     try:

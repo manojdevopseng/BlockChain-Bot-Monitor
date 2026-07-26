@@ -52,10 +52,60 @@ _quiet: set[str] = set()          # components currently reported as quiet
 _task: asyncio.Task | None = None
 
 
+_STATE_KEY = "heartbeat"
+
+
 def beat(name: str) -> None:
     """Record that `name` just did something. Sits in hot paths — a dict write
     and nothing else, no awaits and no database."""
     _last[name] = time.time()
+
+
+async def load() -> None:
+    """Restore the EVENT timestamps from the last run.
+
+    Held in memory, so without this every restart blanked the panel: a
+    cross-chain match five minutes ago would read "nothing yet since start"
+    while the record of it sat in Mongo.
+
+    TICK components are deliberately not restored. Their whole meaning is "this
+    is beating right now", so a value from the previous run would claim a
+    scanner was alive when the process had only just come up — and would keep
+    the watchdog quiet about it.
+    """
+    from . import db
+    try:
+        doc = await db.get_collection("scanner_state").find_one({"name": _STATE_KEY})
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[WATCHDOG] could not load last-activity state: {exc}")
+        return
+    saved = (doc or {}).get("data") or {}
+    restored = 0
+    for name, (_label, kind, _quiet) in COMPONENTS.items():
+        if kind != EVENT or name in _last:
+            continue
+        ts = saved.get(name)
+        if ts:
+            _last[name] = float(ts)
+            restored += 1
+    if restored:
+        log.info(f"[WATCHDOG] restored last-activity for {restored} component(s)")
+
+
+async def save() -> None:
+    """Persist what has been seen, so the next start can pick it up."""
+    if not _last:
+        return
+    from . import db
+    try:
+        await db.get_collection("scanner_state").update_one(
+            {"name": _STATE_KEY},
+            {"$set": {"name": _STATE_KEY, "kind": "dict",
+                      "data": dict(_last), "saved_at": time.time()}},
+            upsert=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[WATCHDOG] could not save last-activity state: {exc}")
 
 
 def last_seen(name: str) -> float | None:
@@ -108,7 +158,7 @@ def snapshot() -> list[dict]:
         rows.append({
             "name": name, "label": label, "kind": kind,
             "last_seen": ts, "age_seconds": age, "status": status,
-            "detail": "" if ts else "nothing yet since start",
+            "detail": "" if ts else "no record of this yet",
         })
     return rows
 
@@ -162,7 +212,9 @@ async def watch() -> None:
         try:
             await asyncio.sleep(CHECK_SECONDS)
             await _check()
+            await save()
         except asyncio.CancelledError:
+            await save()      # keep what this run saw
             return
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[WATCHDOG] check failed: {exc}")
