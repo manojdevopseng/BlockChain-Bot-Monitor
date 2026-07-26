@@ -256,8 +256,10 @@ async def add_group(payload: dict = Body(...)):
     if fwd is not None:
         try:
             live = await fwd.reload_premium_ids()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # Not fatal — the 20s reloader picks it up — but worth saying, since
+            # the response would otherwise imply it was live immediately.
+            print(f"[forwarder] group {gid} added but the live reload failed: {exc}")
     return {"added": True, "id": gid, "name": resolved["name"],
             "username": resolved["username"], "live_groups": live}
 
@@ -272,8 +274,8 @@ async def remove_group(gid: int):
     if fwd is not None:
         try:
             await fwd.reload_premium_ids()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            print(f"[forwarder] group {gid} removed but the live reload failed: {exc}")
     return {"removed": True, "id": gid}
 
 

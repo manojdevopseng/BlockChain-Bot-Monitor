@@ -71,6 +71,6 @@ async def toggle_command(command: str, payload: dict = Body(...)):
     if handler is not None:
         try:
             await handler.refresh_menu()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            print(f"[commands] menu not re-published after toggling {cmd}: {exc}")
     return {"command": cmd, "enabled": enabled}

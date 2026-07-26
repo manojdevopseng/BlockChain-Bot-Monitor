@@ -121,8 +121,10 @@ class TelegramCommands:
         # nothing at all, silently.
         try:
             await self._api("deleteWebhook", {"drop_pending_updates": "false"})
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # A webhook left in place swallows every update, so getUpdates would
+            # return nothing at all and the bot would look simply dead.
+            log.warning(f"[CMD] deleteWebhook failed: {exc}")
         await self.refresh_menu()
 
     async def stop(self) -> None:
@@ -253,8 +255,8 @@ class TelegramCommands:
                 status = ((member.get("new_chat_member") or {}).get("status")) or "?"
                 log.info(f"[CMD] chat noted: {chat.get('title') or chat.get('id')} "
                          f"({chat.get('id')}) — bot is now '{status}'")
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[CMD] could not note chat {chat.get('id')}: {exc}")
 
     async def _handle(self, update: dict) -> None:
         msg = update.get("message") or {}
@@ -303,8 +305,8 @@ class TelegramCommands:
                           "last_ms": round(seconds * 1000),
                           "last_user_id": user_id}},
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[CMD] could not record use of /{cmd}: {exc}")
 
     async def _reply_for(self, cmd: str) -> str:
         if cmd in ("start", "help"):

@@ -21,6 +21,9 @@ import re
 from pathlib import Path
 
 from .config import ROOT, settings
+from .scanners.slog import get_logger
+
+log = get_logger(__name__)
 
 ENV_PATH = ROOT / ".env"
 
@@ -193,8 +196,11 @@ def apply_runtime(key: str, value) -> None:
         from .scanners import scfg
         if hasattr(scfg, key):
             setattr(scfg, key, coerced)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # The value is in .env but the running process did not take it. Saying
+        # so matters most for the GMGN fingerprint: the whole point of that
+        # form is that the fix applies without a restart.
+        log.error(f"{key} written to .env but could not be applied live: {exc}")
 
 
 def worker_for(key: str) -> str | None:

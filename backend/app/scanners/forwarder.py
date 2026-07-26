@@ -682,8 +682,12 @@ class TelegramForwarder:
                                 lambda: self._client.send_message(DEST_PREMIUM_ALL, f"📢 {source}\n\n{text}"),
                                 self._limiter, "PREMIUM-ALL",
                             )
-                        except Exception:
-                            pass
+                        except Exception as exc2:  # noqa: BLE001
+                            # Last resort for a no-forwards group failed too, so
+                            # this message is not mirrored anywhere. Identical
+                            # repeats are collapsed by the log dedup filter.
+                            log.warning(f"[PREMIUM-ALL] copy fallback failed for "
+                                        f"chat {event.chat_id}: {exc2}")
                 else:
                     log.error(f"[PREMIUM-ALL] Forward error: {exc}")
 

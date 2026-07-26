@@ -88,8 +88,12 @@ async def _drain_state(name: str) -> None:
                     {"$set": {"name": name, "kind": kind, "data": data, "saved_at": time.time()}},
                     upsert=True,
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                # Not silent: this is what persists the SOL watchlist, the
+                # pending map and the dedup sets. If it stops working the
+                # scanners keep running and quietly lose their state on the
+                # next restart.
+                log.error(f"could not persist scanner state '{name}': {exc}")
     finally:
         _state_writer_active.discard(name)
 
@@ -252,8 +256,8 @@ async def _persist_token(token) -> None:
         await db.get_collection("tokens").update_one(
             {"address": doc.get("address")}, {"$set": doc}, upsert=True
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.error(f"could not save token {getattr(token, 'symbol', '?')}: {exc}")
 
 
 def save_alert(alert) -> None:  # pragma: no cover - parity stub

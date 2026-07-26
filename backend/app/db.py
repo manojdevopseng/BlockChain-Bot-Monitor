@@ -223,7 +223,7 @@ async def _ensure_ttl(name: str, days: int) -> None:
         try:
             await col.drop_index(index_name)
         except Exception:
-            pass
+            pass    # nothing to drop — retention was already off
         return
 
     try:

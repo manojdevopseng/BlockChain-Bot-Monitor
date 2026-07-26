@@ -23,6 +23,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from . import db
+from .scanners.slog import get_logger
+
+log = get_logger(__name__)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 FLUSH_SECONDS = 10
@@ -118,8 +121,10 @@ async def today(scope: str) -> dict[str, int]:
         ).to_list(2000)
         for d in docs:
             out[str(d.get("key"))] = int(d.get("count") or 0)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # Reading nothing would report every count as 0, which reads exactly
+        # like a forwarder that has stopped seeing messages.
+        log.error(f"could not read {scope} counters: {exc}")
     for (s, key), n in _pending.items():
         if s == scope:
             out[key] = out.get(key, 0) + n
