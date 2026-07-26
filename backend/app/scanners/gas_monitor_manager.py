@@ -16,7 +16,6 @@ When a monitor fires, this module:
 
 from __future__ import annotations
 
-import html
 import time
 from typing import Dict
 
@@ -25,6 +24,7 @@ import aiohttp
 from app.scanners import scfg as config
 from app.scanners.onchain_detector import DetectedToken
 from app.scanners.slog import get_logger
+from app.util import esc
 from app import heartbeat
 from app.scanners.swap_monitor import SwapMonitor
 from app.scanners.ws_provider import WSProvider
@@ -145,10 +145,6 @@ class GasMonitorManager:
             log.error(f"[GasAlert] send failed: {exc}")
 
 
-def _esc(text) -> str:
-    return html.escape(str(text or ""), quote=False)
-
-
 def _format_alert(token: DetectedToken, fee_eth: float, age_seconds: int) -> str:
     """The reference's alert body, unchanged."""
     addr = token.address
@@ -158,8 +154,8 @@ def _format_alert(token: DetectedToken, fee_eth: float, age_seconds: int) -> str
 
     return (
         "🚨 <b>High Gas Early Activity</b>\n\n"
-        f"Token Name:\n<b>{_esc(token.name)}</b>\n\n"
-        f"Symbol:\n<b>{_esc(token.symbol)}</b>\n\n"
+        f"Token Name:\n<b>{esc(token.name)}</b>\n\n"
+        f"Symbol:\n<b>{esc(token.symbol)}</b>\n\n"
         f"CA:\n<code>{addr}</code>\n\n"
         f"DEX: <b>{token.dex.upper()}</b>{pool_info}\n\n"
         f"Age:\n<b>{age_seconds}s</b>\n\n"

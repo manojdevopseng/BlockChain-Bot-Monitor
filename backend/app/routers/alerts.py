@@ -3,24 +3,18 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Query
 
 from .. import db
-from ..util import clean_list
+from ..util import clean_list, ist_date_str
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
-
-IST = timezone(timedelta(hours=5, minutes=30))
 
 # flow id -> the `chain` value the scanners write on a cross-chain alert
 _FLOW_CHAIN = {"eth": "eth", "rbh": "robinhood"}
 _FLOW_SLUG = {"eth": "eth", "rbh": "robinhood"}
-
-
-def _day_str(ts: float) -> str:
-    return datetime.fromtimestamp(ts, IST).strftime("%d-%m-%Y")
 
 
 # Fields a search looks in — same set the reference dashboard searched
@@ -117,7 +111,7 @@ async def list_alerts(
 
     merged = clean_list(docs) + gas
     if date:
-        merged = [d for d in merged if _day_str(d.get("created_at") or 0) == date]
+        merged = [d for d in merged if ist_date_str(d.get("created_at") or 0) == date]
         total = len(merged)
     else:
         total = await col.count_documents(flt) + len(gas)
@@ -136,7 +130,7 @@ async def alert_dates():
         for d in await db.get_collection(name).find({}).to_list(_DAY_SCAN_CAP):
             ts = d.get("created_at")
             if ts:
-                days.add(_day_str(ts))
+                days.add(ist_date_str(ts))
     return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}
 
 
@@ -180,7 +174,7 @@ async def crosschain(
     ).to_list(1000)
     docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
     if date:
-        docs = [d for d in docs if _day_str(d.get("created_at", 0)) == date]
+        docs = [d for d in docs if ist_date_str(d.get("created_at", 0)) == date]
     if q:
         docs = [d for d in docs if _match_cc(d, q)]
     docs = docs[:limit]
@@ -197,5 +191,5 @@ async def crosschain_dates(flow: str = Query("eth", pattern="^(eth|rbh)$")):
     docs = await db.get_collection("alerts").find(
         {"type": "Cross-Chain Match", "chain": _FLOW_CHAIN[flow]}
     ).to_list(2000)
-    days = {_day_str(d.get("created_at", 0)) for d in docs if d.get("created_at")}
+    days = {ist_date_str(d.get("created_at", 0)) for d in docs if d.get("created_at")}
     return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}

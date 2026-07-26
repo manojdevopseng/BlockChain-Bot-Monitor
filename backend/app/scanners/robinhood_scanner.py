@@ -8,7 +8,7 @@ calendar day per symbol (cycle resets 12:00 AM IST).
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 import aiohttp
@@ -19,14 +19,10 @@ from app.scanners import storage_repo as storage
 from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
+from app.util import IST, ist_day
 
 log = get_logger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
-
-
-def _ist_day(ts: float):
-    return datetime.fromtimestamp(ts, IST).date()
 
 
 class RobinhoodScanner:
@@ -87,9 +83,9 @@ class RobinhoodScanner:
         storage.save_set("robinhood_alerted", self._alerted)
 
         now   = time.time()
-        today = _ist_day(now)
+        today = ist_day(now)
         last  = float(self._symbol_alerted.get(symbol, 0))
-        if last and _ist_day(last) == today:
+        if last and ist_day(last) == today:
             midnight = (datetime.fromtimestamp(now, IST) + timedelta(days=1)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
@@ -100,7 +96,7 @@ class RobinhoodScanner:
             )
             return
         self._symbol_alerted = {
-            s: t for s, t in self._symbol_alerted.items() if _ist_day(float(t)) == today
+            s: t for s, t in self._symbol_alerted.items() if ist_day(float(t)) == today
         }
         self._symbol_alerted[symbol] = now
         storage.save_dict("rbh_symbol_alerted", self._symbol_alerted)

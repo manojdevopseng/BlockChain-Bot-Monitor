@@ -8,7 +8,6 @@ formatter are unchanged.
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 import aiohttp
 
@@ -17,6 +16,7 @@ from app.scanners.sol_scanner import _launchpad_display
 from app.scanners import storage_repo as storage
 from app.scanners import scfg as config
 from app.scanners.slog import get_logger
+from app.util import esc
 from app import heartbeat
 
 log = get_logger(__name__)
@@ -24,10 +24,6 @@ log = get_logger(__name__)
 TELEGRAM_API = "https://api.telegram.org"
 
 _DEX_LABEL = {"v2": "Uniswap V2", "v3": "Uniswap V3", "v4": "Uniswap V4", "noxa": "Noxa"}
-
-
-def _esc(text) -> str:
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _token_link(spec: ChainSpec, address: str) -> str:
@@ -91,8 +87,8 @@ async def send_telegram(
 def format_immediate_lean_alert(
     sol_data: dict, tok: DetectedToken, spec: ChainSpec
 ) -> str:
-    symbol     = _esc(sol_data["symbol"])
-    lp_display = _esc(_launchpad_display(sol_data.get("launchpad") or ""))
+    symbol     = esc(sol_data["symbol"])
+    lp_display = esc(_launchpad_display(sol_data.get("launchpad") or ""))
     sol_addr   = sol_data["address"]
     dst_addr   = tok.address
     dex_label  = _DEX_LABEL.get(tok.dex, tok.dex.upper())
@@ -119,8 +115,8 @@ def format_immediate_lean_alert(
         f"<b>Watch left:</b> {remaining}m\n"
         f'🔗 <a href="https://gmgn.ai/sol/token/{sol_addr}">View SOL on GMGN</a>\n\n'
 
-        f"🔵 <b>{spec.name} — {_esc(tok.symbol)}</b>  <i>(new pair · {dex_label})</i>\n"
-        f"<b>Name:</b> {_esc(tok.name)}\n"
+        f"🔵 <b>{spec.name} — {esc(tok.symbol)}</b>  <i>(new pair · {dex_label})</i>\n"
+        f"<b>Name:</b> {esc(tok.name)}\n"
         f"<b>Address:</b> <code>{dst_addr}</code>\n"
         f"{dst_link}"
     )

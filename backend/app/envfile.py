@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
 
 from .config import ROOT, settings
 from .scanners.slog import get_logger

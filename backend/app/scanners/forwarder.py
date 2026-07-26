@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -33,6 +33,7 @@ from app.scanners.slog import get_logger
 from app import heartbeat
 from app.keywords import match_any
 from app import fwd_counters
+from app.util import bare_chat_id, ist_day
 
 log = get_logger(__name__)
 
@@ -78,7 +79,6 @@ _ETH_RE  = re.compile(r"0x[a-fA-F0-9]{40}", re.IGNORECASE)
 # Word-bounded so it doesn't slice a substring out of a longer token.
 _SOL_RE  = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
-IST = timezone(timedelta(hours=5, minutes=30))
 _DETECTED_MAX = 300
 
 
@@ -123,7 +123,7 @@ async def _safe_send(chat_id, coro_factory, limiter: "_ChatRateLimiter", tag: st
     """
     if chat_id is None:
         return None   # destination not configured in .env — skip silently
-    key = _bare_id(chat_id)
+    key = bare_chat_id(chat_id)
     for attempt in (1, 2):
         await limiter.acquire(key)
         try:
@@ -142,17 +142,6 @@ async def _safe_send(chat_id, coro_factory, limiter: "_ChatRateLimiter", tag: st
     return None
 
 
-def _bare_id(cid) -> int:
-    s = str(cid).strip()
-    if s.startswith("-100"):
-        return int(s[4:])
-    return abs(int(s))
-
-
-def _ist_day(ts: float):
-    return datetime.fromtimestamp(ts, IST).date()
-
-
 # ── Mongo helpers (replace the reference's JSON files) ──────────────────────────
 
 def _col(name: str):
@@ -164,7 +153,7 @@ async def _load_premium_ids() -> set:
     """Live premium group filter — built-in (seeded) + user-added, all in the
     `premium_groups` collection. Nothing hardcoded."""
     docs = await _col("premium_groups").find({"enabled": {"$ne": False}}).to_list(5000)
-    return {_bare_id(d["id"]) for d in docs if d.get("id") is not None}
+    return {bare_chat_id(d["id"]) for d in docs if d.get("id") is not None}
 
 
 async def _load_otto_rules() -> tuple[set, set, set]:
@@ -213,7 +202,7 @@ class TelegramForwarder:
 
         self._watcher_task: Optional[asyncio.Task] = None
         self._rollover_task: Optional[asyncio.Task] = None
-        self._last_rollover_day = _ist_day(time.time())
+        self._last_rollover_day = ist_day(time.time())
 
         self._capture_seen: BoundedSet = BoundedSet(20000)
 
@@ -346,7 +335,7 @@ class TelegramForwarder:
         while True:
             try:
                 await asyncio.sleep(60)
-                today = _ist_day(time.time())
+                today = ist_day(time.time())
                 if today == self._last_rollover_day:
                     continue
                 for chain in ("eth", "rbh"):
@@ -655,7 +644,7 @@ class TelegramForwarder:
     async def _premium_handler(self, event) -> None:
         if not self._on(GATE_PREMIUM):
             return
-        bare = _bare_id(event.chat_id)
+        bare = bare_chat_id(event.chat_id)
         if bare not in self._premium_ids:
             return
         fwd_counters.bump(fwd_counters.SOURCE, bare)
@@ -700,7 +689,7 @@ class TelegramForwarder:
         chat = await event.get_chat()
         source_name = getattr(chat, "title", "Unknown")
         source_uname = getattr(chat, "username", None)
-        bare = _bare_id(event.chat_id)
+        bare = bare_chat_id(event.chat_id)
 
         # ── SOL address capture (dashboard-only panel; independent of ETH) ──
         for sol_addr in set(_SOL_RE.findall(raw)):

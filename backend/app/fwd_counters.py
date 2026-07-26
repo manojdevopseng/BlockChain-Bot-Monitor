@@ -20,14 +20,14 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from . import db
 from .scanners.slog import get_logger
+from .util import IST, bare_key  # noqa: F401  (re-exported)
 
 log = get_logger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
 FLUSH_SECONDS = 10
 
 SOURCE = "source"
@@ -39,22 +39,6 @@ _flusher: asyncio.Task | None = None
 
 def today_key() -> str:
     return datetime.now(IST).strftime("%d-%m-%Y")
-
-
-def bare_key(chat_id) -> str:
-    """Normalise a chat id to the form counts are keyed by.
-
-    Telegram hands the same chat around as -1003952803806, 3952803806 or
-    -5015581029 depending on where it came from, so the rule lives here and
-    both the counting side and the dashboard call it. A channel name is left
-    alone — the four signal sources are keyed by name.
-    """
-    s = str(chat_id).strip()
-    if not s.lstrip("-").isdigit():
-        return s
-    if s.startswith("-100"):
-        return s[4:]
-    return s.lstrip("-")
 
 
 def bump(scope: str, key, n: int = 1) -> None:

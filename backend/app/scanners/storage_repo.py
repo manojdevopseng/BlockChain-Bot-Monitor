@@ -17,7 +17,6 @@ import asyncio
 import time
 from typing import Any
 
-from .bounded_set import BoundedSet
 from .slog import get_logger
 
 log = get_logger(__name__)

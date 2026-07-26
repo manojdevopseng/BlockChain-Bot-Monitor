@@ -19,7 +19,6 @@ safe to expose in a group.
 from __future__ import annotations
 
 import asyncio
-import html
 import json
 import time
 from typing import Optional
@@ -28,6 +27,7 @@ import aiohttp
 
 from app.scanners import scfg as config
 from app.scanners.slog import get_logger
+from app.util import esc
 from app import heartbeat
 
 log = get_logger(__name__)
@@ -49,10 +49,6 @@ COMMAND_SPEC = [
     ("gas",      "Recent high-gas early buys",         "Alerts"),
     ("ping",     "Quick alive check",                  "General"),
 ]
-
-
-def _esc(text) -> str:
-    return html.escape(str(text if text is not None else ""), quote=False)
 
 
 def _fmt_dur(seconds: int) -> str:
@@ -367,7 +363,7 @@ class TelegramCommands:
         for s in svcs:
             st = states.get(s["id"], {}).get("status", "unknown")
             out.setdefault(s["category"], []).append(
-                f"{icon.get(st, '❔')} {_esc(s['label'])} — {st}"
+                f"{icon.get(st, '❔')} {esc(s['label'])} — {st}"
             )
         parts = ["🔀 <b>Services</b>"]
         for cat, title in (("bot", "Bots"), ("chain", "Chains"), ("rpc", "RPCs")):
@@ -407,7 +403,7 @@ class TelegramCommands:
         for d in wl[:25]:
             rem = max(0, int((d.get("expires_at", 0) - now) / 60))
             lines.append(
-                f"• <b>{_esc(d.get('symbol'))}</b>  "
+                f"• <b>{esc(d.get('symbol'))}</b>  "
                 f"${float(d.get('mcap_usd') or 0):,.0f}  ·  {rem}m left"
             )
         if len(wl) > 25:
@@ -422,7 +418,7 @@ class TelegramCommands:
         lines = ["🪙 <b>Recent Tokens</b>\n"]
         for t in docs[:10]:
             lines.append(
-                f"• <b>{_esc(t.get('symbol'))}</b> · {_esc((t.get('chain') or '').upper())}"
+                f"• <b>{esc(t.get('symbol'))}</b> · {esc((t.get('chain') or '').upper())}"
                 f" · {_ago(t.get('created_at'))} ago"
             )
         return "\n".join(lines)
@@ -435,8 +431,8 @@ class TelegramCommands:
         lines = ["🔔 <b>Recent Alerts</b>\n"]
         for a in docs[:8]:
             lines.append(
-                f"• <b>{_esc(a.get('token_symbol') or a.get('type'))}</b> · "
-                f"{_esc((a.get('chain') or '').upper())} · {_ago(a.get('created_at'))} ago"
+                f"• <b>{esc(a.get('token_symbol') or a.get('type'))}</b> · "
+                f"{esc((a.get('chain') or '').upper())} · {_ago(a.get('created_at'))} ago"
             )
         return "\n".join(lines)
 
@@ -451,7 +447,7 @@ class TelegramCommands:
         lines = [f"⛽ <b>High-Gas Early Buys</b>  (threshold {config.MIN_FEE_ETH} ETH)\n"]
         for g in docs[:8]:
             lines.append(
-                f"• <b>{_esc(g.get('symbol'))}</b> · {float(g.get('fee_eth') or 0):.6f} ETH"
+                f"• <b>{esc(g.get('symbol'))}</b> · {float(g.get('fee_eth') or 0):.6f} ETH"
                 f" · age {g.get('age_seconds', '?')}s · {_ago(g.get('created_at'))} ago"
             )
         return "\n".join(lines)

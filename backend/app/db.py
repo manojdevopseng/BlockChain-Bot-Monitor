@@ -11,11 +11,9 @@ Swap is invisible to routers: they always call `get_collection(name)` and use
 
 from __future__ import annotations
 
-import asyncio
-import fnmatch
 import itertools
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from .config import settings
 
