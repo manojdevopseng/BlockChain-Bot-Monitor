@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -16,8 +16,24 @@ const LEVEL: Record<string, string> = {
 
 export default function LogsPage() {
   const [q, setQ] = useState("");
+  const [query, setQuery] = useState("");
+
+  // Debounced: without this every keystroke changed the SWR key, and the list
+  // emptied and refilled once per character.
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const { data: stats } = useApi<any>("/api/logs/stats", { refreshInterval: 3000 });
-  const { data } = useApi<any>(`/api/logs?limit=100${q ? `&q=${q}` : ""}`, { refreshInterval: 3000 });
+  const { data, isLoading } = useApi<any>(
+    `/api/logs?limit=100${query ? `&q=${encodeURIComponent(query)}` : ""}`,
+    // keepPreviousData holds the old lines on screen while the new query
+    // resolves, instead of blanking to "No logs" and back.
+    { refreshInterval: 3000, keepPreviousData: true }
+  );
+
+  const items: any[] = data?.items ?? [];
 
   return (
     <div className="space-y-5">
@@ -35,16 +51,21 @@ export default function LogsPage() {
         </CardHeader>
         <CardContent>
           <div className="max-h-[520px] overflow-y-auto font-mono text-xs">
-            {(data?.items ?? []).map((l: any, i: number) => (
-              <div key={i} className="flex gap-3 border-b border-border-soft py-1.5">
+            {items.map((l: any, i: number) => (
+              // Keyed by the log's own id: a new line at the top then inserts
+              // one row instead of shifting every row's content down by one
+              // index and repainting the whole list every 3 seconds.
+              <div key={l.id ?? `${l.ts}-${i}`} className="flex gap-3 border-b border-border-soft py-1.5">
                 <span className="shrink-0 text-text-dim">{fmtClock(l.ts)}</span>
                 <span className={cn("w-12 shrink-0 font-semibold", LEVEL[l.level] || "text-text")}>{l.level}</span>
                 <span className="w-32 shrink-0 text-brand-soft">{l.service}</span>
                 <span className="text-text-muted">{l.message}</span>
               </div>
             ))}
-            {(!data?.items || data.items.length === 0) && (
-              <div className="py-8 text-center text-text-dim">No logs</div>
+            {items.length === 0 && !isLoading && (
+              <div className="py-8 text-center text-text-dim">
+                {query ? "No logs match this search" : "No logs"}
+              </div>
             )}
           </div>
         </CardContent>

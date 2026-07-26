@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Query
 
 from .. import db
@@ -23,10 +25,17 @@ async def list_logs(
     if service:
         flt["service"] = service
     if q:
-        flt["message"] = {"$regex": q, "$options": "i"}
+        # Escaped: log messages are full of "(", "[" and "…", and typing one
+        # of those used to be handed to Mongo as a regex.
+        flt["message"] = {"$regex": re.escape(q), "$options": "i"}
     col = db.get_collection("logs")
     total = await col.count_documents(flt)
     docs = await col.find(flt).sort("ts", -1).limit(limit).to_list(limit)
+    # A stable id per line, so the live stream can key rows by identity. With
+    # index keys every row's content shifts when one new log arrives and the
+    # whole visible list repaints.
+    for d in docs:
+        d["id"] = str(d.get("_id", ""))
     return {"total": total, "items": clean_list(docs)}
 
 
