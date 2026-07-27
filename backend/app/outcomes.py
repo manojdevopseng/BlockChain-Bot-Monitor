@@ -92,21 +92,33 @@ _DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens/{addr}"
 _DS_CHAIN = {"eth": "ethereum", "ethereum": "ethereum",
              "sol": "solana", "solana": "solana"}
 
-# Chains an outcome can be measured on at all.
-PRICED_CHAINS = frozenset({"eth", "ethereum", "sol", "solana"})
+# Chains an outcome can be measured on at all. Robinhood is not listed on any
+# aggregator, so its price is read straight off the pool — see rbh_price.
+PRICED_CHAINS = frozenset({"eth", "ethereum", "sol", "solana", "robinhood", "rbh"})
+_RBH_CHAINS = frozenset({"robinhood", "rbh"})
 
 
 def is_priceable(chain: str | None) -> bool:
     return (chain or "").lower() in PRICED_CHAINS
 
 
-async def _price(client, chain: str, address: str) -> Optional[float]:
+async def _price(client, chain: str, address: str,
+                 doc: Optional[dict] = None) -> Optional[float]:
     """Current USD price, or None if this chain has no source.
 
-    `client` is the shared GMGNClient, used only for Solana; everything else
-    goes to DexScreener over a short-lived session.
+    `client` is the shared GMGNClient, used only for Solana. Robinhood is read
+    from its own pool over RBH_RPC_HTTP; everything else goes to DexScreener
+    over a short-lived session.
     """
     c = (chain or "").lower()
+    if c in _RBH_CHAINS:
+        from . import rbh_price
+        doc = doc or {}
+        return await rbh_price.price_usd(
+            token=address, dex=doc.get("dex") or "", pair=doc.get("pair"),
+            pool_id=doc.get("pool_id"), weth_is_token0=doc.get("weth_is_token0"),
+        )
+
     want = _DS_CHAIN.get(c)
     if not want:
         return None
@@ -173,7 +185,7 @@ async def _run_once(client) -> int:
         # The entry price is taken on the first pass, not at alert time: the
         # alert path must not wait on a network call.
         if doc.get("entry_price") is None:
-            price = await _price(client, doc.get("chain"), doc["address"])
+            price = await _price(client, doc.get("chain"), doc["address"], doc)
             calls += 1
             if price is None:
                 continue
@@ -186,7 +198,7 @@ async def _run_once(client) -> int:
         if not due:
             continue
         label, _secs = due
-        price = await _price(client, doc.get("chain"), doc["address"])
+        price = await _price(client, doc.get("chain"), doc["address"], doc)
         calls += 1
         if price is None:
             continue

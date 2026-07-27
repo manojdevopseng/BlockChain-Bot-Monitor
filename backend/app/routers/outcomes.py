@@ -55,8 +55,14 @@ async def recent(limit: int = Query(50, le=500), source: str | None = None):
 
 @router.get("/groups")
 async def groups(days: int = Query(30, ge=1, le=90),
-                 min_calls: int = Query(1, ge=1)):
-    """Premium groups ranked by the outcome of their calls."""
+                 min_calls: int = Query(5, ge=1)):
+    """Premium groups ranked by the outcome of their calls.
+
+    `min_calls` defaults to 5 because one lucky call reads as a 100% hit rate
+    and sorts straight to the top, which is exactly the wrong group to trust.
+    Five is still thin — twenty or more is where the ranking starts meaning
+    something — but it keeps single-call noise out of the table.
+    """
     return {"days": days, "items": await outcomes.by_group(days=days, min_calls=min_calls)}
 
 

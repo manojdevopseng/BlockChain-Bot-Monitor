@@ -42,6 +42,11 @@ def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
         source=outcomes.SRC_XCHAIN_RBH if chain == "robinhood" else outcomes.SRC_XCHAIN_ETH,
         chain=chain, address=tok.address, symbol=tok.symbol,
         sol_symbol=sol_data.get("symbol"), dex=tok.dex,
+        # Robinhood has no price aggregator, so its outcome is read off the
+        # pool. That needs the pool's own identity, which is only known here at
+        # detection — looking it up later costs extra calls and fails for v4,
+        # whose pools have no address of their own.
+        pair=tok.pair, pool_id=tok.pool_id, weth_is_token0=tok.weth_is_token0,
     ))
     try:
         storage.save_alert_record({
