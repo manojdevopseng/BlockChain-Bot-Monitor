@@ -110,9 +110,16 @@ class SolDiscovery:
     async def _watch(self, label: str, program_id: str) -> None:
         import websockets
         backoff = 1.0
+        # Endpoints are rotated per reconnect rather than per failure count: if
+        # the current one is refusing or dropping us, the next attempt should
+        # not go back to it first.
+        endpoints = config.SOL_WSS_ENDPOINTS or [config.SOL_RPC_WSS]
+        attempt = 0
         while self._running:
+            url = endpoints[attempt % len(endpoints)]
+            attempt += 1
             try:
-                async with websockets.connect(config.SOL_RPC_WSS, max_size=2 ** 23,
+                async with websockets.connect(url, max_size=2 ** 23,
                                               ping_interval=30, ping_timeout=60) as ws:
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
@@ -123,14 +130,17 @@ class SolDiscovery:
                     if "result" not in ack:
                         log.warning(f"[SOL-RPC] {label} subscription refused: {ack}")
                     else:
-                        log.info(f"[SOL-RPC] subscribed to {label} ({program_id[:8]}…)")
+                        host = url.split("//")[-1].split("/")[0].split("?")[0]
+                        log.info(f"[SOL-RPC] subscribed to {label} "
+                                 f"({program_id[:8]}…) via {host}")
                     backoff = 1.0
                     async for raw in ws:
                         await self._handle(label, raw)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                log.warning(f"[SOL-RPC] {label} socket error: {exc}")
+                nxt = " — trying the next endpoint" if len(endpoints) > 1 else ""
+                log.warning(f"[SOL-RPC] {label} socket error: {exc}{nxt}")
             if not self._running:
                 return
             await asyncio.sleep(backoff)

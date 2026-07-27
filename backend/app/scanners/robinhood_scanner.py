@@ -113,9 +113,10 @@ class RobinhoodScanner:
             return
 
         text = format_immediate_lean_alert(sol_data, tok, self._spec)
-        await send_telegram(
+        msg_id = await send_telegram(
             self._session, config.ROBINHOOD_CHAT_ID, text, tag="RBH-XCHAIN",
             buttons=tgbuttons.keyboard(chain=self._spec.gmgn_slug, address=tok.address,
                                        symbol=tok.symbol),
         )
-        record_alert(sol_data, tok, self._spec)
+        record_alert(sol_data, tok, self._spec,
+                     tg_chat_id=config.ROBINHOOD_CHAT_ID, tg_message_id=msg_id)

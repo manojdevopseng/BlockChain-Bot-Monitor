@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     # failover, exactly as before.
     eth_rpc_wss_fallback: str = ""
     rbh_rpc_wss_fallback: str = ""
+    # Second endpoint for SOL mint discovery. Note it must support
+    # `logsSubscribe` — Alchemy's Solana endpoint does not ("Method not found",
+    # tested), so a second Helius key is the usual choice.
+    sol_rpc_wss_fallback: str = ""
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

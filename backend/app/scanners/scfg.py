@@ -49,6 +49,11 @@ CHAIN = "eth"
 # ── Solana (from .env) ──────────────────────────────────────────
 SOL_RPC_HTTP      = settings.sol_rpc_http
 SOL_RPC_WSS       = settings.sol_rpc_wss
+# Ordered endpoints discovery rotates through when one keeps failing. A single
+# provider having a bad hour left mint discovery blind with nothing to fall
+# back on — the same reason ETH and RBH carry a second endpoint.
+SOL_WSS_ENDPOINTS = [u for u in (settings.sol_rpc_wss,
+                                 settings.sol_rpc_wss_fallback) if u]
 SOL_SCAN_INTERVAL = settings.sol_scan_interval
 SOL_MIN_FEES      = settings.sol_min_fees
 SOL_MIN_MCAP      = settings.sol_min_mcap

@@ -35,7 +35,9 @@ def _token_link(spec: ChainSpec, address: str) -> str:
 
 
 def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
-                 fee_eth: float | None = None) -> None:
+                 fee_eth: float | None = None,
+                 tg_chat_id: str | int | None = None,
+                 tg_message_id: int | None = None) -> None:
     heartbeat.beat("xchain_match")
     chain = spec.gmgn_slug or spec.name.lower()
     storage._schedule(outcomes.track(
@@ -47,6 +49,10 @@ def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
         # detection — looking it up later costs extra calls and fails for v4,
         # whose pools have no address of their own.
         pair=tok.pair, pool_id=tok.pool_id, weth_is_token0=tok.weth_is_token0,
+        # Where this alert landed in Telegram, so the result can be posted as a
+        # reply to it rather than as a message with no context.
+        tg_chat_id=str(tg_chat_id) if tg_chat_id else None,
+        tg_message_id=tg_message_id,
     ))
     try:
         storage.save_alert_record({
@@ -72,10 +78,16 @@ def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
 async def send_telegram(
     session: aiohttp.ClientSession, chat_id, text: str, tag: str = "XCHAIN",
     buttons: dict | None = None,
-) -> bool:
+) -> int | None:
+    """Send an alert. Returns Telegram's message id, or None if it did not send.
+
+    The id is what lets the outcome tracker reply to this very message later
+    with how the call actually did, instead of the result only existing on a
+    dashboard nobody has open. Callers that just check truthiness still work.
+    """
     if not config.TELEGRAM_ENABLED:
         log.info(f"[DRY-RUN] {tag} alert (Telegram disabled) → chat {chat_id}")
-        return False
+        return None
     url = f"{TELEGRAM_API}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -89,13 +101,14 @@ async def send_telegram(
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 log.info(f"[{tag}] ✅ Alert sent → {chat_id}")
-                return True
+                body = await resp.json(content_type=None)
+                return ((body or {}).get("result") or {}).get("message_id")
             body = await resp.text()
             log.error(f"[{tag}] Telegram error {resp.status}: {body[:200]}")
-            return False
+            return None
     except Exception as exc:
         log.error(f"[{tag}] Send error: {exc}")
-        return False
+        return None
 
 
 def format_immediate_lean_alert(

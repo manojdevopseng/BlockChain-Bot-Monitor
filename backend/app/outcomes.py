@@ -24,6 +24,7 @@ import time
 from typing import Any, Optional
 
 from . import db
+from .util import esc
 from .scanners.slog import get_logger
 
 log = get_logger(__name__)
@@ -41,6 +42,12 @@ SRC_XCHAIN_ETH = "xchain_eth"
 SRC_XCHAIN_RBH = "xchain_rbh"
 SRC_GAS = "gas"
 SRC_PREMIUM = "premium"
+
+# Which checkpoints get posted back to Telegram as a reply to the original
+# alert. Not all four: at 63 alerts a day that would be 250 messages against a
+# group limit of ~18 a minute. The first real read and the final one are what
+# actually tell you whether the call was any good.
+REPLY_CHECKPOINTS = ("1h", "24h")
 
 CYCLE_SECONDS = 60          # how often to look for due checks
 MAX_PER_CYCLE = 8           # hard cap on GMGN calls per cycle
@@ -215,7 +222,52 @@ async def _run_once(client) -> int:
         )
         log.info(f"[OUTCOME] {doc.get('symbol')} {label}: {change:+.1f}% "
                  f"({doc.get('source')})")
+        if label in REPLY_CHECKPOINTS:
+            await _reply_with_result(doc, label, change, price)
     return calls
+
+
+async def _reply_with_result(doc: dict, label: str, change: float,
+                             price: float) -> None:
+    """Post the result as a reply to the alert that started it.
+
+    The point is that the answer arrives where the question was asked. A result
+    on the dashboard is only seen by someone who goes looking; a reply under the
+    original alert is seen by everyone who read it.
+    """
+    chat_id = doc.get("tg_chat_id")
+    message_id = doc.get("tg_message_id")
+    if not chat_id or not message_id:
+        return                      # alert predates this, or never reached Telegram
+
+    from .scanners import scfg
+    if not scfg.TELEGRAM_BOT_TOKEN_SET:
+        return
+    mark = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+    text = (f"{mark} <b>{esc(doc.get('symbol') or '?')}</b> — {label}: "
+            f"<b>{change:+.1f}%</b>\n"
+            f"<i>entry ${float(doc.get('entry_price') or 0):.10f} "
+            f"→ now ${price:.10f}</i>")
+
+    import aiohttp
+    url = f"https://api.telegram.org/bot{scfg.TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+        "reply_to_message_id": int(message_id),
+        # The alert may have been deleted, or be too old to reply to. Sending it
+        # unattached beats not sending it at all.
+        "allow_sending_without_reply": True,
+    }
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(url, json=payload,
+                              timeout=aiohttp.ClientTimeout(total=12)) as r:
+                if r.status != 200:
+                    log.debug(f"[OUTCOME] reply failed {r.status}: "
+                              f"{(await r.text())[:120]}")
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[OUTCOME] reply send failed: {exc}")
 
 
 async def watch() -> None:
