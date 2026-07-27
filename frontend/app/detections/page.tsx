@@ -13,7 +13,7 @@ import { HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { DownloadCsv } from "@/components/Performance";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
-import { fmtEth, shortAddr, timeAgo } from "@/lib/utils";
+import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
 
@@ -101,7 +101,7 @@ function GasSection() {
                   No high-gas buys caught yet
                 </td></tr>
               ) : items.map((r: any, i: number) => (
-                <tr key={i} className="border-b border-border-soft hover:bg-bg-hover/40">
+                <tr key={rowKey(r, i)} className="border-b border-border-soft hover:bg-bg-hover/40">
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <span className="font-semibold text-text">{r.symbol}</span>

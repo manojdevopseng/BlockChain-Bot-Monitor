@@ -25,12 +25,15 @@ export default function LogsPage() {
     return () => clearTimeout(t);
   }, [q]);
 
-  const { data: stats } = useApi<any>("/api/logs/stats", { refreshInterval: 3000 });
+  const { data: stats } = useApi<any>("/api/logs/stats", { refreshInterval: 15000 });
   const { data, isLoading } = useApi<any>(
     `/api/logs?limit=100${query ? `&q=${encodeURIComponent(query)}` : ""}`,
     // keepPreviousData holds the old lines on screen while the new query
     // resolves, instead of blanking to "No logs" and back.
-    { refreshInterval: 3000, keepPreviousData: true }
+    // 15s is a safety net, not the update path: the WS `log` event revalidates
+    // this the moment a line is written. Polling every 3s on top of that was
+    // five wasted repaints per new line.
+    { refreshInterval: 15000, keepPreviousData: true }
   );
 
   const items: any[] = data?.items ?? [];

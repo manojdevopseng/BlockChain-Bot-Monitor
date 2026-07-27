@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn, rowKey } from "@/lib/utils";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 
 export type Column<T> = {
@@ -37,7 +37,7 @@ export function DataTable<T extends Record<string, any>>({
             </tr>
           ) : (
             rows.map((row, i) => (
-              <tr key={i} className="border-b border-border-soft hover:bg-bg-hover/40">
+              <tr key={rowKey(row, i)} className="border-b border-border-soft hover:bg-bg-hover/40">
                 {columns.map((c) => (
                   <td key={c.key} className={cn("px-3 py-2.5 text-text", c.className)}>
                     {c.render ? c.render(row) : row[c.key]}

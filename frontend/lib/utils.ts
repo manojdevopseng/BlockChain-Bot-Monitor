@@ -53,3 +53,17 @@ export function fmtUptime(sec: number): string {
   const m = Math.floor((sec % 3600) / 60);
   return `${d}d ${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m`;
 }
+
+// A row's own identity, for use as a React key in a table that refreshes.
+// Keying by array index means a single new row arriving at the top shifts every
+// row's content down one slot, so React rewrites every cell and the whole table
+// visibly repaints. Keying by the row itself makes that one insertion.
+export function rowKey(row: any, i: number): string {
+  if (!row || typeof row !== "object") return String(i);
+  const id = row.id ?? row._id ?? row.tx_hash ?? row.pair
+    ?? row.token_address ?? row.address ?? row.sol_address;
+  const at = row.created_at ?? row.alert_timestamp ?? row.detected_at
+    ?? row.open_timestamp ?? row.dt ?? row.ts;
+  if (id != null) return at != null ? `${id}:${at}` : String(id);
+  return at != null ? `${at}:${i}` : String(i);
+}

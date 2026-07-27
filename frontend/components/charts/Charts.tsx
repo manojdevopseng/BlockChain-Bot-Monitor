@@ -25,6 +25,9 @@ function useChartColors() {
   };
 }
 
+// Recharts replays its draw animation on every data change, not just on mount.
+// With the dashboard refreshing in the background that read as the chart
+// flashing every few seconds, so every series below opts out.
 export function AreaSpark({ data, color = "#7c5cff" }: { data: { value: number }[]; color?: string }) {
   return (
     <ResponsiveContainer width="100%" height={48}>
@@ -35,7 +38,8 @@ export function AreaSpark({ data, color = "#7c5cff" }: { data: { value: number }
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={`url(#g-${color})`} />
+        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2}
+          fill={`url(#g-${color})`} isAnimationActive={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -57,7 +61,8 @@ export function LineSeries({
         <Tooltip contentStyle={c.tooltip} />
         {keys.map((k) => (
           <Line key={k.key} type="monotone" dataKey={k.key} stroke={k.color}
-            strokeWidth={2} dot={false} name={k.label || k.key} />
+            strokeWidth={2} dot={false} name={k.label || k.key}
+            isAnimationActive={false} />
         ))}
       </LineChart>
     </ResponsiveContainer>
@@ -73,7 +78,7 @@ export function BarSeries({ data, color = "#7c5cff" }: { data: any[]; color?: st
         <XAxis dataKey="label" {...c.axis} tickLine={false} axisLine={false} />
         <YAxis {...c.axis} tickLine={false} axisLine={false} width={30} />
         <Tooltip contentStyle={c.tooltip} cursor={{ fill: c.cursor }} />
-        <Bar dataKey="value" fill={color} radius={[3, 3, 0, 0]} />
+        <Bar dataKey="value" fill={color} radius={[3, 3, 0, 0]} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );

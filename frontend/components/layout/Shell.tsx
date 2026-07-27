@@ -22,12 +22,27 @@ const EVENT_KEYS: Record<string, string[]> = {
 
 const COLLAPSE_KEY = "sidebar_collapsed";
 
+// Scanner events arrive in bursts — logs alone run at roughly 40 a minute — and
+// revalidating on each one repainted the page that often. Prefixes are pooled
+// and flushed once per window, so a burst costs one refetch.
+const REVALIDATE_WINDOW_MS = 500;
+let pendingPrefixes = new Set<string>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
 function revalidate(prefixes: string[]) {
-  mutate(
-    (key) => typeof key === "string" && prefixes.some((p) => key.startsWith(p)),
-    undefined,
-    { revalidate: true }
-  );
+  prefixes.forEach((p) => pendingPrefixes.add(p));
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    const due = [...pendingPrefixes];
+    pendingPrefixes = new Set();
+    flushTimer = null;
+    // No data argument. Passing `undefined` as the second argument told SWR to
+    // *clear* the cache and only then refetch, so every component rendered its
+    // empty state in the gap and filled back in a moment later — that was the
+    // flashing. Without it the current data stays on screen and is replaced
+    // once, when the new response lands.
+    mutate((key) => typeof key === "string" && due.some((p) => key.startsWith(p)));
+  }, REVALIDATE_WINDOW_MS);
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {

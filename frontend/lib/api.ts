@@ -91,8 +91,14 @@ const fetcher = (path: string) => apiGet(path);
 // Polling SWR hook — realtime WS updates layer on top for instant pushes.
 export function useApi<T = any>(path: string | null, cfg?: SWRConfiguration) {
   return useSWR<T>(path, fetcher, {
-    refreshInterval: 5000,
+    // The WebSocket already pushes the moment anything happens, so the poll is
+    // only a safety net for what no event covers. At 5s it was mostly redundant
+    // work that repainted the page for nothing.
+    refreshInterval: 12000,
     revalidateOnFocus: false,
+    // Keep showing the data we have while a new key loads. Without this a
+    // filter or search change blanks the table for one frame before refilling.
+    keepPreviousData: true,
     ...cfg,
   });
 }

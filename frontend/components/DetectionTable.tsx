@@ -4,7 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
-import { fmtDateTime, shortAddr, timeAgo } from "@/lib/utils";
+import { fmtDateTime, shortAddr, timeAgo, rowKey } from "@/lib/utils";
 
 export type GroupEntry = {
   chat_id?: number;
@@ -55,7 +55,7 @@ export function DetectionTable(
             <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">No detections yet</td></tr>
           ) : (
             items.map((d, i) => (
-              <tr key={i} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
+              <tr key={rowKey(d, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
                 {/* Symbol */}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1.5">
