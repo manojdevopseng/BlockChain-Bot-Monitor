@@ -96,25 +96,34 @@ async def sources():
     return {"items": items}
 
 
-async def _backfill_names(rows: list[dict], limit: int = 5) -> None:
-    """Fill in titles for groups that were added before we asked Telegram.
+async def _backfill_names(rows: list[dict], limit: int = 8) -> None:
+    """Give every group its real Telegram title and @username.
 
-    A few rows predate resolving the title at add time, and a group added while
-    the userbot was logged out has none either. Resolving them here is bounded
-    to `limit` per request and written back, so each group costs one Telegram
-    call once, ever — never on the next page load.
+    Rows arrived by three different routes — seeded from JSON with a slug for a
+    name, added by chat id before we asked Telegram, or added while the userbot
+    was logged out — so they showed inconsistent detail. Each is resolved once
+    against Telegram and written back.
+
+    `resolved_at` records that we tried, whether or not it worked. Without it a
+    group with no @username (most private ones) would be looked up again on
+    every single page load. Bounded to `limit` per request, so a long list
+    fills in over a few loads instead of one slow one.
     """
-    missing = [r for r in rows if not r.get("name") and r.get("id") is not None][:limit]
-    if not missing or _userbot() is None:
+    todo = [r for r in rows if r.get("id") is not None and not r.get("resolved_at")][:limit]
+    if not todo:
         return
     col = db.get_collection("premium_groups")
-    for row in missing:
+    for row in todo:
         name, username = await _title_of(int(row["id"]))
-        if not name:
-            continue
-        row["name"], row["username"] = name, username
-        await col.update_one({"id": row["id"]},
-                             {"$set": {"name": name, "username": username}})
+        # The seeded name is a fallback, not the truth — Telegram's own title
+        # wins where we can get it.
+        update = {"resolved_at": time.time()}
+        if name:
+            update["name"] = name
+        if username:
+            update["username"] = username
+        row.update(update)
+        await col.update_one({"id": row["id"]}, {"$set": update})
 
 
 @router.get("/destinations")
