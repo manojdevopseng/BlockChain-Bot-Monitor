@@ -8,11 +8,10 @@ price at fixed intervals, so the dashboard can answer "SOL→RBH matches average
 
 Two things it is careful about:
 
-  • GMGN pacing. Prices come from the SAME shared GMGNClient the scanners use,
-    so every request goes through the one rate limiter. gmgn.ai's Cloudflare
-    403s a datacenter IP that polls too fast, and that was hard-won — a second
-    client, or a burst of catch-up lookups, would put it back at risk. Checks
-    are due-based and capped per cycle.
+  • Staying away from gmgn.ai. Prices come from DexScreener (eth, sol) and, for
+    Robinhood, straight off the pool over our own RPC. Nothing here touches the
+    GMGN client or its rate limiter, so no number of outcome checks can put the
+    hard-won Cloudflare pacing at risk.
   • Never blocking a scanner. This runs as its own supervisor task; a failed
     price lookup marks the check and moves on.
 """
@@ -50,8 +49,19 @@ SRC_PREMIUM = "premium"
 REPLY_CHECKPOINTS = ("1h", "24h")
 
 CYCLE_SECONDS = 60          # how often to look for due checks
-MAX_PER_CYCLE = 8           # hard cap on GMGN calls per cycle
+# Lookups per cycle. This was 8, set when prices came from GMGN and the cap was
+# really protecting its Cloudflare pacing. No price comes from GMGN any more —
+# eth and sol go to DexScreener (300 req/min allowed), robinhood to our own RPC
+# — so 8 was throttling against a limit that no longer applies. Robinhood
+# becoming priceable tripled the queue, and at 8/cycle new alerts sat behind a
+# backlog of 215 waiting for their entry price.
+MAX_PER_CYCLE = 40
 STALE_AFTER = 36 * 3600     # stop chasing an alert this old
+
+# An entry price taken later than this after the alert is no longer measuring
+# that alert. It is still recorded — throwing the row away helps nobody — but
+# flagged so the reporting can leave it out rather than quietly average it in.
+ENTRY_GRACE_SECONDS = 15 * 60
 
 
 def _col():
@@ -164,14 +174,22 @@ def _due(doc: dict, now: float) -> Optional[tuple[str, int]]:
 
 
 async def _run_once(client) -> int:
-    """One pass. Returns how many GMGN calls were made."""
+    """One pass. Returns how many price lookups were made."""
     now = time.time()
     calls = 0
     try:
-        docs = await _col().find({"done": False}).to_list(500)
+        docs = await _col().find({"done": False}).to_list(1000)
     except Exception as exc:  # noqa: BLE001
         log.debug(f"[OUTCOME] could not read pending: {exc}")
         return 0
+
+    # Newest first, and rows still needing an entry price ahead of everything
+    # else. An entry price is the one reading that cannot be taken late: every
+    # percentage on the row is measured from it, so a row priced two hours after
+    # its alert reports the wrong number for the rest of its life. A 6h
+    # checkpoint, by contrast, is happy to wait a few minutes.
+    docs.sort(key=lambda d: (d.get("entry_price") is not None,
+                             -float(d.get("created_at") or 0)))
 
     for doc in docs:
         if calls >= MAX_PER_CYCLE:
@@ -196,8 +214,15 @@ async def _run_once(client) -> int:
             calls += 1
             if price is None:
                 continue
-            await _col().update_one({"_id": doc["_id"]},
-                                    {"$set": {"entry_price": price, "entry_at": now}})
+            late = now - float(doc.get("created_at") or now) > ENTRY_GRACE_SECONDS
+            await _col().update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"entry_price": price, "entry_at": now, "entry_late": late}},
+            )
+            if late:
+                log.debug(f"[OUTCOME] {doc.get('symbol')} entry priced late — "
+                          f"{(now - float(doc.get('created_at') or now)) / 60:.0f} min "
+                          f"after the alert")
             doc["entry_price"] = price
             continue
 
@@ -299,7 +324,13 @@ def _summarise(docs: list[dict]) -> dict:
     """
     unpriced = [d for d in docs if d.get("price_source") == "none"]
     docs = [d for d in docs if d.get("price_source") != "none"]
-    out: dict[str, Any] = {"tracked": len(docs), "unpriceable": len(unpriced)}
+    # A row whose entry price was taken well after the alert is measuring
+    # something other than the alert, so it is counted separately rather than
+    # averaged in as though it were a real reading.
+    late = [d for d in docs if d.get("entry_late")]
+    docs = [d for d in docs if not d.get("entry_late")]
+    out: dict[str, Any] = {"tracked": len(docs), "unpriceable": len(unpriced),
+                           "entry_late": len(late)}
     for label, _secs in CHECKPOINTS:
         vals = [c["change_pct"] for d in docs
                 if (c := (d.get("checks") or {}).get(label))]
@@ -358,6 +389,8 @@ async def by_group(days: int = 30, min_calls: int = 1) -> list[dict]:
 
     agg: dict[str, dict] = {}
     for d in docs:
+        if d.get("entry_late"):
+            continue                      # entry price too late to mean anything
         checks = d.get("checks") or {}
         if not checks:
             continue                      # no reading yet — cannot judge it
