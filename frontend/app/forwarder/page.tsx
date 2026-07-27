@@ -84,7 +84,16 @@ function AddGroup() {
     try {
       const r: any = await apiSend("/api/forwarder/groups", "POST", { value });
       setVal("");
-      setMsg({ ok: true, text: `Added ${r.name || r.id} — live now` });
+      // Same three details the chat-id finder gives back, so what was added is
+      // identifiable without hunting for the row.
+      const bits = [r.name, r.username ? `@${r.username}` : null, `-100${r.id}`]
+        .filter(Boolean).join(" · ");
+      setMsg({
+        ok: true,
+        text: r.name ? `Added ${bits} — live now`
+                     : `Added -100${r.id} — live now. Telegram would not give a `
+                       + `title; it will fill in when the group next posts.`,
+      });
       mutate("/api/forwarder/sources");
       mutate("/api/forwarder/stats");
     } catch (e: any) {

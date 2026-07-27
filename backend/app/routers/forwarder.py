@@ -189,22 +189,38 @@ def _userbot():
 
 
 async def _title_of(bare_id: int) -> tuple[str | None, str | None]:
-    """(title, username) for a group we are in, from its bare chat id.
+    """(title, username) for a chat id — the same detection the finder uses.
 
-    Returns (None, None) whenever Telegram cannot answer — the userbot being
-    logged out, or the account not being in that group. A missing title is not
-    an error: the forwarder still fills it in the first time the group posts.
+    Three routes, because no single one covers every group. The userbot sees
+    private groups it is a member of; the Bot API's getChat answers for public
+    groups and anywhere the bot itself was added, member or not; `chats_seen`
+    remembers whatever either has met before. Settings → Find Chat ID resolves
+    all three details this way, so adding a group by id does too.
+
+    (None, None) when none of them can answer. That is not an error: the
+    forwarder still fills the title in the first time the group posts.
     """
     client = _userbot()
-    if client is None:
-        return None, None
-    from telethon.tl.types import PeerChannel, PeerChat
-    for peer in (PeerChannel(bare_id), PeerChat(bare_id)):
-        try:
-            ent = await client.get_entity(peer)
-        except Exception:  # noqa: BLE001
-            continue
-        return getattr(ent, "title", None), getattr(ent, "username", None)
+    if client is not None:
+        from telethon.tl.types import PeerChannel, PeerChat
+        for peer in (PeerChannel(bare_id), PeerChat(bare_id)):
+            try:
+                ent = await client.get_entity(peer)
+            except Exception:  # noqa: BLE001
+                continue
+            title = getattr(ent, "title", None)
+            if title:
+                return title, getattr(ent, "username", None)
+
+    from .. import chatid
+    chat, _err = await chatid._get_chat(f"-100{bare_id}")
+    if chat:
+        await chatid.record_chat(chat, "looked up")
+        return chat.get("title"), chat.get("username")
+
+    for seen in await chatid.seen_chats():
+        if str(seen.get("id", "")).lstrip("-").endswith(str(bare_id)):
+            return seen.get("title"), seen.get("username")
     return None, None
 
 
