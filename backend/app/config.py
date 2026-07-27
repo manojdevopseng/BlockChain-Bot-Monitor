@@ -96,6 +96,16 @@ class Settings(BaseSettings):
     # Max tokens watched for swaps at once (each holds a WS subscription).
     max_gas_monitors: int = 150
 
+    # ── Solana on-chain discovery (optional) ────────────────
+    # Watch a launchpad's own program for new mints instead of relying on
+    # GMGN's rolling new-pairs feed. Needs SOL_RPC_WSS; off without it.
+    # Only the launchpads we watch: pump / bonk / bonkers / bags. Blank = that
+    # launchpad is not watched on-chain and keeps coming from the GMGN feed.
+    sol_pump_program: str = ""
+    sol_bonk_program: str = ""
+    sol_bonkers_program: str = ""
+    sol_bags_program: str = ""
+
     # ── Daily digest ────────────────────────────────────────
     # One summary message a day to ALERT_CHAT_ID: what fired and how it did.
     digest_enabled: bool = True

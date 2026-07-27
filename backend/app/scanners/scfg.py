@@ -54,6 +54,10 @@ SOL_MIN_FEES      = settings.sol_min_fees
 SOL_MIN_MCAP      = settings.sol_min_mcap
 SOL_WATCH_WINDOW  = settings.sol_watch_window
 SOL_CHAIN         = "sol"
+SOL_PUMP_PROGRAM  = settings.sol_pump_program
+SOL_BONK_PROGRAM  = settings.sol_bonk_program
+SOL_BONKERS_PROGRAM = settings.sol_bonkers_program
+SOL_BAGS_PROGRAM    = settings.sol_bags_program
 
 # ── Cross-chain matching (from .env) ────────────────────────────
 CROSS_CHAIN_CHAT_ID = settings.cross_chain_chat_id
