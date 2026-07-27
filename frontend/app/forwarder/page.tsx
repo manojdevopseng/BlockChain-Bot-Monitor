@@ -139,11 +139,15 @@ export default function ForwarderPage() {
   const all: Source[] = sources?.items ?? [];
   const channels = all.filter((s) => s.kind === "channel");
   const needle = q.trim().toLowerCase();
-  const groups = all
-    .filter((s) => s.kind === "group")
-    .filter((s) => !needle
-      || s.name.toLowerCase().includes(needle)
-      || (s.subtitle ?? "").toLowerCase().includes(needle));
+  // Chat ids get pasted in whichever form Telegram showed them: -1002534554639,
+  // 1002534554639 or the bare 2534554639. Comparing the digits alone matches
+  // all three against the one form we store.
+  const digits = needle.replace(/\D/g, "");
+  const allGroups = all.filter((s) => s.kind === "group");
+  const groups = allGroups.filter((s) => !needle
+    || s.name.toLowerCase().includes(needle)
+    || (s.subtitle ?? "").toLowerCase().includes(needle)
+    || (digits.length >= 4 && String(s.chat_id).includes(digits.replace(/^100/, ""))));
 
   return (
     <div className="space-y-5">
@@ -180,13 +184,15 @@ export default function ForwarderPage() {
         id="fwd-groups"
         title="Premium Groups"
         icon={<Users size={14} />}
-        count={groups.length}
+        count={allGroups.length}
         controls={<SearchBox value={q} onChange={setQ} placeholder="group name / id" />}
       >
         <p className="mb-3 text-xs text-text-dim">
-          Every group the userbot mirrors, with its chat id under the name. The
-          name is worked out on its own — the group's live Telegram title as
-          soon as it posts, otherwise the seeded one.
+          {needle
+            ? `${groups.length} of ${allGroups.length} groups match "${q.trim()}".`
+            : `${allGroups.length} groups mirrored by the userbot, with each chat id under the name.`}
+          {" "}The name is worked out on its own — the group's live Telegram
+          title, otherwise the seeded one.
         </p>
         <AddGroup />
         <TableScroll>

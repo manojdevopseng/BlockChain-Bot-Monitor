@@ -69,15 +69,21 @@ async def sources():
         for name, service, feeds in _signal_channels() if name
     ]
 
-    for g in await db.get_collection("premium_groups").find({}).to_list(5000):
+    rows = await db.get_collection("premium_groups").find({}).to_list(5000)
+    await _backfill_names(rows)
+
+    for g in rows:
         gid = g.get("id")
         if gid is None:
             continue
         # The chat id is always on the row, next to the name — knowing which
-        # group an id belongs to is the whole point of showing the name.
-        subtitle = str(gid)
+        # group an id belongs to is the whole point of showing the name. Both
+        # forms are shown: ids are stored bare, but -100… is what Telegram
+        # displays and therefore what gets pasted into the search box.
+        full = f"-100{gid}"
+        subtitle = f"{full} · {gid}"
         if g.get("username"):
-            subtitle = f"@{g['username']} · {gid}"
+            subtitle = f"@{g['username']} · {subtitle}"
         items.append({
             "key": str(gid), "kind": "group",
             "name": g.get("name") or str(gid),
@@ -88,6 +94,27 @@ async def sources():
             "today": counts.get(fwd_counters.bare_key(gid), 0),
         })
     return {"items": items}
+
+
+async def _backfill_names(rows: list[dict], limit: int = 5) -> None:
+    """Fill in titles for groups that were added before we asked Telegram.
+
+    A few rows predate resolving the title at add time, and a group added while
+    the userbot was logged out has none either. Resolving them here is bounded
+    to `limit` per request and written back, so each group costs one Telegram
+    call once, ever — never on the next page load.
+    """
+    missing = [r for r in rows if not r.get("name") and r.get("id") is not None][:limit]
+    if not missing or _userbot() is None:
+        return
+    col = db.get_collection("premium_groups")
+    for row in missing:
+        name, username = await _title_of(int(row["id"]))
+        if not name:
+            continue
+        row["name"], row["username"] = name, username
+        await col.update_one({"id": row["id"]},
+                             {"$set": {"name": name, "username": username}})
 
 
 @router.get("/destinations")
@@ -161,6 +188,26 @@ def _userbot():
     return client if client is not None and client.is_connected() else None
 
 
+async def _title_of(bare_id: int) -> tuple[str | None, str | None]:
+    """(title, username) for a group we are in, from its bare chat id.
+
+    Returns (None, None) whenever Telegram cannot answer — the userbot being
+    logged out, or the account not being in that group. A missing title is not
+    an error: the forwarder still fills it in the first time the group posts.
+    """
+    client = _userbot()
+    if client is None:
+        return None, None
+    from telethon.tl.types import PeerChannel, PeerChat
+    for peer in (PeerChannel(bare_id), PeerChat(bare_id)):
+        try:
+            ent = await client.get_entity(peer)
+        except Exception:  # noqa: BLE001
+            continue
+        return getattr(ent, "title", None), getattr(ent, "username", None)
+    return None, None
+
+
 async def _resolve_group(value: str) -> dict:
     """Turn whatever was typed into {id, name, username}.
 
@@ -182,7 +229,12 @@ async def _resolve_group(value: str) -> dict:
     if kind == "chat_id":
         # bare_key, not string trimming: lstrip("100") strips *characters*, so
         # -1001000000123 would come out as 23.
-        return {"id": int(fwd_counters.bare_key(val)), "name": None, "username": None}
+        gid = int(fwd_counters.bare_key(val))
+        # Ask Telegram for the title straight away. Waiting for the group's
+        # first message left the row showing nothing but its own number, so it
+        # could not be found by name in the list.
+        name, username = await _title_of(gid)
+        return {"id": gid, "name": name, "username": username}
 
     client = _userbot()
     if client is None:
