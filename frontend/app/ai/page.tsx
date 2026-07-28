@@ -41,7 +41,7 @@ function useDebounced(value: string, ms = 250): string {
 // two halves fail for completely different reasons — no credits versus a dead
 // Nitter instance — and a decisions table cannot tell them apart.
 function XCheck() {
-  const { data } = useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 180000 });
+  const { data } = useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 60000 });
   const items: any[] = data?.items ?? [];
 
   return (
@@ -57,8 +57,8 @@ function XCheck() {
         <>
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
-            live through fxtwitter with Nitter behind it, no X API key. Cached
-            for three minutes.
+            live through fxtwitter with Nitter behind it, no X API key. Newest
+            first, refreshed every minute.
             {data && (
               <> <span className="text-text">{data.with_link}</span> of{" "}
                 <span className="text-text">{data.pairs}</span> tokens carry a
@@ -74,6 +74,7 @@ function XCheck() {
               <thead>
                 <tr className={`${STICKY_HEAD} border-b border-border`}>
                   <th className="px-3 py-2.5 font-medium">Token</th>
+                  <th className="px-3 py-2.5 font-medium">Age</th>
                   <th className="px-3 py-2.5 font-medium">Link type</th>
                   <th className="px-3 py-2.5 font-medium">Account</th>
                   <th className="px-3 py-2.5 font-medium">Verified</th>
@@ -84,12 +85,28 @@ function XCheck() {
               </thead>
               <tbody>
                 {items.length === 0 ? (
-                  <tr><td colSpan={7} className="px-3 py-10 text-center text-text-dim">
+                  <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
                     Nothing checked yet
                   </td></tr>
                 ) : items.map((r: any, i: number) => (
                   <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
-                    <td className="px-3 py-3 font-semibold text-text">{r.symbol}</td>
+                    <td className="px-3 py-3">
+                      <span className="flex items-center gap-1.5">
+                        <a href={`https://gmgn.ai/robinhood/token/${r.address}`}
+                           target="_blank" rel="noopener noreferrer"
+                           title="View on GMGN"
+                           className="font-semibold text-brand-soft hover:underline">
+                          {r.symbol}
+                        </a>
+                        <CopyButton value={r.address} />
+                      </span>
+                      <span className="font-mono text-[11px] text-text-dim">
+                        {shortAddr(r.address)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-text-muted">
+                      {r.open_timestamp ? timeAgo(r.open_timestamp) : "—"}
+                    </td>
                     <td className="px-3 py-3">
                       <Badge variant={r.kind === "tweet" ? "purple" : r.kind === "profile" ? "blue" : "gray"}>
                         {r.kind}

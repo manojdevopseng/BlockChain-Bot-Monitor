@@ -527,8 +527,10 @@ async def watch() -> None:
 
 # A live X check, for the dashboard. Cached, because it is served to a polling
 # page: without this, every refresh would re-read the feed and re-ask fxtwitter
-# for the same handles.
-_PROBE_TTL = 180
+# for the same handles. Sixty seconds, not longer — Robinhood is busy enough
+# that the whole hundred-pair window is only about six minutes wide, so a
+# three-minute cache was showing half a window of stale rows.
+_PROBE_TTL = 60
 _probe_cache: tuple[float, dict] = (0.0, {})
 
 
@@ -558,6 +560,8 @@ async def x_probe(client, session: aiohttp.ClientSession, limit: int = 12) -> di
         rows.append({
             "symbol": info.get("symbol") or "?",
             "address": (pair.get("base_address") or info.get("address") or ""),
+            "open_timestamp": float(pair.get("open_timestamp")
+                                    or info.get("creation_timestamp") or 0),
             "link": link,
             "kind": ref.kind,
             "handle": ref.handle,
@@ -574,6 +578,10 @@ async def x_probe(client, session: aiohttp.ClientSession, limit: int = 12) -> di
 
     out = {
         "at": now,
+        # The feed is ordered newest-first by GMGN (verified: strictly
+        # descending), and the rows below are the newest ones carrying a link.
+        "newest_age_minutes": (round((now - rows[0]["open_timestamp"]) / 60, 1)
+                               if rows and rows[0]["open_timestamp"] else None),
         "pairs": len(pairs),
         "with_link": len(linked),
         "checked": len(rows),
