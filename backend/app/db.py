@@ -270,6 +270,14 @@ async def ensure_indexes() -> None:
         ("forwarder_counters", [("scope", 1), ("day", 1), ("key", 1)]),   # every page load
         ("chats_seen",         "id"),                               # chat-id finder
         ("commands",           "command"),                           # per-command lookup
+        # The AI narrative collections. x_links is written several times a
+        # minute and read newest-first on every page load, so the sort has to be
+        # index-backed rather than a scan.
+        ("x_links",            "address"),
+        ("x_links",            [("found_at", -1)]),
+        ("ai_decisions",       "address"),
+        ("ai_decisions",       [("at", -1)]),
+        ("ai_watch",           [("first_seen", -1)]),
     ]
     for coll, keys in plan:
         try:

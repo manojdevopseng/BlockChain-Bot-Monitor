@@ -677,12 +677,13 @@ _LINKED_KINDS = ("tweet", "profile")
 
 async def x_links(limit: int = 40) -> dict:
     """Tokens with an X link, newest first. Read from Mongo — no upstream call."""
+    # Sorted by Mongo, not in Python. Reading a fixed slice and sorting that
+    # returns the newest of the OLDEST documents — which is what this did once
+    # the collection outgrew the slice, so the section froze on rows two hours
+    # old while fresh ones were being written the whole time.
     rows = await _col("x_links").find(
         {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True}
-    ).to_list(400)
-    rows.sort(key=lambda r: r.get("open_timestamp") or r.get("found_at") or 0,
-              reverse=True)
-    rows = rows[:limit]
+    ).sort("found_at", -1).limit(limit).to_list(limit)
     for r in rows:
         r.pop("_id", None)
         r.pop("dt", None)
@@ -702,10 +703,9 @@ async def recent(limit: int = 100, verdict: Optional[str] = None) -> list[dict]:
     flt: dict[str, Any] = {}
     if verdict:
         flt["verdict"] = verdict
-    docs = await _col("ai_decisions").find(flt).to_list(1000)
-    docs.sort(key=lambda d: d.get("at", 0), reverse=True)
+    docs = await _col("ai_decisions").find(flt).sort("at", -1).limit(limit).to_list(limit)
     out = []
-    for d in docs[:limit]:
+    for d in docs:
         d.pop("_id", None)
         d["gmgn_url"] = _gmgn(d.get("address", ""))
         out.append(d)
@@ -728,8 +728,7 @@ async def stats() -> dict:
 
 
 async def watching() -> list[dict]:
-    rows = await _col("ai_watch").find({}).to_list(500)
-    rows.sort(key=lambda r: r.get("first_seen", 0), reverse=True)
+    rows = await _col("ai_watch").find({}).sort("first_seen", -1).limit(200).to_list(200)
     for r in rows:
         r.pop("_id", None)
         r["gmgn_url"] = _gmgn(r.get("address", ""))
