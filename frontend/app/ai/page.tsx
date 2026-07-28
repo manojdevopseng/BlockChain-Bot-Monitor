@@ -221,9 +221,10 @@ function OGSection() {
       </>}
     >
       <p className="mb-3 text-xs text-text-dim">
-        The first launch of a name and ticker that then came back five times
-        inside a minute. Five is not a coincidence — it is somebody working at it
-        — and the original is the one that ran before the copies.
+        The first launch of a name and ticker that came back five times inside
+        five minutes, counting only launches that carry an X link. Five is not a
+        coincidence — it is somebody working at it — and the original is the one
+        that ran before the copies.
         {data && (
           <> <span className="text-text">{data.total}</span> stored, showing the
             newest <span className="text-text">{data.shown}</span>.</>

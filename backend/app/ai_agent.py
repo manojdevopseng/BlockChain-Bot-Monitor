@@ -96,13 +96,11 @@ MAX_PER_NAME_PER_DAY = 5
 
 # The OG rule. A name and ticker launched this many times inside this window is
 # somebody working at it, not a coincidence — and the one worth keeping is the
-# first, before the copies. Counted over EVERY launch, linked or not: the copies
-# are usually the ones that skip the socials, so counting only the linked ones
-# would miss the burst that makes the original interesting. Measured on stored
-# rows alone, repeats arrive seconds apart — six of one name inside a single
-# second in one case — so a minute is a wide window, not a tight one.
+# first, before the copies. Only launches carrying an X link count: one without
+# a link says nothing about who is behind it, and letting those make up the five
+# turned anonymous name-squatting into a signal.
 OG_BURST_COUNT = 5
-OG_BURST_WINDOW = 60
+OG_BURST_WINDOW = 300
 
 # X can simply not answer — a timeout, a 429, a bad minute at the mirror. That
 # is not the same as an account being unverified, and dropping the launch for it
@@ -613,10 +611,11 @@ async def x_feed_watch() -> None:
                         if (msg.get("pool") or "").lower() != "pump":
                             continue
                         seen.add(mint)
-                        # Counted here, not in the handler: the handler drops
-                        # anything without a verified X link, and those are
-                        # exactly the copies this rule needs to see.
-                        await _note_for_og(msg)
+                        # Counting moved into the handler, which is where a link
+                        # is known. Arrival is stamped here because metadata
+                        # fetches finish out of order, and the burst has to be
+                        # ordered by when the launch happened.
+                        msg["_seen_at"] = time.time()
                         asyncio.create_task(_handle_launch(session, gate, msg))
             except asyncio.CancelledError:
                 log.info("[PUMP] stopped")
@@ -645,6 +644,11 @@ async def _handle_launch(session: aiohttp.ClientSession,
             if ref.kind == "none":
                 await _count_drop("link is not an account", msg)
                 return
+
+            # It has a link, so it counts towards a burst. Before the verified
+            # gate on purpose: the copies in a burst are often unverified, and
+            # the rule is about the name being worked, not the account.
+            await _note_for_og(msg, ref)
 
             day = ist_date_str(time.time())
             name_key = (f"{(msg.get('name') or '').lower().strip()}|"
@@ -718,14 +722,14 @@ async def _handle_launch(session: aiohttp.ClientSession,
             log.debug(f"[PUMP] {msg.get('symbol')}: {exc}")
 
 
-async def _note_for_og(msg: dict) -> None:
-    """Count a launch towards the OG rule, and promote the original on the fifth.
+async def _note_for_og(msg: dict, ref) -> None:
+    """Count a linked launch towards the OG rule, promoting the original on the fifth.
 
-    Every launch counts, linked or not. What surfaces is the first of the burst —
-    and if that one had no X account, its row simply has no account to show,
-    which is honest: the burst is the signal here, not the profile.
+    Only launches with an X link count. One without a link says nothing about
+    who is behind it, and counting those let a name relaunched anonymously look
+    like somebody working at it.
     """
-    now = time.time()
+    now = float(msg.get("_seen_at") or time.time())
     name_key = (f"{(msg.get('name') or '').lower().strip()}|"
                 f"{(msg.get('symbol') or '').lower().strip()}")
     if name_key == "|":
@@ -735,7 +739,9 @@ async def _note_for_og(msg: dict) -> None:
                 if now - l["ts"] <= OG_BURST_WINDOW]
     launches.append({"ts": now, "mint": (msg.get("mint") or "").strip(),
                      "symbol": msg.get("symbol") or "?",
-                     "name": msg.get("name") or ""})
+                     "name": msg.get("name") or "",
+                     "link": ref.raw, "handle": ref.handle, "kind": ref.kind})
+    launches.sort(key=lambda l: l["ts"])
     _recent_launches[name_key] = launches
 
     # Names that went quiet are dropped, so this holds a minute of traffic
@@ -772,13 +778,15 @@ async def _promote_og(name_key: str, first: dict) -> None:
             row = {**{k: v for k, v in existing.items() if k not in ("_id", "dt")},
                    "og": True}
         else:
-            # Nothing stored it, so the original had no X link or an unverified
-            # account. It still belongs here — the burst is what makes it worth
-            # seeing — and the account columns are left empty rather than faked.
+            # Nothing stored it, so the original's account was unverified. It
+            # still belongs here — the burst is what makes it worth seeing — and
+            # its link is kept even though the account did not pass the gate.
             row = {
                 "address": mint, "symbol": first.get("symbol") or "?",
-                "name": first.get("name") or "", "link": "", "kind": "none",
-                "handle": "", "resolved": False, "verified": False,
+                "name": first.get("name") or "",
+                "link": first.get("link") or "", "kind": first.get("kind") or "none",
+                "handle": first.get("handle") or "", "resolved": False,
+                "verified": False,
                 "verified_type": "", "followers": 0, "post_found": False,
                 "post_source": "", "post_age_minutes": None, "excerpt": "",
                 "open_timestamp": first.get("ts") or time.time(),
@@ -790,8 +798,8 @@ async def _promote_og(name_key: str, first: dict) -> None:
             await _col("x_links").update_one({"address": mint},
                                              {"$set": {**row, "dt": _utc_now()}},
                                              upsert=True)
-        log.info(f"[PUMP] OG: {row.get('symbol')} — {OG_BURST_COUNT} launches "
-                 f"under this name inside {OG_BURST_WINDOW}s")
+        log.info(f"[PUMP] OG: {row.get('symbol')} — {OG_BURST_COUNT} linked "
+                 f"launches under this name inside {OG_BURST_WINDOW}s")
         await hub.broadcast("x_link", row)
     except Exception as exc:  # noqa: BLE001
         log.debug(f"[PUMP] could not promote OG for {name_key}: {exc}")
