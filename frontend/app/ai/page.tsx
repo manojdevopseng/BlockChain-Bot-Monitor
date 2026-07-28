@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Brain, CheckCircle2, Crown, Rocket, XCircle, ExternalLink, Eye, RefreshCw, Twitter } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
@@ -30,6 +30,11 @@ const TONE: Record<string, "green" | "purple" | "amber" | "gray" | "red"> = {
   skipped: "gray", error: "red",
 };
 
+// Rows fetched at a time. The sections hold thousands, and rendering all of
+// them at once would be a slow page for a list nobody reads past the top of —
+// so they arrive a page at a time, until the table matches the count.
+const PAGE = 200;
+
 // Both launch sections are fed by the one PumpPortal socket, so they are on the
 // one Settings switch — "X Links Feed". Neither has its own. The state is shown
 // in both headers because a stopped feed otherwise reads as a quiet market.
@@ -44,16 +49,25 @@ function FeedState({ enabled }: { enabled: boolean | undefined }) {
   return <Badge variant="amber">feed off — Settings → Bots → X Links Feed</Badge>;
 }
 
-// Ages were rendered once per fetch, so a row sat on "1m ago" for a whole
-// minute and the section looked frozen between refreshes. This re-renders every
-// second, which is what makes a live counter live.
-function useTick(ms = 1000): number {
+// Ages were rendered once per fetch, so a row sat on "1m ago" for a whole minute
+// and the section looked frozen between refreshes. A tick fixes that, but
+// ticking the section itself re-renders every row every second — fine for forty
+// rows, not for hundreds. So the clock lives in a context and only the age cells
+// subscribe to it: one timer, and a second's work is a few dozen text nodes.
+const TickContext = createContext(0);
+
+function TickProvider({ children }: { children: React.ReactNode }) {
   const [n, setN] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setN((v) => v + 1), ms);
+    const t = setInterval(() => setN((v) => v + 1), 1000);
     return () => clearInterval(t);
-  }, [ms]);
-  return n;
+  }, []);
+  return <TickContext.Provider value={n}>{children}</TickContext.Provider>;
+}
+
+function Age({ ts }: { ts?: number }) {
+  useContext(TickContext);
+  return <>{ts ? ageLabel(ts) : "—"}</>;
 }
 
 // Seconds only while they mean something. A launch is worth watching by the
@@ -116,12 +130,15 @@ function Highlighted({ text, rx }: { text: string; rx: RegExp | null }) {
 // The launch table, shared by the live section and the OG one. Same nine
 // columns, same row rendering — two copies would have drifted the moment one
 // of them gained a column.
-function LaunchTable({ items, rx, empty }: {
+function LaunchTable({ items, rx, empty, total, onMore }: {
   items: any[];
   rx: RegExp | null;
   empty: string;
+  total?: number;
+  onMore?: () => void;
 }) {
   return (
+    <>
         <TableScroll>
           <table className="w-full min-w-[900px] text-sm">
             <thead>
@@ -203,24 +220,38 @@ function LaunchTable({ items, rx, empty }: {
             </tbody>
           </table>
         </TableScroll>
+      {/* The count in the header is the whole filter; this is how the table
+          catches up with it. */}
+      {onMore && typeof total === "number" && items.length < total && (
+        <div className="mt-3 flex items-center justify-center gap-3 text-xs">
+          <span className="text-text-dim">
+            showing {items.length.toLocaleString()} of {total.toLocaleString()}
+          </span>
+          <Button size="sm" variant="outline" onClick={onMore}>
+            Load {Math.min(PAGE, total - items.length).toLocaleString()} more
+          </Button>
+        </div>
+      )}
+    </>
   );
 }
 
 // A name relaunched to the daily cap is somebody working at it, and the first
 // of those launches is the one worth keeping — the rest are copies of it.
 function OGSection() {
+  const [limit, setLimit] = useState(PAGE);
   const [q, setQ] = useState("");
   const [date, setDate] = useState("");
   const query = useDebounced(q);
   const rx = useKeywordRegex();
   const feedOn = useFeedEnabled();
-  useTick(1000);
 
-  const params = new URLSearchParams({ limit: "40" });
+  const params = new URLSearchParams({ limit: String(limit) });
   if (query) params.set("q", query);
   if (date) params.set("date", date);
 
   const { data } = useApi<any>(`/api/ai/og?${params.toString()}`, { refreshInterval: 60000 });
+  useEffect(() => setLimit(PAGE), [query, date]);
   const { data: datesData } = useApi<any>("/api/ai/xdates?og=true", { refreshInterval: 300000 });
   const items: any[] = data?.items ?? [];
 
@@ -250,6 +281,8 @@ function OGSection() {
       <LaunchTable
         items={items}
         rx={rx}
+        total={data?.total}
+        onMore={() => setLimit((n) => n + PAGE)}
         empty={query ? "Nothing matches this search"
           : date ? `No originals on ${date}`
           : "No name has hit five launches yet today"}
@@ -265,13 +298,14 @@ function XCheck() {
   // Rows arrive over the WebSocket, one per token, as the feed finds them —
   // Shell revalidates this key on an `x_link` event. The interval is only a
   // safety net for a dropped socket, so it can be slow.
+  const [limit, setLimit] = useState(PAGE);
   const [q, setQ] = useState("");
   const [followers, setFollowers] = useState("");
   const [date, setDate] = useState("");
   const query = useDebounced(q);
   const minFollowers = useDebounced(followers);
 
-  const params = new URLSearchParams({ limit: "40" });
+  const params = new URLSearchParams({ limit: String(limit) });
   if (query) params.set("q", query);
   // Only when a number is actually typed — an empty box is no filter, not zero.
   if (/^\d+$/.test(minFollowers)) params.set("min_followers", minFollowers);
@@ -279,10 +313,12 @@ function XCheck() {
 
   const { data, mutate: refetch, isValidating } =
     useApi<any>(`/api/ai/xcheck?${params.toString()}`, { refreshInterval: 60000 });
+  // A filter change puts us back at the first page — otherwise a narrow filter
+  // would keep asking for a page size it can never fill.
+  useEffect(() => setLimit(PAGE), [query, minFollowers, date]);
   const { data: datesData } = useApi<any>("/api/ai/xdates", { refreshInterval: 300000 });
   const rx = useKeywordRegex();
   const feedOn = useFeedEnabled();
-  useTick(1000);
   const items: any[] = data?.items ?? [];
   const emptyText = query || minFollowers ? "Nothing matches this filter"
     : date ? `No launches recorded on ${date}`
@@ -331,7 +367,8 @@ function XCheck() {
                 <span className="text-text">{data.posts}</span> with post text.</>
             )}
           </p>
-          <LaunchTable items={items} rx={rx} empty={emptyText} />
+          <LaunchTable items={items} rx={rx} empty={emptyText}
+            total={data?.total} onMore={() => setLimit((n) => n + PAGE)} />
         </>
       )}
     </CollapsibleSection>
@@ -355,6 +392,7 @@ export default function AiPage() {
   const watching: any[] = (watch?.items ?? []).filter((w: any) => w.status === "launching");
 
   return (
+    <TickProvider>
     <div className="space-y-5">
       <PageHeader
         title="AI Narrative"
@@ -527,5 +565,6 @@ export default function AiPage() {
 
       <XCheck />
     </div>
+    </TickProvider>
   );
 }
