@@ -275,6 +275,8 @@ async def ensure_indexes() -> None:
         # index-backed rather than a scan.
         ("x_links",            "address"),
         ("x_links",            [("found_at", -1)]),
+        ("x_links",            [("name_key", 1), ("day", 1)]),   # per-day cap
+        ("x_links",            [("day", -1)]),                   # History filter
         ("ai_decisions",       "address"),
         ("ai_decisions",       [("at", -1)]),
         ("ai_watch",           [("first_seen", -1)]),

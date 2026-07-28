@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -40,7 +41,7 @@ from . import db, x_client
 from .scanners.bounded_set import BoundedSet
 from .config import settings
 from .scanners.slog import get_logger
-from .util import esc
+from .util import esc, ist_date_str
 
 log = get_logger(__name__)
 
@@ -84,6 +85,14 @@ MAX_NAME_OCCURRENCES = 3
 _name_counts: dict[str, int] = {}
 
 _DEDUP_WINDOW = 24 * 3600
+
+# A name and ticker gets at most this many rows in one IST day — the first
+# launch plus four repeats. The same pair relaunched over and over is the
+# commonest spam here, and five is enough to see that it is happening without
+# the list becoming a wall of one name. The day boundary is IST midnight, the
+# same one the archives and per-day counters use, so "today" means one thing
+# across the whole project.
+MAX_PER_NAME_PER_DAY = 5
 
 
 def _col(name: str):
@@ -610,6 +619,16 @@ async def _handle_launch(session: aiohttp.ClientSession,
             if ref.kind == "none":
                 return                    # not an account — a community link, say
 
+            day = ist_date_str(time.time())
+            name_key = (f"{(msg.get('name') or '').lower().strip()}|"
+                        f"{(msg.get('symbol') or '').lower().strip()}")
+            already = await _col("x_links").count_documents(
+                {"name_key": name_key, "day": day})
+            if already >= MAX_PER_NAME_PER_DAY:
+                log.debug(f"[PUMP] {msg.get('symbol')} skipped — "
+                          f"{already} today already under this name")
+                return
+
             prof = await x_client.fetch_profile(session, ref.handle)
             # Verified or nothing. Any kind counts — individual, business,
             # government — but an unverified account is not worth a row: on this
@@ -648,6 +667,10 @@ async def _handle_launch(session: aiohttp.ClientSession,
                 "found_at": time.time(),
                 "source": "pumpportal",
                 "judged": False,
+                # Kept on the row so the per-day cap and the History dropdown
+                # both read the same field rather than recomputing a boundary.
+                "day": day,
+                "name_key": name_key,
             }
             await _col("x_links").update_one({"address": mint},
                                              {"$set": {**row, "dt": _utc_now()}},
@@ -679,15 +702,33 @@ async def _fetch_metadata(session: aiohttp.ClientSession, uri: str) -> dict:
 _LINKED_KINDS = ("tweet", "profile")
 
 
-async def x_links(limit: int = 40) -> dict:
+async def x_link_dates() -> list[str]:
+    """IST days that have rows, newest first — the History dropdown."""
+    days = await _col("x_links").distinct("day")
+    days = [d for d in days if d]
+    return sorted(days, key=lambda x: datetime.strptime(x, "%d-%m-%Y"), reverse=True)
+
+
+async def x_links(limit: int = 40, q: str | None = None,
+                  min_followers: int = 0, day: str | None = None) -> dict:
     """Tokens with an X link, newest first. Read from Mongo — no upstream call."""
     # Sorted by Mongo, not in Python. Reading a fixed slice and sorting that
     # returns the newest of the OLDEST documents — which is what this did once
     # the collection outgrew the slice, so the section froze on rows two hours
     # old while fresh ones were being written the whole time.
-    rows = await _col("x_links").find(
-        {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True}
-    ).sort("found_at", -1).limit(limit).to_list(limit)
+    flt: dict[str, Any] = {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True}
+    if day:
+        flt["day"] = day
+    if min_followers > 0:
+        flt["followers"] = {"$gte": min_followers}
+    if q:
+        # Address, @handle, or any word in the post text / name / ticker.
+        rx = {"$regex": re.escape(q.lstrip("@")), "$options": "i"}
+        flt["$or"] = [{f: rx} for f in
+                      ("address", "handle", "excerpt", "symbol", "name", "link")]
+
+    rows = await _col("x_links").find(flt).sort(
+        "found_at", -1).limit(limit).to_list(limit)
     for r in rows:
         r.pop("_id", None)
         r.pop("dt", None)

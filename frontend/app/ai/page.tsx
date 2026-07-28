@@ -7,8 +7,9 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
-import { SearchBox } from "@/components/SectionFilters";
+import { HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtDateTime, rowKey, shortAddr, timeAgo } from "@/lib/utils";
@@ -113,8 +114,21 @@ function XCheck() {
   // Rows arrive over the WebSocket, one per token, as the feed finds them —
   // Shell revalidates this key on an `x_link` event. The interval is only a
   // safety net for a dropped socket, so it can be slow.
+  const [q, setQ] = useState("");
+  const [followers, setFollowers] = useState("");
+  const [date, setDate] = useState("");
+  const query = useDebounced(q);
+  const minFollowers = useDebounced(followers);
+
+  const params = new URLSearchParams({ limit: "40" });
+  if (query) params.set("q", query);
+  // Only when a number is actually typed — an empty box is no filter, not zero.
+  if (/^\d+$/.test(minFollowers)) params.set("min_followers", minFollowers);
+  if (date) params.set("date", date);
+
   const { data, mutate: refetch, isValidating } =
-    useApi<any>("/api/ai/xcheck?limit=40", { refreshInterval: 60000 });
+    useApi<any>(`/api/ai/xcheck?${params.toString()}`, { refreshInterval: 60000 });
+  const { data: datesData } = useApi<any>("/api/ai/xdates", { refreshInterval: 300000 });
   const rx = useKeywordRegex();
   useTick(1000);
   const items: any[] = data?.items ?? [];
@@ -125,14 +139,22 @@ function XCheck() {
       title="X Links — live check"
       icon={<Twitter size={14} />}
       count={items.length}
-      controls={
-        // A visible way to force a read. Polling covers the normal case, but a
-        // tab left open across a deploy is running the previous build's timers,
-        // and this is faster than explaining that.
+      controls={<>
+        <SearchBox value={q} onChange={setQ} placeholder="address / @username / word" />
+        <Input
+          value={followers}
+          onChange={(e) => setFollowers(e.target.value.replace(/\D/g, ""))}
+          placeholder="min followers"
+          inputMode="numeric"
+          className="h-8 w-32 text-xs"
+        />
+        <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
+        {/* A visible way to force a read. Polling covers the normal case, but a
+            tab left open across a deploy runs the previous build's timers. */}
         <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isValidating}>
           <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> Refresh
         </Button>
-      }
+      </>}
     >
       {data?.error ? (
         <p className="text-xs text-accent-amber">{data.error}</p>
@@ -143,7 +165,8 @@ function XCheck() {
             PumpPortal as they happen. The link comes from the token's own
             metadata, so it arrives with the launch — a row is typically a second
             or two old. Any kind of tick counts; unverified accounts are not
-            listed.
+            listed. The same name and ticker is listed at most five times an IST
+            day, so a relaunch loop cannot fill the table.
             {data && (
               <> 
                 <span className="text-text">{data.resolved}</span> accounts
@@ -170,7 +193,9 @@ function XCheck() {
               <tbody>
                 {items.length === 0 ? (
                   <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
-                    Nothing checked yet
+                    {query || minFollowers ? "Nothing matches this filter"
+                      : date ? `No launches recorded on ${date}`
+                      : "Nothing recorded yet"}
                   </td></tr>
                 ) : items.map((r: any, i: number) => (
                   <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">

@@ -1,6 +1,6 @@
 "use client";
 
-import { History as HistoryIcon, Search } from "lucide-react";
+import { ChevronDown, History as HistoryIcon, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 // The search box and History dropdown used in section headers. Shared so the
@@ -38,15 +38,23 @@ export function HistorySelect({
 }) {
   return (
     <div className="relative">
+      {/* appearance-none, then our own chevron. The native arrow sat on top of
+          the text — there was no padding reserved for it — and it is drawn in
+          the OS's colours, which is what made this control look out of place
+          next to the others. The open list is still the browser's, but it
+          follows the page's color-scheme, so it matches the theme. */}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 rounded-lg border border-border bg-bg-soft pl-7 pr-2 text-xs text-text focus:border-brand/60 focus:outline-none"
+        className="h-8 w-[132px] cursor-pointer appearance-none rounded-lg border border-border
+                   bg-bg-soft pl-7 pr-7 text-xs text-text
+                   hover:border-brand/40 focus:border-brand/60 focus:outline-none"
       >
         <option value="">Live</option>
         {dates.map((d) => <option key={d} value={d}>{d}</option>)}
       </select>
       <HistoryIcon size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-dim" />
+      <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-dim" />
     </div>
   );
 }

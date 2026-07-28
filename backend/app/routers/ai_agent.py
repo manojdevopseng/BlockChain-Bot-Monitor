@@ -36,15 +36,27 @@ async def decisions(
     return {"total": len(items), "items": items}
 
 
+@router.get("/xdates")
+async def xdates():
+    """IST days with rows, newest first — the History dropdown."""
+    return {"dates": await ai_agent.x_link_dates()}
+
+
 @router.get("/xcheck")
-async def xcheck(limit: int = Query(40, ge=1, le=200)):
+async def xcheck(
+    limit: int = Query(40, ge=1, le=200),
+    q: str | None = None,
+    min_followers: int = Query(0, ge=0),
+    date: str | None = None,          # DD-MM-YYYY (IST) — History filter
+):
     """What the X feed loop has found, newest first.
 
     Served straight from Mongo: the reading happens on a background loop that
     broadcasts each new token over the WebSocket, so this is only what the page
     needs on first paint or after a reconnect — never an upstream call.
     """
-    return await ai_agent.x_links(limit=limit)
+    return await ai_agent.x_links(limit=limit, q=q,
+                                  min_followers=min_followers, day=date)
 
 
 @router.get("/watching")
