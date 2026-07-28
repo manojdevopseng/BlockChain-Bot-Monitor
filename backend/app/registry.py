@@ -51,9 +51,14 @@ DEFAULT_SERVICES: list[dict] = [
     # it is independent of the forwarder's userbot session.
     {"id": "bot_commands",          "category": BOT, "label": "Bot Commands",
      "chain": None,  "key": "commands",         "enabled": True},
-    # Posts each alert's 1h and 24h result as a reply to that alert. Separate
-    # from outcome tracking itself: off, the numbers still reach the dashboard
-    # and the digest, the Telegram group just stays quiet.
+    # Follows every fired alert forward and records what the price did at 15m,
+    # 1h, 6h and 24h. Off, the background task is not running at all: no price
+    # lookups, no writes — and Analytics, the digest and the group ranking stop
+    # gaining new data.
+    {"id": "outcome_tracker",       "category": BOT, "label": "Outcome Tracker",
+     "chain": None,  "key": "outcome_tracker",  "enabled": True},
+    # Posts each alert's 1h and 24h result as a reply to that alert. Narrower
+    # than the tracker: off, measurement continues and only Telegram goes quiet.
     {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",
      "chain": None,  "key": "outcome_replies",  "enabled": True},
 

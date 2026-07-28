@@ -72,10 +72,10 @@ async def start() -> None:
     await heartbeat.load()      # so a restart does not blank "last activity"
     _watchdog = asyncio.create_task(heartbeat.watch(), name="watchdog")
 
-    # Follows each fired alert forward and records what the price did.
-    global _outcomes, _digest
-    from . import digest, outcomes
-    _outcomes = asyncio.create_task(outcomes.watch(), name="outcomes")
+    # The outcome tracker is started by reconcile() instead, so its Settings
+    # switch can stop and start it live like any other worker.
+    global _digest
+    from . import digest
     _digest = asyncio.create_task(digest.watch(), name="digest")
 
 
@@ -167,11 +167,37 @@ async def reconcile() -> None:
                 from .scanners.slog import get_logger
                 get_logger("supervisor").error(f"[{name}] worker failed to start: {exc}")
 
+    # The outcome tracker is a standalone task rather than a scanner worker,
+    # but its switch has to behave the same: turning it off stops the task, not
+    # just its output.
+    from . import outcomes
+    await _set_standalone("_outcomes", bool(enabled.get("outcome_tracker", True)),
+                          outcomes.watch, "outcomes")
+
     # Push the live toggle map into a running forwarder so per-source gates
     # (BBCAnalyser2 / DexSignalCall / ETH otto / Premium Callers) update live.
     fwd = _instances.get("fwd")
     if fwd is not None:
         fwd.set_enabled_map(enabled)
+
+
+async def _set_standalone(attr: str, want: bool, factory, name: str) -> None:
+    """Start or stop one of the standalone background tasks to match a toggle.
+
+    These are not scanner workers — nothing depends on them and they hold no
+    connections — so they are tracked as module globals rather than in _tasks.
+    """
+    task = globals().get(attr)
+    alive = task is not None and not task.done()
+    if want and not alive:
+        globals()[attr] = asyncio.create_task(factory(), name=name)
+    elif not want and alive:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        globals()[attr] = None
 
 
 async def _ensure_core() -> None:
