@@ -31,13 +31,29 @@ export function timeAgo(ts: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+// Everything in this project is keyed on IST — retention days, the digest hour,
+// the per-day counters — so timestamps are shown in IST rather than in UTC or
+// in whatever zone the viewer's machine happens to be set to. fmtDateTime used
+// toISOString(), which meant every displayed time was 5h30m behind what the
+// backend had recorded for that day.
+const IST = "Asia/Kolkata";
+// sv-SE gives YYYY-MM-DD HH:mm:ss, the shape these columns already had.
+const _istDateTime = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: IST, year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
+const _istClock = new Intl.DateTimeFormat("en-GB", {
+  timeZone: IST, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
+
 export function fmtClock(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString("en-GB");
+  return _istClock.format(new Date(ts * 1000));
 }
 
 export function fmtDateTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  return d.toISOString().slice(0, 19).replace("T", " ");
+  // The suffix is not decoration: these values just moved by five and a half
+  // hours, and a bare timestamp gives no way to tell which zone it is in.
+  return `${_istDateTime.format(new Date(ts * 1000))} IST`;
 }
 
 export function shortAddr(addr: string | undefined | null, head = 6, tail = 4): string {
