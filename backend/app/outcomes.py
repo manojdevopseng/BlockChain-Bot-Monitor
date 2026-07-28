@@ -297,6 +297,13 @@ async def _reply_with_result(doc: dict, label: str, change: float,
     if not chat_id or not message_id:
         return                      # alert predates this, or never reached Telegram
 
+    # Settings → Bots → Outcome Replies. Checked here rather than at the
+    # checkpoint so switching it off silences Telegram without stopping the
+    # measurement — the dashboard and digest carry on either way.
+    from . import registry
+    if not await registry.is_enabled("outcome_replies"):
+        return
+
     from .scanners import scfg
     if not scfg.TELEGRAM_BOT_TOKEN_SET:
         return

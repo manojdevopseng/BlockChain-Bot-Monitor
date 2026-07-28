@@ -51,6 +51,11 @@ DEFAULT_SERVICES: list[dict] = [
     # it is independent of the forwarder's userbot session.
     {"id": "bot_commands",          "category": BOT, "label": "Bot Commands",
      "chain": None,  "key": "commands",         "enabled": True},
+    # Posts each alert's 1h and 24h result as a reply to that alert. Separate
+    # from outcome tracking itself: off, the numbers still reach the dashboard
+    # and the digest, the Telegram group just stays quiet.
+    {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",
+     "chain": None,  "key": "outcome_replies",  "enabled": True},
 
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth",
