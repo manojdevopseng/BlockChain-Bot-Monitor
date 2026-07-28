@@ -65,8 +65,9 @@ TWEET_NARRATIVES = [
     "Robinhood or a Robinhood employee",
 ]
 
-# A *profile* is a coarser judgement — what kind of account is this.
-PROFILE_NARRATIVES = ["A tech token", "A gaming token", "Other"]
+# Rule 14 of the brief: the model must also say whether the thing is real.
+# Without it, "New AI Launch" fires on anyone who types the words — the
+# narrative is the easy half, the verification is the half that costs money.
 
 # How many tokens get the full treatment in one pass. The feed returns 100 and
 # most are already known; this caps the work when a burst arrives.
@@ -77,15 +78,6 @@ MAX_RECHECK_PER_CYCLE = 6
 # was judged — so it is retried. Capped, because a token nothing can classify
 # should not be asked about forever.
 MAX_ERROR_RETRIES = 5
-# The same name and ticker relaunched over and over is the commonest form of
-# spam on these chains, and the reference bot blocks it twice over: once for a
-# day, and once per process run. Both are kept — a restart should not reopen a
-# name that was already judged noise.
-MAX_NAME_OCCURRENCES = 3
-_name_counts: dict[str, int] = {}
-
-_DEDUP_WINDOW = 24 * 3600
-
 # A name and ticker gets at most this many rows in one IST day — the first
 # launch plus four repeats. The same pair relaunched over and over is the
 # commonest spam here, and five is enough to see that it is happening without
@@ -133,34 +125,38 @@ def allowed_verification() -> set[str]:
 
 # ── Grok ───────────────────────────────────────────────────────────────────────
 
-def _prompt(kind: str, token: dict, content: str, profile) -> str:
-    narratives = TWEET_NARRATIVES if kind == "tweet" else PROFILE_NARRATIVES
-    listed = "\n".join(f"{i + 1}. {n}" for i, n in enumerate(narratives))
-    what = "the post below" if kind == "tweet" else "the account below"
+def _prompt(token: dict, content: str, profile) -> str:
+    listed = "\n".join(f"{i + 1}. {n}" for i, n in enumerate(TWEET_NARRATIVES))
     return (
         f"Token name: {token.get('name') or '?'}\n"
         f"Token ticker: {token.get('symbol') or '?'}\n"
-        f"Account: @{profile.handle} ({profile.followers:,} followers, "
+        f"Posted by: @{profile.handle} ({profile.followers:,} followers, "
         f"verified: {profile.verified_type or 'no'})\n"
-        f"Account bio: {profile.bio[:400]}\n"
-        f"Content:\n{content[:1500]}\n\n"
-        f"Decide whether {what} matches one of these narratives:\n{listed}\n\n"
+        f"Post:\n{content[:1500]}\n\n"
+        f"Two questions about the post.\n\n"
+        f"First, does it match one of these narratives?\n{listed}\n\n"
+        "Second, is the thing it describes real — an event, product, launch or "
+        "post that actually happened and could be checked — rather than a claim "
+        "the post makes about itself?\n\n"
         "Reply with JSON only:\n"
         '{"match": true|false, "narrative": "the matched narrative or none", '
-        '"confidence": 1-10, "summary": "one short line on what it is about", '
+        '"verified": true|false, "confidence": 1-10, '
+        '"summary": "one short line on what it is about", '
         '"red_flags": ["..."]}\n\n'
         "Rules:\n"
         "- match false if none of the narratives fit.\n"
         "- match false for pure hype with no substance (moon, 1000x, buy now, "
         "emoji-only, giveaway spam).\n"
+        "- verified true only when the thing is real and checkable. A post that "
+        "merely announces itself is match true, verified false.\n"
         "- The token name does NOT have to match the narrative. Anyone can "
         "launch a token about any real event.\n"
-        "- confidence 8-10 only for a clear, verifiable, current event.\n"
+        "- confidence 8-10 for a clear, current, checkable event.\n"
         "- confidence 1-5 for a weak or guessed match."
     )
 
 
-async def ask_grok(session: aiohttp.ClientSession, kind: str, token: dict,
+async def ask_grok(session: aiohttp.ClientSession, token: dict,
                    content: str, profile) -> Optional[dict]:
     """One classification. None when the call fails — never a fabricated verdict."""
     if not settings.xai_api_key:
@@ -172,7 +168,7 @@ async def ask_grok(session: aiohttp.ClientSession, kind: str, token: dict,
              "content": ("You classify crypto token launches by the narrative "
                          "behind them. Reply with JSON only — no markdown, no "
                          "commentary.")},
-            {"role": "user", "content": _prompt(kind, token, content, profile)},
+            {"role": "user", "content": _prompt(token, content, profile)},
         ],
         "temperature": 0,
         "response_format": {"type": "json_object"},
@@ -200,28 +196,9 @@ async def ask_grok(session: aiohttp.ClientSession, kind: str, token: dict,
         return None
 
 
-# ── Dedup ──────────────────────────────────────────────────────────────────────
-
-async def _seen_count(key: str) -> int:
-    doc = await _col("ai_seen").find_one({"_id": key})
-    if not doc:
-        return 0
-    hits = [t for t in (doc.get("hits") or []) if time.time() - t < _DEDUP_WINDOW]
-    return len(hits)
-
-
-async def _mark_seen(key: str) -> None:
-    now = time.time()
-    doc = await _col("ai_seen").find_one({"_id": key})
-    hits = [t for t in ((doc or {}).get("hits") or []) if now - t < _DEDUP_WINDOW]
-    hits.append(now)
-    await _col("ai_seen").update_one(
-        {"_id": key}, {"$set": {"hits": hits, "dt": _utc_now()}}, upsert=True)
-
-
 # ── Decisions ──────────────────────────────────────────────────────────────────
 
-async def _record(token: dict, ref, profile, verdict: str, detail: dict) -> None:
+async def _record(token: dict, row, profile, verdict: str, detail: dict) -> None:
     """Every judgement is written, including the skips.
 
     A dashboard that only shows what fired cannot answer "why did it ignore
@@ -233,10 +210,14 @@ async def _record(token: dict, ref, profile, verdict: str, detail: dict) -> None
             {"$set": {
                 "address": token["address"], "symbol": token.get("symbol"),
                 "name": token.get("name"), "handle": getattr(profile, "handle", ""),
+                "name_key": (f"{(token.get('name') or '').lower().strip()}|"
+                             f"{(token.get('symbol') or '').lower().strip()}"),
                 "verified": getattr(profile, "verified", False),
                 "verified_type": getattr(profile, "verified_type", ""),
                 "followers": getattr(profile, "followers", 0),
-                "kind": getattr(ref, "kind", "none"), "link": getattr(ref, "raw", ""),
+                "kind": (row or {}).get("kind", "none"),
+                "link": (row or {}).get("link", ""),
+                "excerpt": (row or {}).get("excerpt", ""),
                 "verdict": verdict, **detail,
                 "at": time.time(), "dt": _utc_now(),
                 # The IST day this was decided — the same boundary the archives
@@ -292,184 +273,70 @@ async def _notify(session: aiohttp.ClientSession, text: str, address: str) -> bo
         return False
 
 
-# ── The two branches ───────────────────────────────────────────────────────────
+# ── Judging ────────────────────────────────────────────────────────────────────
 
-def _passes(verdict: dict, narrative_is_other: bool) -> bool:
-    if not verdict.get("match"):
-        return False
-    floor = (settings.ai_other_min_confidence if narrative_is_other
-             else settings.ai_min_confidence)
-    return int(verdict.get("confidence") or 0) >= floor
-
-
-async def _handle_tweet(session, token: dict, ref, profile, row: dict) -> None:
-    # The post was read when the row was written; using it again costs nothing.
-    post = x_client.XPost(text=row.get("excerpt") or "",
-                          age_minutes=row.get("post_age_minutes"),
-                          found=bool(row.get("post_found")))
-    content = post.text if post.found else (token.get("description") or "")
-    if not content:
-        # Same order the reference bot uses: the post, else the token's own
-        # description, else there is nothing to judge and it is dropped.
-        await _record(token, ref, profile, "skipped", {"reason": "no content to read"})
-        return
-    if (post.age_minutes is not None
-            and post.age_minutes > settings.ai_tweet_max_age_hours * 60):
-        await _record(token, ref, profile, "skipped",
-                      {"reason": f"post is {post.age_minutes / 60:.0f}h old"})
+async def _judge(session, token: dict, row: dict, profile) -> None:
+    """Read the post behind the launch and put it to the model."""
+    text = row.get("excerpt") or ""
+    if not text.strip():
+        await _record(token, row, profile, "skipped", {"reason": "no post text to read"})
         return
 
-    verdict = await ask_grok(session, "tweet", token, content, profile)
+    verdict = await ask_grok(session, token, text, profile)
     if not verdict:
-        await _record(token, ref, profile, "error", {"reason": "no verdict from Grok"})
-        return
-    narrative = str(verdict.get("narrative") or "none")
-    if not _passes(verdict, narrative.strip().lower() == "other"):
-        await _record(token, ref, profile, "rejected",
-                      {"reason": verdict.get("summary") or "no narrative match",
-                       "narrative": narrative,
-                       "confidence": verdict.get("confidence")})
+        await _record(token, row, profile, "error", {"reason": "no verdict from Grok"})
         return
 
-    text = _message("🎯 <b>NARRATIVE MATCH</b>", token, token["address"], [
-        f"Narrative: <b>{esc(narrative)}</b> ({verdict.get('confidence')}/10)",
+    narrative = str(verdict.get("narrative") or "none")
+    confidence = int(verdict.get("confidence") or 0)
+    detail = {"narrative": narrative, "confidence": confidence,
+              "reason": verdict.get("summary") or "",
+              "verified_claim": bool(verdict.get("verified"))}
+
+    if not verdict.get("match") or confidence < settings.ai_min_confidence:
+        detail["reason"] = detail["reason"] or "no narrative match"
+        await _record(token, row, profile, "rejected", detail)
+        return
+
+    # Matched the narrative but the model could not stand behind it being real.
+    # Worth seeing, not worth acting on — that is what Launching is for.
+    if not verdict.get("verified"):
+        await _record(token, row, profile, "launching", detail)
+        log.info(f"[AI] LAUNCHING {token.get('symbol')} — {narrative} "
+                 f"({confidence}/10), unverified")
+        return
+
+    text_out = _message("🎯 <b>NARRATIVE MATCH</b>", token, token["address"], [
+        f"Narrative: <b>{esc(narrative)}</b> ({confidence}/10)",
         f"{esc(str(verdict.get('summary') or ''))}",
         f"By @{esc(profile.handle)} · {profile.followers:,} followers "
         f"· {esc(profile.verified_type or 'verified')}",
     ])
-    sent = await _notify(session, text, token["address"])
-    await _record(token, ref, profile, "matched",
-                  {"narrative": narrative, "confidence": verdict.get("confidence"),
-                   "reason": verdict.get("summary"), "sent": sent})
-    log.info(f"[AI] MATCH {token.get('symbol')} — {narrative} "
-             f"({verdict.get('confidence')}/10) via @{profile.handle}")
+    sent = await _notify(session, text_out, token["address"])
+    detail["sent"] = sent
+    await _record(token, row, profile, "matched", detail)
+    log.info(f"[AI] MATCH {token.get('symbol')} — {narrative} ({confidence}/10) "
+             f"via @{profile.handle}")
 
-
-async def _handle_profile(session, token: dict, ref, profile) -> None:
-    # Follower count is not a gate. It was one — accounts over a million were
-    # skipped — and it is kept only as an opt-in knob, off by default: a large
-    # account is as likely to be the real story as a small one.
-    if (settings.ai_big_account_followers
-            and profile.followers >= settings.ai_big_account_followers):
-        await _record(token, ref, profile, "skipped",
-                      {"reason": f"account too big ({profile.followers:,})"})
-        return
-
-    post = await x_client.fetch_post(session, ref)
-    found_ca = x_client.find_contract(profile.bio, post.text if post.found else "")
-
-    if found_ca:
-        if found_ca == token["address"].lower():
-            text = _message("✅ <b>MATCHED</b>", token, token["address"], [
-                f"@{esc(profile.handle)} published this contract "
-                f"· {profile.followers:,} followers",
-            ])
-            sent = await _notify(session, text, token["address"])
-            await _record(token, ref, profile, "matched",
-                          {"reason": "profile CA equals token CA", "sent": sent})
-            log.info(f"[AI] MATCHED {token.get('symbol')} via @{profile.handle}")
-        else:
-            await _record(token, ref, profile, "skipped",
-                          {"reason": "profile advertises a different contract",
-                           "found_ca": found_ca})
-        return
-
-    # No contract anywhere yet. Seen this name before with the same silence?
-    name_key = f"launching:{(token.get('name') or '').lower()}|" \
-               f"{(token.get('symbol') or '').lower()}"
-    if await _seen_count(name_key):
-        await _record(token, ref, profile, "skipped",
-                      {"reason": "same name already reported as launching"})
-        return
-
-    verdict = await ask_grok(session, "profile", token,
-                             post.text if post.found else profile.bio, profile)
-    if not verdict:
-        await _record(token, ref, profile, "error", {"reason": "no verdict from Grok"})
-        return
-    narrative = str(verdict.get("narrative") or "none")
-    if not _passes(verdict, narrative.strip().lower() == "other"):
-        await _record(token, ref, profile, "rejected",
-                      {"reason": verdict.get("summary") or "no narrative match",
-                       "narrative": narrative,
-                       "confidence": verdict.get("confidence")})
-        return
-
-    text = _message("🚀 <b>LAUNCHING</b>", token, token["address"], [
-        f"Narrative: <b>{esc(narrative)}</b> ({verdict.get('confidence')}/10)",
-        f"{esc(str(verdict.get('summary') or ''))}",
-        f"@{esc(profile.handle)} · {profile.followers:,} followers "
-        f"· no contract published yet",
-    ])
-    sent = await _notify(session, text, token["address"])
-    await _mark_seen(name_key)
-    await _col("ai_watch").update_one(
-        {"_id": f"{profile.handle.lower()}:{token['address']}"},
-        {"$set": {"handle": profile.handle, "address": token["address"],
-                  "symbol": token.get("symbol"), "name": token.get("name"),
-                  "status": "launching", "first_seen": time.time(),
-                  "last_check": time.time(), "dt": _utc_now()}},
-        upsert=True,
-    )
-    await _record(token, ref, profile, "launching",
-                  {"narrative": narrative, "confidence": verdict.get("confidence"),
-                   "reason": verdict.get("summary"), "sent": sent})
-    log.info(f"[AI] LAUNCHING {token.get('symbol')} via @{profile.handle}")
-
-
-async def _recheck_launching(session) -> None:
-    """Ask each pending profile again whether it has published a contract yet."""
-    cutoff = time.time() - settings.ai_launching_watch_hours * 3600
-    rows = await _col("ai_watch").find({"status": "launching"}).to_list(500)
-    rows = [r for r in rows if r.get("first_seen", 0) >= cutoff]
-    stale = [r["_id"] for r in await _col("ai_watch").find(
-        {"status": "launching"}).to_list(500) if r.get("first_seen", 0) < cutoff]
-    if stale:
-        await _col("ai_watch").update_many({"_id": {"$in": stale}},
-                                           {"$set": {"status": "expired"}})
-
-    rows.sort(key=lambda r: r.get("last_check", 0))
-    for row in rows[:MAX_RECHECK_PER_CYCLE]:
-        await _col("ai_watch").update_one({"_id": row["_id"]},
-                                          {"$set": {"last_check": time.time()}})
-        profile = await x_client.fetch_profile(session, row["handle"])
-        ref = x_client.parse_ref(row["handle"])
-        post = await x_client.fetch_post(session, ref)
-        found = x_client.find_contract(profile.bio, post.text if post.found else "")
-        if not found:
-            continue
-        if found != str(row["address"]).lower():
-            await _col("ai_watch").update_one(
-                {"_id": row["_id"]},
-                {"$set": {"status": "mismatch", "found_ca": found}})
-            continue
-        token = {"name": row.get("name"), "symbol": row.get("symbol"),
-                 "address": row["address"]}
-        text = _message("✅ <b>MATCHED</b>", token, row["address"], [
-            f"@{esc(row['handle'])} has now published this contract",
-        ])
-        sent = await _notify(session, text, row["address"])
-        await _col("ai_watch").update_one(
-            {"_id": row["_id"]},
-            {"$set": {"status": "matched", "found_ca": found, "sent": sent}})
-        log.info(f"[AI] MATCHED (late) {row.get('symbol')} via @{row['handle']}")
-
-
-# ── Judging pass ───────────────────────────────────────────────────────────────
 
 async def run_once(session: aiohttp.ClientSession) -> int:
-    """Judge the launches the feed has collected. Returns how many were judged.
+    """Judge the launches the feed has collected. Returns how many reached the model.
 
     Reads from `x_links`, which the PumpPortal socket fills — nothing here goes
-    near GMGN. The X account was already resolved when the row was written, so
-    this pass is the gates and the model, nothing else.
+    near GMGN, and the X account was already resolved when the row was written.
+    Everything before the model is a cheap, deterministic gate; the model is
+    asked once, about the post, and only when a launch has earned it.
     """
+    # Oldest first, deliberately. The rule is that the FIRST launch of a name
+    # goes to the model and its copies do not, and judging newest-first gave
+    # that backwards: the copy was judged and the original skipped as a repeat.
     rows = await _col("x_links").find(
         {"judged": {"$ne": True}, "kind": {"$in": list(_LINKED_KINDS)}}
-    ).to_list(500)
-    rows.sort(key=lambda r: r.get("found_at") or 0, reverse=True)
+    ).sort("found_at", 1).limit(200).to_list(200)
 
     judged = 0
+    today = ist_date_str(time.time())
+
     for row in rows:
         if judged >= MAX_PER_CYCLE:
             break
@@ -485,63 +352,46 @@ async def run_once(session: aiohttp.ClientSession) -> int:
             continue                      # never could be judged; stop asking
 
         token = {"address": address, "symbol": row.get("symbol") or "",
-                 "name": row.get("name") or "",
-                 "description": row.get("description") or ""}
-        ref = x_client.XRef(handle=row.get("handle") or "",
-                            status_id=("1" if row.get("kind") == "tweet" else ""),
-                            raw=row.get("link") or "", kind=row.get("kind") or "none")
+                 "name": row.get("name") or ""}
         profile = x_client.XProfile(
             handle=row.get("handle") or "", verified=bool(row.get("verified")),
             verified_type=row.get("verified_type") or "",
             followers=int(row.get("followers") or 0),
             bio=row.get("excerpt") or "", found=bool(row.get("resolved")))
 
-        # One viral link gets attached to a run of copycat tokens. Reading it
-        # more than a couple of times a day is money spent on the same answer.
-        link_key = f"link:{ref.handle.lower()}:{row.get('link', '')}"
-        if await _seen_count(link_key) >= settings.ai_max_link_reads:
-            await _record(token, ref, profile, "skipped",
-                          {"reason": "link already analysed today"})
-            await _mark_judged(address)
-            continue
-
-        # A name and ticker seen three times in this run, or at all in the last
-        # day, is a relaunch — the commonest spam on this chain.
-        name_key = (f"name:{(token['name'] or '').lower().strip()}|"
+        name_key = (f"{(token['name'] or '').lower().strip()}|"
                     f"{(token['symbol'] or '').lower().strip()}")
-        if _name_counts.get(name_key, 0) >= MAX_NAME_OCCURRENCES:
-            await _mark_judged(address)
-            continue
-        if await _seen_count(name_key):
-            await _record(token, ref, profile, "skipped",
-                          {"reason": "same name and ticker seen today"})
+
+        # 1. An account with no followers is nobody, whatever it posted.
+        if profile.followers <= 0:
+            await _record(token, row, profile, "skipped", {"reason": "account has no followers"})
             await _mark_judged(address)
             continue
 
-        if not profile.found:
-            await _record(token, ref, profile, "skipped",
-                          {"reason": "account not found"})
-            await _mark_judged(address)
-            continue
-        if not profile.verified or profile.verified_type.lower() not in allowed_verification():
-            await _record(token, ref, profile, "skipped",
-                          {"reason": f"not verified ({profile.verified_type or 'none'})"})
+        # 2. The same name, ticker AND link, seen again: the first of those went
+        #    to the model, and the copies would only buy the same answer twice.
+        same = await _col("ai_decisions").find_one(
+            {"name_key": name_key, "link": row.get("link") or ""}, {"_id": 1})
+        if same:
+            await _record(token, row, profile, "skipped",
+                          {"reason": "same name, ticker and link already judged"})
             await _mark_judged(address)
             continue
 
-        # Registered before the model is asked, not after.
-        await _mark_seen(link_key)
-        await _mark_seen(name_key)
-        _name_counts[name_key] = _name_counts.get(name_key, 0) + 1
+        # 3. The same name and ticker already judged today. The day runs from
+        #    midnight IST, the same boundary the rest of the project uses.
+        today_same = await _col("ai_decisions").find_one(
+            {"name_key": name_key, "day": today}, {"_id": 1})
+        if today_same:
+            await _record(token, row, profile, "skipped",
+                          {"reason": "same name and ticker already judged today"})
+            await _mark_judged(address)
+            continue
+
         judged += 1
-
-        if row.get("kind") == "tweet":
-            await _handle_tweet(session, token, ref, profile, row)
-        else:
-            await _handle_profile(session, token, ref, profile)
+        await _judge(session, token, row, profile)
         await _mark_judged(address)
 
-    await _recheck_launching(session)
     return judged
 
 
@@ -955,20 +805,10 @@ async def stats() -> dict:
     col = _col("ai_decisions")
     counts = {v: await col.count_documents({"verdict": v})
               for v in ("matched", "launching", "rejected", "skipped", "error")}
-    watching = await _col("ai_watch").count_documents({"status": "launching"})
     return {
         "enabled": bool(settings.xai_api_key),
         "dry_run": settings.ai_dry_run,
         "model": settings.xai_model,
         "total": await col.count_documents({}),
-        "watching": watching,
         **counts,
     }
-
-
-async def watching() -> list[dict]:
-    rows = await _col("ai_watch").find({}).sort("first_seen", -1).limit(200).to_list(200)
-    for r in rows:
-        r.pop("_id", None)
-        r["gmgn_url"] = _gmgn(r.get("address", ""))
-    return rows

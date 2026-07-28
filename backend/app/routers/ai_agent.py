@@ -84,10 +84,3 @@ async def drops(hours: int = Query(24, ge=1, le=168)):
     worth chasing.
     """
     return {"items": await ai_agent.drops(hours=hours)}
-
-
-@router.get("/watching")
-async def watching():
-    """Profiles reported as Launching, still being re-checked for a contract."""
-    rows = await ai_agent.watching()
-    return {"total": len(rows), "items": rows}

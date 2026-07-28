@@ -211,7 +211,6 @@ _TTL_COLLECTIONS = {
     # "why was this token ignored" stays answerable for the same window.
     "ai_decisions": "alert_retention_days",
     "ai_seen": "log_retention_days",
-    "ai_watch": "alert_retention_days",
     # Rolling record of tokens and their X links, so the page has something to
     # paint before the next loop pass.
     "x_links": "log_retention_days",
@@ -284,7 +283,6 @@ async def ensure_indexes() -> None:
         ("ai_decisions",       [("at", -1)]),
         ("ai_decisions",       [("verdict", 1), ("at", -1)]),   # verdict tabs
         ("ai_decisions",       [("day", -1)]),                  # History filter
-        ("ai_watch",           [("first_seen", -1)]),
     ]
     for coll, keys in plan:
         try:
