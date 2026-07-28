@@ -40,12 +40,15 @@ function useTick(ms = 1000): number {
   return n;
 }
 
-// Seconds matter here — these tokens are a minute or two old — so the age is
-// shown to the second rather than rounded to whole minutes.
+// Seconds only while they mean something. A launch is worth watching by the
+// second in its first minute; after that the seconds are just noise ticking in
+// the corner of the eye, so the age rounds to minutes and then to hours.
 function ageLabel(ts: number): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
   if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  const h = Math.floor(s / 3600);
+  return `${h}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
 function useDebounced(value: string, ms = 250): string {
@@ -89,8 +92,7 @@ function XCheck() {
       ) : (
         <>
           <p className="mb-3 text-xs text-text-dim">
-            The newest Robinhood tokens, their X link, and what came back — read
-            new pump.fun launches whose X account is verified, pushed by
+            New pump.fun launches whose X account is verified, pushed by
             PumpPortal as they happen. The link comes from the token's own
             metadata, so it arrives with the launch — a row is typically a second
             or two old. Any kind of tick counts; unverified accounts are not
