@@ -56,7 +56,18 @@ CYCLE_SECONDS = 60          # how often to look for due checks
 # becoming priceable tripled the queue, and at 8/cycle new alerts sat behind a
 # backlog of 215 waiting for their entry price.
 MAX_PER_CYCLE = 40
+# …of which at most this many go on entry pricing. Without a split, entry
+# pricing starved the checkpoints outright: rows needing an entry price sort
+# first, and while any 40 of them existed no checkpoint was ever reached. 146
+# alerts sat 11 hours with an entry price and not one reading.
+MAX_ENTRY_PER_CYCLE = 25
 STALE_AFTER = 36 * 3600     # stop chasing an alert this old
+
+# How many times a price lookup may come back empty before the row is closed.
+# A row that can never be priced — no pool, or a chain we cannot read — used to
+# be retried every single cycle forever, and because those rows sort to the
+# front they consumed the whole budget on every pass.
+MAX_PRICE_TRIES = 5
 
 # An entry price taken later than this after the alert is no longer measuring
 # that alert. It is still recorded — throwing the row away helps nobody — but
@@ -191,6 +202,7 @@ async def _run_once(client) -> int:
     docs.sort(key=lambda d: (d.get("entry_price") is not None,
                              -float(d.get("created_at") or 0)))
 
+    entry_calls = 0
     for doc in docs:
         if calls >= MAX_PER_CYCLE:
             break
@@ -210,9 +222,21 @@ async def _run_once(client) -> int:
         # The entry price is taken on the first pass, not at alert time: the
         # alert path must not wait on a network call.
         if doc.get("entry_price") is None:
+            if entry_calls >= MAX_ENTRY_PER_CYCLE:
+                continue                  # leave the rest of the budget for checks
             price = await _price(client, doc.get("chain"), doc["address"], doc)
             calls += 1
+            entry_calls += 1
             if price is None:
+                tries = int(doc.get("price_tries") or 0) + 1
+                update = {"price_tries": tries}
+                if tries >= MAX_PRICE_TRIES:
+                    # Closed, not deleted: the alert still happened, we simply
+                    # never found a price for it.
+                    update.update({"done": True, "price_source": "unavailable"})
+                    log.debug(f"[OUTCOME] giving up on {doc.get('symbol')} "
+                              f"after {tries} price attempts")
+                await _col().update_one({"_id": doc["_id"]}, {"$set": update})
                 continue
             late = now - float(doc.get("created_at") or now) > ENTRY_GRACE_SECONDS
             await _col().update_one(
@@ -233,6 +257,14 @@ async def _run_once(client) -> int:
         price = await _price(client, doc.get("chain"), doc["address"], doc)
         calls += 1
         if price is None:
+            # Same give-up rule as entry pricing: a pool that has been drained
+            # or delisted answers nothing, and retrying it every minute for 36
+            # hours costs a slot that a live row needs.
+            tries = int(doc.get("price_tries") or 0) + 1
+            update = {"price_tries": tries}
+            if tries >= MAX_PRICE_TRIES:
+                update["done"] = True
+            await _col().update_one({"_id": doc["_id"]}, {"$set": update})
             continue
 
         entry = float(doc["entry_price"])
@@ -242,7 +274,7 @@ async def _run_once(client) -> int:
         finished = len(checks) >= len(CHECKPOINTS)
         await _col().update_one(
             {"_id": doc["_id"]},
-            {"$set": {"checks": checks, "done": finished,
+            {"$set": {"checks": checks, "done": finished, "price_tries": 0,
                       "best_pct": max([c["change_pct"] for c in checks.values()])}},
         )
         log.info(f"[OUTCOME] {doc.get('symbol')} {label}: {change:+.1f}% "

@@ -153,23 +153,30 @@ async def _token_decimals(rpc: _Rpc, token: str) -> int:
     return _decimals[key]
 
 
-async def _find_pool(rpc: _Rpc, token: str, dex: str) -> Optional[str]:
-    """Locate the pool for a token detected before pairs were recorded."""
+async def _find_pool(rpc: _Rpc, token: str, dex: str) -> tuple[Optional[str], str]:
+    """Locate a token's pool. Returns (pool address, which dex it turned out to be).
+
+    The dex is often unknown: premium-caller rows carry an address and nothing
+    else, and those are the majority of Robinhood rows. Rather than give up,
+    both factories are asked — whichever answers also tells us how to read the
+    pool, which is the part the caller actually needs.
+    """
     weth = config.RBH_WETH
     if not weth:
-        return None
-    if dex == "v2" and config.RBH_V2_FACTORY:
-        got = await rpc.call(config.RBH_V2_FACTORY,
-                             _SEL_GET_PAIR + _addr_arg(token) + _addr_arg(weth))
-        return f"0x{got:040x}" if got else None
-    if dex == "v3" and config.RBH_V3_FACTORY:
+        return None, dex
+    if dex in ("", "v3", "noxa") and config.RBH_V3_FACTORY:
         for fee in _V3_FEES:
             got = await rpc.call(
                 config.RBH_V3_FACTORY,
                 _SEL_GET_POOL + _addr_arg(token) + _addr_arg(weth) + _uint_arg(fee))
             if got:
-                return f"0x{got:040x}"
-    return None
+                return f"0x{got:040x}", "v3"
+    if dex in ("", "v2", "noxa") and config.RBH_V2_FACTORY:
+        got = await rpc.call(config.RBH_V2_FACTORY,
+                             _SEL_GET_PAIR + _addr_arg(token) + _addr_arg(weth))
+        if got:
+            return f"0x{got:040x}", "v2"
+    return None, dex
 
 
 async def _price_in_weth(rpc: _Rpc, *, token: str, dex: str, pair: Optional[str],
@@ -191,7 +198,7 @@ async def _price_in_weth(rpc: _Rpc, *, token: str, dex: str, pair: Optional[str]
         return _from_sqrt(sqrt_price, token_dec, bool(weth_is_token0))
 
     if not pair:
-        pair = await _find_pool(rpc, token, dex)
+        pair, dex = await _find_pool(rpc, token, dex)
         if not pair:
             return None
 
