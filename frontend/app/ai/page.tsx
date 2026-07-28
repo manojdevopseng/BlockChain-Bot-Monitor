@@ -376,17 +376,28 @@ function XCheck() {
 }
 
 export default function AiPage() {
+  const [limit, setLimit] = useState(PAGE);
   const [q, setQ] = useState("");
+  const [followers, setFollowers] = useState("");
+  const [date, setDate] = useState("");
   const [verdict, setVerdict] = useState<string>("");
   const query = useDebounced(q);
+  const minFollowers = useDebounced(followers);
 
-  const params = new URLSearchParams({ limit: "150" });
+  const params = new URLSearchParams({ limit: String(limit) });
   if (verdict) params.set("verdict", verdict);
   if (query) params.set("q", query);
+  // Only when a number is actually typed — an empty box is no filter, not zero.
+  if (/^\d+$/.test(minFollowers)) params.set("min_followers", minFollowers);
+  if (date) params.set("date", date);
 
   const { data: stats } = useApi<any>("/api/ai/stats");
   const { data } = useApi<any>(`/api/ai/decisions?${params.toString()}`);
+  const { data: datesData } = useApi<any>("/api/ai/decision-dates",
+    { refreshInterval: 300000 });
   const { data: watch } = useApi<any>("/api/ai/watching");
+  // A filter change starts again at the first page.
+  useEffect(() => setLimit(PAGE), [query, minFollowers, date, verdict]);
 
   const items: any[] = data?.items ?? [];
   const watching: any[] = (watch?.items ?? []).filter((w: any) => w.status === "launching");
@@ -478,6 +489,14 @@ export default function AiPage() {
         count={data?.total ?? items.length}
         controls={<>
           <SearchBox value={q} onChange={setQ} placeholder="symbol / address / handle / narrative" />
+          <Input
+            value={followers}
+            onChange={(e) => setFollowers(e.target.value.replace(/\D/g, ""))}
+            placeholder="min followers"
+            inputMode="numeric"
+            className="h-8 w-32 text-xs"
+          />
+          <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
           {VERDICTS.map((v) => (
             <Button key={v.id} size="sm" variant={verdict === v.id ? "primary" : "outline"}
               onClick={() => setVerdict(v.id)}>{v.label}</Button>
@@ -505,7 +524,8 @@ export default function AiPage() {
             <tbody>
               {items.length === 0 ? (
                 <tr><td colSpan={7} className="px-3 py-10 text-center text-text-dim">
-                  {query || verdict ? "Nothing matches this filter"
+                  {query || verdict || minFollowers ? "Nothing matches this filter"
+                    : date ? `No decisions on ${date}`
                     : "No decisions yet — the agent is off, or has no key"}
                 </td></tr>
               ) : items.map((d: any, i: number) => (

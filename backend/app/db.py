@@ -282,6 +282,8 @@ async def ensure_indexes() -> None:
         ("x_links",            [("og", 1), ("found_at", -1)]),   # OG section
         ("ai_decisions",       "address"),
         ("ai_decisions",       [("at", -1)]),
+        ("ai_decisions",       [("verdict", 1), ("at", -1)]),   # verdict tabs
+        ("ai_decisions",       [("day", -1)]),                  # History filter
         ("ai_watch",           [("first_seen", -1)]),
     ]
     for coll, keys in plan:

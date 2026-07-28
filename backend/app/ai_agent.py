@@ -239,6 +239,9 @@ async def _record(token: dict, ref, profile, verdict: str, detail: dict) -> None
                 "kind": getattr(ref, "kind", "none"), "link": getattr(ref, "raw", ""),
                 "verdict": verdict, **detail,
                 "at": time.time(), "dt": _utc_now(),
+                # The IST day this was decided — the same boundary the archives
+                # and the launch sections use, so "today" means one thing.
+                "day": ist_date_str(time.time()),
             },
              "$inc": {"tries": 1}},
             upsert=True,
@@ -912,11 +915,32 @@ async def x_links(limit: int = 40, q: str | None = None,
     }
 
 
-async def recent(limit: int = 100, verdict: Optional[str] = None) -> dict:
-    """Decisions newest first, with the count of everything the filter matches."""
+async def decision_dates() -> list[str]:
+    """IST days that have decisions, newest first — the History dropdown."""
+    days = [d for d in await _col("ai_decisions").distinct("day") if d]
+    return sorted(days, key=lambda x: datetime.strptime(x, "%d-%m-%Y"), reverse=True)
+
+
+async def recent(limit: int = 200, verdict: Optional[str] = None,
+                 q: Optional[str] = None, min_followers: int = 0,
+                 day: Optional[str] = None) -> dict:
+    """Decisions newest first, with the count of everything the filter matches.
+
+    Every filter is applied by the query. Searching a page of results and
+    calling that a search means the answer changes with the page size, which is
+    not a search anyone can trust.
+    """
     flt: dict[str, Any] = {}
     if verdict:
         flt["verdict"] = verdict
+    if day:
+        flt["day"] = day
+    if min_followers > 0:
+        flt["followers"] = {"$gte": min_followers}
+    if q:
+        rx = {"$regex": re.escape(q.lstrip("@")), "$options": "i"}
+        flt["$or"] = [{f: rx} for f in
+                      ("address", "handle", "symbol", "name", "narrative", "reason")]
     total = await _col("ai_decisions").count_documents(flt)
     docs = await _col("ai_decisions").find(flt).sort("at", -1).limit(limit).to_list(limit)
     out: list[dict] = []

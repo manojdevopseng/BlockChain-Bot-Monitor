@@ -23,21 +23,18 @@ async def decisions(
     limit: int = Query(200, ge=1, le=5000),
     verdict: str | None = Query(None, pattern="^(matched|launching|rejected|skipped|error)$"),
     q: str | None = None,
+    min_followers: int = Query(0, ge=0),
+    date: str | None = None,          # DD-MM-YYYY (IST) — History filter
 ):
-    got = await ai_agent.recent(limit=limit, verdict=verdict)
-    items = got["items"]
-    if q:
-        # Searching narrows the page in hand, so the count has to narrow with it
-        # rather than keep reporting the unfiltered total.
-        needle = q.lower()
-        items = [
-            d for d in items
-            if needle in f"{d.get('symbol','')} {d.get('name','')} "
-                         f"{d.get('address','')} {d.get('handle','')} "
-                         f"{d.get('narrative','')}".lower()
-        ]
-        return {"total": len(items), "shown": len(items), "items": items}
-    return {"total": got["total"], "shown": got["shown"], "items": items}
+    """Decisions, newest first. Every filter is applied by the query."""
+    return await ai_agent.recent(limit=limit, verdict=verdict, q=q,
+                                 min_followers=min_followers, day=date)
+
+
+@router.get("/decision-dates")
+async def decision_dates():
+    """IST days that have decisions, newest first."""
+    return {"dates": await ai_agent.decision_dates()}
 
 
 @router.get("/xdates")
