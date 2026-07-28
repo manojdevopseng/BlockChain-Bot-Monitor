@@ -94,6 +94,21 @@ _DEDUP_WINDOW = 24 * 3600
 # across the whole project.
 MAX_PER_NAME_PER_DAY = 5
 
+# The OG rule. A name and ticker launched this many times inside this window is
+# somebody working at it, not a coincidence — and the one worth keeping is the
+# first, before the copies. Counted over EVERY launch, linked or not: the copies
+# are usually the ones that skip the socials, so counting only the linked ones
+# would miss the burst that makes the original interesting. Measured on stored
+# rows alone, repeats arrive seconds apart — six of one name inside a single
+# second in one case — so a minute is a wide window, not a tight one.
+OG_BURST_COUNT = 5
+OG_BURST_WINDOW = 60
+
+# name_key -> launches seen inside the window, oldest first. Held in memory: it
+# is a minute of traffic, and it must not cost a database round trip per launch.
+_recent_launches: dict[str, list[dict]] = {}
+_og_promoted: dict[str, float] = {}
+
 
 def _col(name: str):
     return db.get_collection(name)
@@ -592,6 +607,10 @@ async def x_feed_watch() -> None:
                         if (msg.get("pool") or "").lower() != "pump":
                             continue
                         seen.add(mint)
+                        # Counted here, not in the handler: the handler drops
+                        # anything without a verified X link, and those are
+                        # exactly the copies this rule needs to see.
+                        await _note_for_og(msg)
                         asyncio.create_task(_handle_launch(session, gate, msg))
             except asyncio.CancelledError:
                 log.info("[PUMP] stopped")
@@ -676,35 +695,85 @@ async def _handle_launch(session: aiohttp.ClientSession,
                                              {"$set": {**row, "dt": _utc_now()}},
                                              upsert=True)
             await hub.broadcast("x_link", row)
-            await _promote_og(name_key, day)
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[PUMP] {msg.get('symbol')}: {exc}")
 
 
-async def _promote_og(name_key: str, day: str) -> None:
-    """Mark the original once a name has been relaunched to the cap.
+async def _note_for_og(msg: dict) -> None:
+    """Count a launch towards the OG rule, and promote the original on the fifth.
 
-    A name that comes back five times in a day is not a coincidence, it is
-    somebody working — and the one worth looking at is the first, before the
-    copies. So when the fifth arrives, the earliest of that name is flagged and
-    surfaces in its own section; the copies stay where they are.
+    Every launch counts, linked or not. What surfaces is the first of the burst —
+    and if that one had no X account, its row simply has no account to show,
+    which is honest: the burst is the signal here, not the profile.
     """
+    now = time.time()
+    name_key = (f"{(msg.get('name') or '').lower().strip()}|"
+                f"{(msg.get('symbol') or '').lower().strip()}")
+    if name_key == "|":
+        return
+
+    launches = [l for l in _recent_launches.get(name_key, [])
+                if now - l["ts"] <= OG_BURST_WINDOW]
+    launches.append({"ts": now, "mint": (msg.get("mint") or "").strip(),
+                     "symbol": msg.get("symbol") or "?",
+                     "name": msg.get("name") or ""})
+    _recent_launches[name_key] = launches
+
+    # Names that went quiet are dropped, so this holds a minute of traffic
+    # rather than a day of it.
+    if len(_recent_launches) > 4000:
+        for key, seen in list(_recent_launches.items()):
+            if not seen or now - seen[-1]["ts"] > OG_BURST_WINDOW:
+                _recent_launches.pop(key, None)
+        for key, when in list(_og_promoted.items()):
+            if now - when > 3600:
+                _og_promoted.pop(key, None)
+
+    if len(launches) < OG_BURST_COUNT:
+        return
+    if now - _og_promoted.get(name_key, 0) < OG_BURST_WINDOW:
+        return                            # this burst already has its original
+    _og_promoted[name_key] = now
+    await _promote_og(name_key, launches[0])
+
+
+async def _promote_og(name_key: str, first: dict) -> None:
+    """Flag the first launch of a burst, storing it if nothing stored it before."""
+    from .ws_hub import hub
     try:
-        if await _col("x_links").count_documents(
-                {"name_key": name_key, "day": day}) < MAX_PER_NAME_PER_DAY:
+        mint = (first.get("mint") or "").strip()
+        if not mint:
             return
-        first = await _col("x_links").find(
-            {"name_key": name_key, "day": day}).sort("found_at", 1).limit(1).to_list(1)
-        if not first or first[0].get("og"):
-            return                        # nothing to mark, or already marked
-        await _col("x_links").update_one(
-            {"_id": first[0]["_id"]},
-            {"$set": {"og": True, "og_at": time.time()}})
-        from .ws_hub import hub
-        log.info(f"[PUMP] OG: {first[0].get('symbol')} — "
-                 f"{MAX_PER_NAME_PER_DAY} launches under this name today")
-        await hub.broadcast("x_link", {**{k: v for k, v in first[0].items()
-                                          if k not in ("_id", "dt")}, "og": True})
+        existing = await _col("x_links").find_one({"address": mint})
+        if existing and existing.get("og"):
+            return
+        if existing:
+            await _col("x_links").update_one(
+                {"address": mint}, {"$set": {"og": True, "og_at": time.time()}})
+            row = {**{k: v for k, v in existing.items() if k not in ("_id", "dt")},
+                   "og": True}
+        else:
+            # Nothing stored it, so the original had no X link or an unverified
+            # account. It still belongs here — the burst is what makes it worth
+            # seeing — and the account columns are left empty rather than faked.
+            row = {
+                "address": mint, "symbol": first.get("symbol") or "?",
+                "name": first.get("name") or "", "link": "", "kind": "none",
+                "handle": "", "resolved": False, "verified": False,
+                "verified_type": "", "followers": 0, "post_found": False,
+                "post_source": "", "post_age_minutes": None, "excerpt": "",
+                "open_timestamp": first.get("ts") or time.time(),
+                "found_at": first.get("ts") or time.time(),
+                "source": "pumpportal", "judged": True,
+                "day": ist_date_str(first.get("ts") or time.time()),
+                "name_key": name_key, "og": True, "og_at": time.time(),
+            }
+            await _col("x_links").update_one({"address": mint},
+                                             {"$set": {**row, "dt": _utc_now()}},
+                                             upsert=True)
+        log.info(f"[PUMP] OG: {row.get('symbol')} — {OG_BURST_COUNT} launches "
+                 f"under this name inside {OG_BURST_WINDOW}s")
+        await hub.broadcast("x_link", row)
     except Exception as exc:  # noqa: BLE001
         log.debug(f"[PUMP] could not promote OG for {name_key}: {exc}")
 
@@ -746,9 +815,10 @@ async def x_links(limit: int = 40, q: str | None = None,
     # returns the newest of the OLDEST documents — which is what this did once
     # the collection outgrew the slice, so the section froze on rows two hours
     # old while fresh ones were being written the whole time.
-    flt: dict[str, Any] = {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True}
-    if og_only:
-        flt["og"] = True
+    # The live view is the verified, linked launches. The OG view is a burst's
+    # original, which may have had neither — so it filters on the flag alone.
+    flt: dict[str, Any] = ({"og": True} if og_only
+                           else {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True})
     if day:
         flt["day"] = day
     if min_followers > 0:
