@@ -413,10 +413,21 @@ async def detection_dates(chain: str = Query("eth", pattern="^(eth|rbh|sol)$")):
 async def detection_history(
     chain: str = Query("eth", pattern="^(eth|rbh|sol)$"),
     date: str = "",
+    q: str | None = None,
+    multi: bool = False,
 ):
-    """One archived day's detections (same shape as live)."""
+    """One archived day's detections (same shape, and same filters, as live).
+
+    `q` and `multi` are applied here for the same reason they exist on the live
+    view: the controls stay on screen when a date is picked, so a search that
+    quietly did nothing looked like a day with no matches.
+    """
     doc = await db.get_collection("premium_archive").find_one({"chain": chain, "date": date})
     items = (doc or {}).get("items", [])
+    if multi:
+        items = [d for d in items if int(d.get("count") or 0) >= 2]
+    if q:
+        items = [d for d in items if _match_q(d, q)]
     for d in items:
         d["gmgn_url"] = _gmgn_url(chain, d.get("address", ""))
     return {"date": date, "total": len(items), "items": items}

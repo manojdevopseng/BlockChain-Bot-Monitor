@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Layers, Fuel, ExternalLink, ArrowRightLeft } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -17,6 +17,17 @@ import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
 
+// Every search box on this page feeds straight into an SWR key, so an
+// un-debounced one fired a request per character typed.
+function useDebounced(value: string, ms = 250): string {
+  const [out, setOut] = useState(value.trim());
+  useEffect(() => {
+    const t = setTimeout(() => setOut(value.trim()), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return out;
+}
+
 /* ── 1-3: premium caller detection panels (RBH / ETH / SOL) ─────────────── */
 
 function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title: string }) {
@@ -24,11 +35,19 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
   const [multi, setMulti] = useState(false);
   const [date, setDate] = useState("");
 
+  const query = useDebounced(q);
+
+  // The search and Multi filters go to whichever view is showing. They used to
+  // be dropped in history mode while the controls stayed on screen, so typing
+  // there silently did nothing.
+  const filters = `&multi=${multi}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
   const { data: datesData } = useApi<any>(`/api/forwarder/detections/dates?chain=${chain}`);
   const live = useApi<any>(
-    date ? null : `/api/forwarder/detections?chain=${chain}&multi=${multi}${q ? `&q=${encodeURIComponent(q)}` : ""}`
+    date ? null : `/api/forwarder/detections?chain=${chain}${filters}`
   );
-  const hist = useApi<any>(date ? `/api/forwarder/detections/history?chain=${chain}&date=${date}` : null);
+  const hist = useApi<any>(
+    date ? `/api/forwarder/detections/history?chain=${chain}&date=${date}${filters}` : null
+  );
   const data = date ? hist.data : live.data;
 
   return (
@@ -56,7 +75,8 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
 
 function GasSection() {
   const [q, setQ] = useState("");
-  const { data } = useApi<any>(`/api/rpc/gas/recent${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+  const query = useDebounced(q);
+  const { data } = useApi<any>(`/api/rpc/gas/recent${query ? `?q=${encodeURIComponent(query)}` : ""}`);
   const { data: summary } = useApi<any>("/api/rpc/gas");
   const items = data?.items ?? [];
 
@@ -152,8 +172,9 @@ function CrossChainSection({ flow, title }: { flow: "eth" | "rbh"; title: string
   const [q, setQ] = useState("");
   const [date, setDate] = useState("");
   const { data: datesData } = useApi<any>(`/api/alerts/crosschain/dates?flow=${flow}`);
+  const query = useDebounced(q);
   const { data } = useApi<any>(
-    `/api/alerts/crosschain?flow=${flow}${q ? `&q=${encodeURIComponent(q)}` : ""}${date ? `&date=${date}` : ""}`
+    `/api/alerts/crosschain?flow=${flow}${query ? `&q=${encodeURIComponent(query)}` : ""}${date ? `&date=${date}` : ""}`
   );
 
   return (
