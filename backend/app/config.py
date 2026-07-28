@@ -114,8 +114,13 @@ class Settings(BaseSettings):
     # Grok 4 Fast. Non-reasoning is the cheaper of the pair and this is a
     # classification job, not a reasoning one.
     xai_model: str = "grok-4-fast-non-reasoning"
-    # Seconds between passes over the Robinhood new-pairs feed.
-    ai_scan_interval: int = 60
+    # PumpPortal's public realtime feed: pump.fun launches, pushed. No key —
+    # the key on that site is for its trading endpoints, which nothing here
+    # touches. Each token carries its own metadata URI, and that URI carries the
+    # X link, so the link arrives with the token instead of a minute later.
+    pumpportal_ws: str = "wss://pumpportal.fun/api/data"
+    # Seconds between passes of the judging loop over tokens already collected.
+    ai_scan_interval: int = 20
     # Decisions are recorded but nothing is sent while this is on. Leave it on
     # for the first day and read the log before letting it post.
     ai_dry_run: bool = True

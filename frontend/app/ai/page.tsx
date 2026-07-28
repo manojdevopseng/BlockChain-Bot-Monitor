@@ -90,10 +90,10 @@ function XCheck() {
         <>
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
-            new pump.fun tokens that carry an X link. The mint is seen by our own
-            on-chain discovery about a second after it is created, but the link
-            itself comes from GMGN — so a row appears when that arrives, and its
-            Age is the real time since launch.
+            new pump.fun launches that carry an X link, pushed by PumpPortal as
+            they happen. The link comes from the token's own metadata, so it
+            arrives with the launch rather than a minute later — a row is
+            typically a second or two old.
             {data && (
               <> 
                 <span className="text-text">{data.resolved}</span> accounts

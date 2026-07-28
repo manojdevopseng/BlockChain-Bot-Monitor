@@ -166,15 +166,6 @@ class SolDiscovery:
             return
         self._seen.add(mint)
         log.info(f"[SOL-RPC] new mint via {label}: {symbol or '?'} {mint}")
-        # The dashboard's live X list is built from this: it is the earliest
-        # anything knows the mint exists, about a second in, where GMGN's feed
-        # takes longer. Scheduled, never awaited — a slow write here must not
-        # hold up the socket.
-        if label == "pump":
-            from app import ai_agent
-            from app.scanners import storage_repo
-            storage_repo._schedule(
-                ai_agent.note_onchain_token(mint, symbol or "?", symbol or "", label))
         res = self._on_mint(mint, label)
         if asyncio.iscoroutine(res):
             await res

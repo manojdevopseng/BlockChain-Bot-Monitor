@@ -16,8 +16,9 @@ Two branches, because a token's link points at one of two things:
 
 What this deliberately does not do:
 
-  • It never touches the GMGN client's pacing. One call per cycle to the same
-    shared, rate-limited client — the Cloudflare fix stays exactly as it is.
+  • It never calls gmgn.ai at all. The launches come from PumpPortal's socket
+    and the socials from each token's own metadata URI, so the scanners' GMGN
+    budget and its hard-won Cloudflare pacing are untouched by anything here.
   • It never makes an AI call it can avoid. One X link gets reused across a
     stream of copycat tokens, so links and names are deduplicated first; the
     reference bot learned that the hard way.
@@ -36,6 +37,7 @@ from typing import Any, Optional
 import aiohttp
 
 from . import db, x_client
+from .scanners.bounded_set import BoundedSet
 from .config import settings
 from .scanners.slog import get_logger
 from .util import esc
@@ -269,8 +271,11 @@ def _passes(verdict: dict, narrative_is_other: bool) -> bool:
     return int(verdict.get("confidence") or 0) >= floor
 
 
-async def _handle_tweet(session, token: dict, ref, profile) -> None:
-    post = await x_client.fetch_post(session, ref)
+async def _handle_tweet(session, token: dict, ref, profile, row: dict) -> None:
+    # The post was read when the row was written; using it again costs nothing.
+    post = x_client.XPost(text=row.get("excerpt") or "",
+                          age_minutes=row.get("post_age_minutes"),
+                          found=bool(row.get("post_found")))
     content = post.text if post.found else (token.get("description") or "")
     if not content:
         # Same order the reference bot uses: the post, else the token's own
@@ -415,106 +420,103 @@ async def _recheck_launching(session) -> None:
         log.info(f"[AI] MATCHED (late) {row.get('symbol')} via @{row['handle']}")
 
 
-# ── Pass ───────────────────────────────────────────────────────────────────────
+# ── Judging pass ───────────────────────────────────────────────────────────────
 
-def _is_pump(pair: dict) -> bool:
-    """pump.fun and nothing else.
+async def run_once(session: aiohttp.ClientSession) -> int:
+    """Judge the launches the feed has collected. Returns how many were judged.
 
-    Read from the pair, not guessed from the mint's "pump" suffix — a token can
-    carry that suffix and be listed under another launchpad.
+    Reads from `x_links`, which the PumpPortal socket fills — nothing here goes
+    near GMGN. The X account was already resolved when the row was written, so
+    this pass is the gates and the model, nothing else.
     """
-    info = pair.get("base_token_info") or {}
-    label = (pair.get("launchpad") or info.get("launchpad") or "").lower()
-    return "pump" in label
+    rows = await _col("x_links").find(
+        {"judged": {"$ne": True}, "kind": {"$in": list(_LINKED_KINDS)}}
+    ).to_list(500)
+    rows.sort(key=lambda r: r.get("found_at") or 0, reverse=True)
 
-
-def _social_link(pair: dict) -> str:
-    info = pair.get("base_token_info") or {}
-    links = info.get("social_links") or {}
-    for key in ("twitter_username", "twitter", "x"):
-        val = links.get(key) or info.get(key)
-        if val:
-            return str(val)
-    return ""
-
-
-async def run_once(client, session: aiohttp.ClientSession) -> int:
-    """One pass over the Robinhood feed. Returns how many tokens were judged."""
-    pairs = await client.get_chain_new_pairs("robinhood", 100)
     judged = 0
-
-    for pair in pairs:
+    for row in rows:
         if judged >= MAX_PER_CYCLE:
             break
-        info = pair.get("base_token_info") or {}
-        address = (pair.get("base_address") or info.get("address") or "").lower()
-        if not address:
-            continue
+        address = row["address"]
+
         prior = await _col("ai_decisions").find_one(
             {"address": address}, {"verdict": 1, "tries": 1})
         if prior and prior.get("verdict") != "error":
-            continue                      # judged already, one verdict per token
+            await _mark_judged(address)
+            continue                      # one verdict per token
         if prior and int(prior.get("tries") or 0) >= MAX_ERROR_RETRIES:
+            await _mark_judged(address)
             continue                      # never could be judged; stop asking
 
-        token = {"address": address,
-                 "symbol": info.get("symbol") or pair.get("symbol") or "",
-                 "name": info.get("name") or info.get("symbol") or "",
-                 "description": info.get("description") or pair.get("description") or ""}
-
-        link = _social_link(pair)
-        ref = x_client.parse_ref(link)
-        if ref.kind == "none":
-            continue                      # no X link at all — silently ignored
+        token = {"address": address, "symbol": row.get("symbol") or "",
+                 "name": row.get("name") or "",
+                 "description": row.get("description") or ""}
+        ref = x_client.XRef(handle=row.get("handle") or "",
+                            status_id=("1" if row.get("kind") == "tweet" else ""),
+                            raw=row.get("link") or "", kind=row.get("kind") or "none")
+        profile = x_client.XProfile(
+            handle=row.get("handle") or "", verified=bool(row.get("verified")),
+            verified_type=row.get("verified_type") or "",
+            followers=int(row.get("followers") or 0),
+            bio=row.get("excerpt") or "", found=bool(row.get("resolved")))
 
         # One viral link gets attached to a run of copycat tokens. Reading it
         # more than a couple of times a day is money spent on the same answer.
-        link_key = f"link:{ref.handle.lower()}:{ref.status_id}"
+        link_key = f"link:{ref.handle.lower()}:{row.get('link', '')}"
         if await _seen_count(link_key) >= settings.ai_max_link_reads:
-            await _record(token, ref, x_client.XProfile(handle=ref.handle),
-                          "skipped", {"reason": "link already analysed today"})
+            await _record(token, ref, profile, "skipped",
+                          {"reason": "link already analysed today"})
+            await _mark_judged(address)
             continue
 
         # A name and ticker seen three times in this run, or at all in the last
-        # day, is a relaunch. Checked before the account lookup so a spam run
-        # costs nothing at all.
+        # day, is a relaunch — the commonest spam on this chain.
         name_key = (f"name:{(token['name'] or '').lower().strip()}|"
                     f"{(token['symbol'] or '').lower().strip()}")
         if _name_counts.get(name_key, 0) >= MAX_NAME_OCCURRENCES:
+            await _mark_judged(address)
             continue
         if await _seen_count(name_key):
-            await _record(token, ref, x_client.XProfile(handle=ref.handle),
-                          "skipped", {"reason": "same name and ticker seen today"})
+            await _record(token, ref, profile, "skipped",
+                          {"reason": "same name and ticker seen today"})
+            await _mark_judged(address)
             continue
 
-        profile = await x_client.fetch_profile(session, ref.handle)
         if not profile.found:
             await _record(token, ref, profile, "skipped",
                           {"reason": "account not found"})
+            await _mark_judged(address)
             continue
         if not profile.verified or profile.verified_type.lower() not in allowed_verification():
             await _record(token, ref, profile, "skipped",
                           {"reason": f"not verified ({profile.verified_type or 'none'})"})
+            await _mark_judged(address)
             continue
 
-        # Registered before the model is asked, not after: two copies of the
-        # same token arriving in one pass would otherwise both go through.
+        # Registered before the model is asked, not after.
         await _mark_seen(link_key)
         await _mark_seen(name_key)
         _name_counts[name_key] = _name_counts.get(name_key, 0) + 1
         judged += 1
-        if ref.is_tweet:
-            await _handle_tweet(session, token, ref, profile)
+
+        if row.get("kind") == "tweet":
+            await _handle_tweet(session, token, ref, profile, row)
         else:
             await _handle_profile(session, token, ref, profile)
+        await _mark_judged(address)
 
     await _recheck_launching(session)
     return judged
 
 
+async def _mark_judged(address: str) -> None:
+    await _col("x_links").update_one({"address": address},
+                                     {"$set": {"judged": True}})
+
+
 async def watch() -> None:
     """Supervisor task. Off unless the Settings switch and an xAI key are set."""
-    from . import supervisor
     log.info(f"[AI] narrative agent started — model {settings.xai_model}, "
              f"dry-run {settings.ai_dry_run}")
     async with aiohttp.ClientSession() as session:
@@ -523,10 +525,7 @@ async def watch() -> None:
                 await asyncio.sleep(settings.ai_scan_interval)
                 if not settings.xai_api_key:
                     continue              # nothing to ask; stay idle, stay quiet
-                client = getattr(supervisor, "_client", None)
-                if client is None:
-                    continue              # scanners not up — no GMGN client to borrow
-                await run_once(client, session)
+                await run_once(session)
             except asyncio.CancelledError:
                 log.info("[AI] narrative agent stopped")
                 return
@@ -536,154 +535,134 @@ async def watch() -> None:
 
 # ── Reporting (dashboard) ──────────────────────────────────────────────────────
 
-# How often the X feed is read. This is the one GMGN call the loop makes, and it
-# goes through the shared client at its existing pace, so gmgn.ai sees no change
-# in request rate — only in which requests fill the same budget.
-X_FEED_INTERVAL = 15
-# How long a token is kept while it has no X link of its own.
-_PENDING_MAX_AGE = 10 * 60
-
-
-async def note_onchain_token(address: str, symbol: str, name: str,
-                             dex: str = "") -> None:
-    """Record a mint the instant on-chain discovery sees it, X link or not.
-
-    The pump.fun program's own CreateEvent reaches us about a second after the
-    mint exists, where GMGN's feed takes longer. Recording it here is what makes
-    the Age column the real time since launch rather than the time GMGN got
-    round to listing it.
-
-    The X link is not knowable at this point — only GMGN carries it — so the row
-    lands pending and is filled in when the feed catches up. A row that never
-    gets one is dropped.
-    """
-    address = (address or "").strip()
-    if not address:
-        return
-    from .ws_hub import hub
-    try:
-        if await _col("x_links").find_one({"address": address}, {"_id": 1}):
-            return
-        row = {
-            "address": address, "symbol": symbol or "?", "name": name or "",
-            "dex": dex, "link": "", "kind": "pending", "handle": "",
-            "resolved": False, "verified": False, "verified_type": "",
-            "followers": 0, "post_found": False, "post_source": "",
-            "post_age_minutes": None, "excerpt": "",
-            "open_timestamp": time.time(), "found_at": time.time(),
-            "source": "onchain",
-        }
-        await _col("x_links").update_one({"address": address},
-                                         {"$set": {**row, "dt": _utc_now()}},
-                                         upsert=True)
-        await hub.broadcast("x_link", row)
-    except Exception as exc:  # noqa: BLE001
-        log.debug(f"[X-FEED] could not note {symbol}: {exc}")
-
-
 async def x_feed_watch() -> None:
-    """Read the X feed continuously and push each new token as it appears.
+    """Hold PumpPortal's realtime socket and record every launch that has an X link.
 
-    This used to be an on-demand endpoint the page polled, which meant tokens
-    arrived in clumps a poll apart and a row could be a minute behind the chain
-    before anyone saw it. Reading on a loop and broadcasting each new row
-    instead makes them appear one at a time, the moment they are found — the
-    dashboard stops asking and starts being told.
+    This replaced a GMGN polling loop. GMGN publishes pump.fun pairs in bursts,
+    so a token was 20-60 seconds old before its link could even be read, and no
+    polling interval could fix that — the data was not there yet. PumpPortal
+    pushes the launch itself, and the token's own metadata URI carries the
+    twitter field, so the link arrives with the token: measured, the metadata
+    fetch takes 0.3 to 1.4 seconds and 11 of 12 launches had one.
 
-    Runs whether or not the model is enabled: knowing the X side is alive is
-    useful in its own right, and it is one call per pass either way.
+    No API key. The key PumpPortal issues is for its trading endpoints, and
+    nothing in this project trades.
     """
-    from . import supervisor
+    seen: BoundedSet = BoundedSet(20000)
+    backoff = 1.0
+    # A burst of launches must not queue up behind each other's metadata fetch,
+    # and must not open fifty sockets at once either.
+    gate = asyncio.Semaphore(4)
 
-    log.info(f"[X-FEED] started — reading every {X_FEED_INTERVAL}s")
+    log.info(f"[PUMP] connecting to {settings.pumpportal_ws}")
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                await asyncio.sleep(X_FEED_INTERVAL)
-                client = getattr(supervisor, "_client", None)
-                if client is None:
-                    continue          # scanners down: no client to borrow
-                await _read_x_feed(client, session, on_row=_publish)
-                # GMGN publishes a pair's socials within a minute or so of it
-                # appearing. A row still pending well past that has none, and
-                # keeping it costs a document per token launched — which on this
-                # chain is thousands a day.
-                await _col("x_links").delete_many(
-                    {"kind": "pending", "found_at": {"$lt": time.time() - _PENDING_MAX_AGE}})
+                import websockets
+                async with websockets.connect(settings.pumpportal_ws,
+                                              max_size=2 ** 22,
+                                              ping_interval=30,
+                                              ping_timeout=60) as ws:
+                    await ws.send(json.dumps({"method": "subscribeNewToken"}))
+                    backoff = 1.0
+                    log.info("[PUMP] subscribed to new launches")
+                    async for raw in ws:
+                        try:
+                            msg = json.loads(raw)
+                        except Exception:  # noqa: BLE001
+                            continue
+                        mint = (msg.get("mint") or "").strip()
+                        if not mint or mint in seen:
+                            continue
+                        # pump.fun only. The feed labels the pool, so this is
+                        # read rather than inferred from the mint's suffix.
+                        if (msg.get("pool") or "").lower() != "pump":
+                            continue
+                        seen.add(mint)
+                        asyncio.create_task(_handle_launch(session, gate, msg))
             except asyncio.CancelledError:
-                log.info("[X-FEED] stopped")
+                log.info("[PUMP] stopped")
                 return
             except Exception as exc:  # noqa: BLE001
-                log.warning(f"[X-FEED] pass failed: {exc}")
+                log.warning(f"[PUMP] socket error: {exc}")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
 
 
-async def _publish(row: dict) -> None:
+async def _handle_launch(session: aiohttp.ClientSession,
+                         gate: asyncio.Semaphore, msg: dict) -> None:
+    """One launch: read its metadata, resolve the X account, publish the row."""
     from .ws_hub import hub
-    await _col("x_links").update_one({"address": row["address"]},
-                                     {"$set": {**row, "dt": _utc_now()}},
-                                     upsert=True)
-    await hub.broadcast("x_link", row)
-    log.debug(f"[X-FEED] {row['symbol']} @{row['handle']} ({row['kind']})")
+
+    async with gate:
+        try:
+            meta = await _fetch_metadata(session, msg.get("uri") or "")
+            link = str(meta.get("twitter") or "")
+            if not link:
+                return                    # no X account: nothing to judge, no row
+
+            mint = msg["mint"].strip()
+            ref = x_client.parse_ref(link)
+            if ref.kind == "none":
+                return                    # not an account — a community link, say
+
+            prof = await x_client.fetch_profile(session, ref.handle)
+            post = await x_client.fetch_post(session, ref) if prof.found else x_client.XPost()
+
+            row = {
+                "address": mint,
+                "symbol": msg.get("symbol") or "?",
+                "name": msg.get("name") or "",
+                "link": link,
+                "kind": ref.kind,
+                "handle": ref.handle,
+                "resolved": prof.found,
+                "verified": prof.verified,
+                "verified_type": prof.verified_type,
+                "followers": prof.followers,
+                "post_found": post.found,
+                "post_source": post.source,
+                "post_age_minutes": (round(post.age_minutes)
+                                     if post.age_minutes is not None else None),
+                "excerpt": (post.text or prof.bio or "")[:160],
+                "description": str(meta.get("description") or "")[:400],
+                "website": str(meta.get("website") or "")[:200],
+                "market_cap_sol": float(msg.get("marketCapSol") or 0),
+                "creator": msg.get("traderPublicKey") or "",
+                # The launch is now, so this is the launch time — not the time
+                # some aggregator got round to listing it.
+                "open_timestamp": time.time(),
+                "found_at": time.time(),
+                "source": "pumpportal",
+                "judged": False,
+            }
+            await _col("x_links").update_one({"address": mint},
+                                             {"$set": {**row, "dt": _utc_now()}},
+                                             upsert=True)
+            await hub.broadcast("x_link", row)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[PUMP] {msg.get('symbol')}: {exc}")
 
 
-async def _read_x_feed(client, session: aiohttp.ClientSession,
-                       limit: int = 12, on_row=None) -> list[dict]:
-    """Resolve the newest linked tokens, publishing each one as it is ready.
-
-    Published per row, not per pass: the X lookups take a second or two each, so
-    holding a batch until the end of a pass was what made four or five tokens
-    land at the same moment.
-    """
-    pairs = await client.get_sol_new_pairs(limit=200)
-    pairs = [p for p in pairs if _is_pump(p)]
-    linked = [(p, _social_link(p)) for p in pairs]
-    linked = [(p, l) for p, l in linked if l]
-
-    rows: list[dict] = []
-    for pair, link in linked[:limit]:
-        info = pair.get("base_token_info") or {}
-        address = (pair.get("base_address") or info.get("address") or "").strip()
-        if not address:
-            continue
-        known = await _col("x_links").find_one({"address": address},
-                                               {"_id": 1, "kind": 1})
-        if known and known.get("kind") != "pending":
-            continue                  # already resolved; not news any more
-        ref = x_client.parse_ref(link)
-        prof = (await x_client.fetch_profile(session, ref.handle)
-                if ref.kind != "none" else x_client.XProfile(handle=""))
-        post = (await x_client.fetch_post(session, ref)
-                if prof.found else x_client.XPost())
-        rows.append({
-            "symbol": info.get("symbol") or "?",
-            "address": (pair.get("base_address") or info.get("address") or ""),
-            "open_timestamp": float(pair.get("open_timestamp")
-                                    or info.get("creation_timestamp") or 0),
-            "link": link,
-            "kind": ref.kind,
-            "handle": ref.handle,
-            "resolved": prof.found,
-            "verified": prof.verified,
-            "verified_type": prof.verified_type,
-            "followers": prof.followers,
-            "post_found": post.found,
-            "post_source": post.source,
-            "post_age_minutes": (round(post.age_minutes)
-                                 if post.age_minutes is not None else None),
-            "excerpt": (post.text or prof.bio or "")[:160],
-            "found_at": time.time(),
-            "source": "gmgn",
-        })
-        if on_row is not None:
-            await on_row(rows[-1])
-    return rows
+async def _fetch_metadata(session: aiohttp.ClientSession, uri: str) -> dict:
+    """The launch's own metadata JSON — where the socials live."""
+    if not uri or not uri.startswith("http"):
+        return {}
+    try:
+        async with session.get(uri, timeout=aiohttp.ClientTimeout(total=8),
+                               headers={"User-Agent": "Mozilla/5.0 "
+                                                      "(compatible; BlockChainBot/1.0)"}) as r:
+            if r.status != 200:
+                return {}
+            return await r.json(content_type=None) or {}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
-# Link types that count as having an account behind them. A row starts as
-# `pending` — recorded from our own socket a second after the pair exists — and
-# only becomes displayable once GMGN publishes its socials. `none` means GMGN
-# published something that is not an account at all (a contract address in the
-# field, an X community link), which is not worth a row either.
+# Link types that count as an account behind the token. A launch whose metadata
+# names something else — an X community, a bare contract address — is not worth
+# a row, and one with no twitter field at all never becomes a row in the first
+# place.
 _LINKED_KINDS = ("tweet", "profile")
 
 
@@ -698,7 +677,6 @@ async def x_links(limit: int = 40) -> dict:
         r.pop("dt", None)
     return {
         "at": time.time(),
-        "interval": X_FEED_INTERVAL,
         "newest_age_minutes": (round((time.time() - rows[0]["open_timestamp"]) / 60, 1)
                                if rows and rows[0].get("open_timestamp") else None),
         "total": len(rows),
