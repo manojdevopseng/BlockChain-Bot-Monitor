@@ -40,12 +40,14 @@ FXTWITTER = "https://api.fxtwitter.com"
 NITTER_INSTANCES = (
     "https://nitter.net",
     "https://nitter.poast.org",
+    "https://nitter.cz",
     "https://nitter.privacydev.net",
     "https://nitter.unixfox.eu",
+    "https://nitter.fdn.fr",
 )
 
 _UA = {"User-Agent": "Mozilla/5.0 (compatible; BlockChainBot/1.0)"}
-_TIMEOUT = aiohttp.ClientTimeout(total=12)
+_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 # GMGN stores the link in several shapes: a bare handle, a handle with a status
 # path, or a full URL. All three end up here.

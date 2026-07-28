@@ -74,6 +74,12 @@ MAX_RECHECK_PER_CYCLE = 6
 # was judged — so it is retried. Capped, because a token nothing can classify
 # should not be asked about forever.
 MAX_ERROR_RETRIES = 5
+# The same name and ticker relaunched over and over is the commonest form of
+# spam on these chains, and the reference bot blocks it twice over: once for a
+# day, and once per process run. Both are kept — a restart should not reopen a
+# name that was already judged noise.
+MAX_NAME_OCCURRENCES = 3
+_name_counts: dict[str, int] = {}
 
 _DEDUP_WINDOW = 24 * 3600
 
@@ -265,8 +271,11 @@ def _passes(verdict: dict, narrative_is_other: bool) -> bool:
 
 async def _handle_tweet(session, token: dict, ref, profile) -> None:
     post = await x_client.fetch_post(session, ref)
-    if not post.found:
-        await _record(token, ref, profile, "skipped", {"reason": "post unavailable"})
+    content = post.text if post.found else (token.get("description") or "")
+    if not content:
+        # Same order the reference bot uses: the post, else the token's own
+        # description, else there is nothing to judge and it is dropped.
+        await _record(token, ref, profile, "skipped", {"reason": "no content to read"})
         return
     if (post.age_minutes is not None
             and post.age_minutes > settings.ai_tweet_max_age_hours * 60):
@@ -274,7 +283,7 @@ async def _handle_tweet(session, token: dict, ref, profile) -> None:
                       {"reason": f"post is {post.age_minutes / 60:.0f}h old"})
         return
 
-    verdict = await ask_grok(session, "tweet", token, post.text, profile)
+    verdict = await ask_grok(session, "tweet", token, content, profile)
     if not verdict:
         await _record(token, ref, profile, "error", {"reason": "no verdict from Grok"})
         return
@@ -439,7 +448,8 @@ async def run_once(client, session: aiohttp.ClientSession) -> int:
 
         token = {"address": address,
                  "symbol": info.get("symbol") or pair.get("symbol") or "",
-                 "name": info.get("name") or info.get("symbol") or ""}
+                 "name": info.get("name") or info.get("symbol") or "",
+                 "description": info.get("description") or pair.get("description") or ""}
 
         link = _social_link(pair)
         ref = x_client.parse_ref(link)
@@ -454,6 +464,18 @@ async def run_once(client, session: aiohttp.ClientSession) -> int:
                           "skipped", {"reason": "link already analysed today"})
             continue
 
+        # A name and ticker seen three times in this run, or at all in the last
+        # day, is a relaunch. Checked before the account lookup so a spam run
+        # costs nothing at all.
+        name_key = (f"name:{(token['name'] or '').lower().strip()}|"
+                    f"{(token['symbol'] or '').lower().strip()}")
+        if _name_counts.get(name_key, 0) >= MAX_NAME_OCCURRENCES:
+            continue
+        if await _seen_count(name_key):
+            await _record(token, ref, x_client.XProfile(handle=ref.handle),
+                          "skipped", {"reason": "same name and ticker seen today"})
+            continue
+
         profile = await x_client.fetch_profile(session, ref.handle)
         if not profile.found:
             await _record(token, ref, profile, "skipped",
@@ -464,7 +486,11 @@ async def run_once(client, session: aiohttp.ClientSession) -> int:
                           {"reason": f"not verified ({profile.verified_type or 'none'})"})
             continue
 
+        # Registered before the model is asked, not after: two copies of the
+        # same token arriving in one pass would otherwise both go through.
         await _mark_seen(link_key)
+        await _mark_seen(name_key)
+        _name_counts[name_key] = _name_counts.get(name_key, 0) + 1
         judged += 1
         if ref.is_tweet:
             await _handle_tweet(session, token, ref, profile)
