@@ -525,6 +525,67 @@ async def watch() -> None:
 
 # ── Reporting (dashboard) ──────────────────────────────────────────────────────
 
+# A live X check, for the dashboard. Cached, because it is served to a polling
+# page: without this, every refresh would re-read the feed and re-ask fxtwitter
+# for the same handles.
+_PROBE_TTL = 180
+_probe_cache: tuple[float, dict] = (0.0, {})
+
+
+async def x_probe(client, session: aiohttp.ClientSession, limit: int = 12) -> dict:
+    """Resolve the X link on the newest Robinhood tokens, and report what came back.
+
+    This answers "is the X side actually working" on its own, without the model
+    being involved — which matters, because the two fail for entirely different
+    reasons and the difference is invisible from a decisions table.
+    """
+    now = time.time()
+    if _probe_cache[1] and now - _probe_cache[0] < _PROBE_TTL:
+        return _probe_cache[1]
+
+    pairs = await client.get_chain_new_pairs("robinhood", 100)
+    linked = [(p, _social_link(p)) for p in pairs]
+    linked = [(p, l) for p, l in linked if l]
+
+    rows: list[dict] = []
+    for pair, link in linked[:limit]:
+        info = pair.get("base_token_info") or {}
+        ref = x_client.parse_ref(link)
+        prof = (await x_client.fetch_profile(session, ref.handle)
+                if ref.kind != "none" else x_client.XProfile(handle=""))
+        post = (await x_client.fetch_post(session, ref)
+                if prof.found else x_client.XPost())
+        rows.append({
+            "symbol": info.get("symbol") or "?",
+            "address": (pair.get("base_address") or info.get("address") or ""),
+            "link": link,
+            "kind": ref.kind,
+            "handle": ref.handle,
+            "resolved": prof.found,
+            "verified": prof.verified,
+            "verified_type": prof.verified_type,
+            "followers": prof.followers,
+            "post_found": post.found,
+            "post_source": post.source,
+            "post_age_minutes": (round(post.age_minutes)
+                                 if post.age_minutes is not None else None),
+            "excerpt": (post.text or prof.bio or "")[:160],
+        })
+
+    out = {
+        "at": now,
+        "pairs": len(pairs),
+        "with_link": len(linked),
+        "checked": len(rows),
+        "resolved": sum(1 for r in rows if r["resolved"]),
+        "verified": sum(1 for r in rows if r["verified"]),
+        "posts": sum(1 for r in rows if r["post_found"]),
+        "items": rows,
+    }
+    globals()["_probe_cache"] = (now, out)
+    return out
+
+
 async def recent(limit: int = 100, verdict: Optional[str] = None) -> list[dict]:
     flt: dict[str, Any] = {}
     if verdict:

@@ -36,6 +36,24 @@ async def decisions(
     return {"total": len(items), "items": items}
 
 
+@router.get("/xcheck")
+async def xcheck(limit: int = Query(12, ge=1, le=25)):
+    """Live check of the X side, independent of the model.
+
+    Borrows the scanners' GMGN client rather than opening one, so this cannot
+    add traffic outside the shared rate limiter.
+    """
+    import aiohttp
+
+    from .. import supervisor
+    client = getattr(supervisor, "_client", None)
+    if client is None:
+        return {"error": "scanners are not running, so there is no GMGN client "
+                         "to borrow", "items": []}
+    async with aiohttp.ClientSession() as session:
+        return await ai_agent.x_probe(client, session, limit=limit)
+
+
 @router.get("/watching")
 async def watching():
     """Profiles reported as Launching, still being re-checked for a contract."""
