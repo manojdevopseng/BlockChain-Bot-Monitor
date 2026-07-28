@@ -82,8 +82,11 @@ function Highlighted({ text, rx }: { text: string; rx: RegExp | null }) {
   for (let m = rx.exec(text); m !== null; m = rx.exec(text)) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     parts.push(
+      // The green Badge treatment the Verified column uses, minus the badge's
+      // own padding so a hit sits inside a sentence without breaking its rhythm.
       <mark key={`${m.index}-${m[0]}`}
-        className="rounded bg-brand/25 px-0.5 font-medium text-brand-soft">
+        className="rounded-md border border-accent-green/30 bg-accent-green/15
+                   px-1 py-0.5 text-[11px] font-medium text-accent-green">
         {m[0]}
       </mark>,
     );
