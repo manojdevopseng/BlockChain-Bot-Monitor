@@ -21,7 +21,7 @@ const EVENT_KEYS: Record<string, string[]> = {
   // One token, pushed the moment the X feed finds it. Revalidating the section
   // on the event is what makes rows arrive one at a time instead of a poll at a
   // time.
-  x_link: ["/api/ai/xcheck"],
+  x_link: ["/api/ai/xcheck", "/api/ai/og"],
 };
 
 const COLLAPSE_KEY = "sidebar_collapsed";

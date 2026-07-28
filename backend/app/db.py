@@ -277,6 +277,7 @@ async def ensure_indexes() -> None:
         ("x_links",            [("found_at", -1)]),
         ("x_links",            [("name_key", 1), ("day", 1)]),   # per-day cap
         ("x_links",            [("day", -1)]),                   # History filter
+        ("x_links",            [("og", 1), ("found_at", -1)]),   # OG section
         ("ai_decisions",       "address"),
         ("ai_decisions",       [("at", -1)]),
         ("ai_watch",           [("first_seen", -1)]),

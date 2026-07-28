@@ -676,8 +676,37 @@ async def _handle_launch(session: aiohttp.ClientSession,
                                              {"$set": {**row, "dt": _utc_now()}},
                                              upsert=True)
             await hub.broadcast("x_link", row)
+            await _promote_og(name_key, day)
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[PUMP] {msg.get('symbol')}: {exc}")
+
+
+async def _promote_og(name_key: str, day: str) -> None:
+    """Mark the original once a name has been relaunched to the cap.
+
+    A name that comes back five times in a day is not a coincidence, it is
+    somebody working — and the one worth looking at is the first, before the
+    copies. So when the fifth arrives, the earliest of that name is flagged and
+    surfaces in its own section; the copies stay where they are.
+    """
+    try:
+        if await _col("x_links").count_documents(
+                {"name_key": name_key, "day": day}) < MAX_PER_NAME_PER_DAY:
+            return
+        first = await _col("x_links").find(
+            {"name_key": name_key, "day": day}).sort("found_at", 1).limit(1).to_list(1)
+        if not first or first[0].get("og"):
+            return                        # nothing to mark, or already marked
+        await _col("x_links").update_one(
+            {"_id": first[0]["_id"]},
+            {"$set": {"og": True, "og_at": time.time()}})
+        from .ws_hub import hub
+        log.info(f"[PUMP] OG: {first[0].get('symbol')} — "
+                 f"{MAX_PER_NAME_PER_DAY} launches under this name today")
+        await hub.broadcast("x_link", {**{k: v for k, v in first[0].items()
+                                          if k not in ("_id", "dt")}, "og": True})
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[PUMP] could not promote OG for {name_key}: {exc}")
 
 
 async def _fetch_metadata(session: aiohttp.ClientSession, uri: str) -> dict:
@@ -702,21 +731,24 @@ async def _fetch_metadata(session: aiohttp.ClientSession, uri: str) -> dict:
 _LINKED_KINDS = ("tweet", "profile")
 
 
-async def x_link_dates() -> list[str]:
+async def x_link_dates(og_only: bool = False) -> list[str]:
     """IST days that have rows, newest first — the History dropdown."""
-    days = await _col("x_links").distinct("day")
+    days = await _col("x_links").distinct("day", {"og": True} if og_only else {})
     days = [d for d in days if d]
     return sorted(days, key=lambda x: datetime.strptime(x, "%d-%m-%Y"), reverse=True)
 
 
 async def x_links(limit: int = 40, q: str | None = None,
-                  min_followers: int = 0, day: str | None = None) -> dict:
+                  min_followers: int = 0, day: str | None = None,
+                  og_only: bool = False) -> dict:
     """Tokens with an X link, newest first. Read from Mongo — no upstream call."""
     # Sorted by Mongo, not in Python. Reading a fixed slice and sorting that
     # returns the newest of the OLDEST documents — which is what this did once
     # the collection outgrew the slice, so the section froze on rows two hours
     # old while fresh ones were being written the whole time.
     flt: dict[str, Any] = {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True}
+    if og_only:
+        flt["og"] = True
     if day:
         flt["day"] = day
     if min_followers > 0:

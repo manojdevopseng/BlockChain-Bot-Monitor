@@ -37,9 +37,23 @@ async def decisions(
 
 
 @router.get("/xdates")
-async def xdates():
+async def xdates(og: bool = False):
     """IST days with rows, newest first — the History dropdown."""
-    return {"dates": await ai_agent.x_link_dates()}
+    return {"dates": await ai_agent.x_link_dates(og_only=og)}
+
+
+@router.get("/og")
+async def og(
+    limit: int = Query(40, ge=1, le=200),
+    q: str | None = None,
+    date: str | None = None,
+):
+    """The originals: the first launch of a name that then came back to the cap.
+
+    A name relaunched five times in a day is somebody working at it, and the one
+    worth looking at is the one that came first — before the copies.
+    """
+    return await ai_agent.x_links(limit=limit, q=q, day=date, og_only=True)
 
 
 @router.get("/xcheck")

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Brain, CheckCircle2, Rocket, XCircle, ExternalLink, Eye, RefreshCw, Twitter } from "lucide-react";
+import { Brain, CheckCircle2, Crown, Rocket, XCircle, ExternalLink, Eye, RefreshCw, Twitter } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
@@ -99,6 +99,143 @@ function Highlighted({ text, rx }: { text: string; rx: RegExp | null }) {
   return <>{parts}</>;
 }
 
+// The launch table, shared by the live section and the OG one. Same nine
+// columns, same row rendering — two copies would have drifted the moment one
+// of them gained a column.
+function LaunchTable({ items, rx, empty }: {
+  items: any[];
+  rx: RegExp | null;
+  empty: string;
+}) {
+  return (
+        <TableScroll>
+          <table className="w-full min-w-[900px] text-sm">
+            <thead>
+              <tr className={`${STICKY_HEAD} border-b border-border`}>
+                <th className="px-3 py-2.5 font-medium">Token</th>
+                <th className="px-3 py-2.5 font-medium">Age</th>
+                <th className="px-3 py-2.5 font-medium">Link type</th>
+                <th className="px-3 py-2.5 font-medium">Account</th>
+                <th className="px-3 py-2.5 font-medium">Verified</th>
+                <th className="px-3 py-2.5 font-medium">Followers</th>
+                <th className="px-3 py-2.5 font-medium">Post</th>
+                <th className="px-3 py-2.5 font-medium">Text</th>
+                <th className="px-3 py-2.5 font-medium">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
+                  {empty}
+                </td></tr>
+              ) : items.map((r: any, i: number) => (
+                <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
+                  <td className="px-3 py-3">
+                    <span className="flex items-center gap-1.5">
+                      <a href={`https://gmgn.ai/sol/token/${r.address}`}
+                         target="_blank" rel="noopener noreferrer"
+                         title="View on GMGN"
+                         className="font-semibold text-brand-soft hover:underline">
+                        {r.symbol}
+                      </a>
+                      <CopyButton value={r.address} />
+                    </span>
+                    <span className="font-mono text-[11px] text-text-dim">
+                      {shortAddr(r.address)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 font-mono text-xs text-text-muted">
+                    {r.open_timestamp ? ageLabel(r.open_timestamp) : "—"}
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge variant={r.kind === "tweet" ? "purple" : "blue"}>
+                      {r.kind}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-3">
+                    {r.handle ? (
+                      <a href={`https://x.com/${r.handle}`} target="_blank" rel="noopener noreferrer"
+                         className="text-accent-blue hover:underline">@{r.handle}</a>
+                    ) : <span className="font-mono text-xs text-text-dim">{r.link?.slice(0, 24)}</span>}
+                    {!r.resolved && r.handle && (
+                      <span className="ml-2 text-xs text-accent-amber">not found</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge variant="green">{r.verified_type || "verified"}</Badge>
+                  </td>
+                  <td className="px-3 py-3 text-text-muted">
+                    {r.followers ? Number(r.followers).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-3 py-3">
+                    {r.post_found
+                      ? <span className="text-accent-green">{r.post_source}
+                          {r.post_age_minutes != null && (
+                            <span className="text-text-dim"> · {r.post_age_minutes}m</span>
+                          )}
+                        </span>
+                      : <span className="text-text-dim">—</span>}
+                  </td>
+                  <td className="max-w-[300px] px-3 py-3 text-text-muted">
+                    <Highlighted text={r.excerpt || ""} rx={rx} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="font-mono text-xs text-text-muted">
+                      {r.open_timestamp ? fmtDateTime(r.open_timestamp) : "—"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+  );
+}
+
+// A name relaunched to the daily cap is somebody working at it, and the first
+// of those launches is the one worth keeping — the rest are copies of it.
+function OGSection() {
+  const [q, setQ] = useState("");
+  const [date, setDate] = useState("");
+  const query = useDebounced(q);
+  const rx = useKeywordRegex();
+  useTick(1000);
+
+  const params = new URLSearchParams({ limit: "40" });
+  if (query) params.set("q", query);
+  if (date) params.set("date", date);
+
+  const { data } = useApi<any>(`/api/ai/og?${params.toString()}`, { refreshInterval: 60000 });
+  const { data: datesData } = useApi<any>("/api/ai/xdates?og=true", { refreshInterval: 300000 });
+  const items: any[] = data?.items ?? [];
+
+  return (
+    <CollapsibleSection
+      id="ai-og"
+      title="OG Pump.Fun Tokens"
+      icon={<Crown size={14} />}
+      count={items.length}
+      controls={<>
+        <SearchBox value={q} onChange={setQ} placeholder="address / @username / word" />
+        <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
+      </>}
+    >
+      <p className="mb-3 text-xs text-text-dim">
+        The first launch of a name and ticker that then came back five times in
+        the same IST day. Five is not a coincidence — it is somebody working at
+        it — and the original is the one that ran before the copies.
+      </p>
+      <LaunchTable
+        items={items}
+        rx={rx}
+        empty={query ? "Nothing matches this search"
+          : date ? `No originals on ${date}`
+          : "No name has hit five launches yet today"}
+      />
+    </CollapsibleSection>
+  );
+}
+
 // Proves the X side works on its own, with the model out of the picture. The
 // two halves fail for completely different reasons — no credits versus a dead
 // Nitter instance — and a decisions table cannot tell them apart.
@@ -124,6 +261,9 @@ function XCheck() {
   const rx = useKeywordRegex();
   useTick(1000);
   const items: any[] = data?.items ?? [];
+  const emptyText = query || minFollowers ? "Nothing matches this filter"
+    : date ? `No launches recorded on ${date}`
+    : "Nothing recorded yet";
 
   return (
     <CollapsibleSection
@@ -167,89 +307,7 @@ function XCheck() {
                 post text.</>
             )}
           </p>
-          <TableScroll>
-            <table className="w-full min-w-[900px] text-sm">
-              <thead>
-                <tr className={`${STICKY_HEAD} border-b border-border`}>
-                  <th className="px-3 py-2.5 font-medium">Token</th>
-                  <th className="px-3 py-2.5 font-medium">Age</th>
-                  <th className="px-3 py-2.5 font-medium">Link type</th>
-                  <th className="px-3 py-2.5 font-medium">Account</th>
-                  <th className="px-3 py-2.5 font-medium">Verified</th>
-                  <th className="px-3 py-2.5 font-medium">Followers</th>
-                  <th className="px-3 py-2.5 font-medium">Post</th>
-                  <th className="px-3 py-2.5 font-medium">Text</th>
-                  <th className="px-3 py-2.5 font-medium">When</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
-                    {query || minFollowers ? "Nothing matches this filter"
-                      : date ? `No launches recorded on ${date}`
-                      : "Nothing recorded yet"}
-                  </td></tr>
-                ) : items.map((r: any, i: number) => (
-                  <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
-                    <td className="px-3 py-3">
-                      <span className="flex items-center gap-1.5">
-                        <a href={`https://gmgn.ai/sol/token/${r.address}`}
-                           target="_blank" rel="noopener noreferrer"
-                           title="View on GMGN"
-                           className="font-semibold text-brand-soft hover:underline">
-                          {r.symbol}
-                        </a>
-                        <CopyButton value={r.address} />
-                      </span>
-                      <span className="font-mono text-[11px] text-text-dim">
-                        {shortAddr(r.address)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 font-mono text-xs text-text-muted">
-                      {r.open_timestamp ? ageLabel(r.open_timestamp) : "—"}
-                    </td>
-                    <td className="px-3 py-3">
-                      <Badge variant={r.kind === "tweet" ? "purple" : "blue"}>
-                        {r.kind}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-3">
-                      {r.handle ? (
-                        <a href={`https://x.com/${r.handle}`} target="_blank" rel="noopener noreferrer"
-                           className="text-accent-blue hover:underline">@{r.handle}</a>
-                      ) : <span className="font-mono text-xs text-text-dim">{r.link?.slice(0, 24)}</span>}
-                      {!r.resolved && r.handle && (
-                        <span className="ml-2 text-xs text-accent-amber">not found</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3">
-                      <Badge variant="green">{r.verified_type || "verified"}</Badge>
-                    </td>
-                    <td className="px-3 py-3 text-text-muted">
-                      {r.followers ? Number(r.followers).toLocaleString() : "—"}
-                    </td>
-                    <td className="px-3 py-3">
-                      {r.post_found
-                        ? <span className="text-accent-green">{r.post_source}
-                            {r.post_age_minutes != null && (
-                              <span className="text-text-dim"> · {r.post_age_minutes}m</span>
-                            )}
-                          </span>
-                        : <span className="text-text-dim">—</span>}
-                    </td>
-                    <td className="max-w-[300px] px-3 py-3 text-text-muted">
-                      <Highlighted text={r.excerpt || ""} rx={rx} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="font-mono text-xs text-text-muted">
-                        {r.open_timestamp ? fmtDateTime(r.open_timestamp) : "—"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
+          <LaunchTable items={items} rx={rx} empty={emptyText} />
         </>
       )}
     </CollapsibleSection>
@@ -350,6 +408,8 @@ export default function AiPage() {
       )}
 
       <XCheck />
+
+      <OGSection />
 
       <CollapsibleSection
         id="ai-decisions"
