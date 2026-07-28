@@ -72,6 +72,10 @@ TWEET_NARRATIVES = [
 # How many tokens get the full treatment in one pass. The feed returns 100 and
 # most are already known; this caps the work when a burst arrives.
 MAX_PER_CYCLE = 12
+# Of that budget, how many go on re-asking about launches queued while the model
+# was unreachable. Small on purpose: the queue is worth draining, but never at
+# the price of the launches still coming in.
+RETRY_PENDING_PER_CYCLE = 4
 # Launching profiles re-checked per pass, oldest check first.
 MAX_RECHECK_PER_CYCLE = 6
 # A verdict of "error" means the model could not be reached, not that the token
@@ -338,6 +342,11 @@ async def run_once(session: aiohttp.ClientSession) -> int:
     judged = 0
     today = ist_date_str(time.time())
 
+    # Anything queued waiting for the model gets a few attempts each pass,
+    # ahead of new work but on a budget of its own — a backlog of queued rows
+    # must not be able to starve the launches still arriving.
+    judged += await _retry_pending(session)
+
     for row in rows:
         if judged >= MAX_PER_CYCLE:
             break
@@ -394,13 +403,29 @@ async def run_once(session: aiohttp.ClientSession) -> int:
 
         judged += 1
         await _judge(session, token, row, profile)
-        # Left unjudged when it is only queued, so the next pass with a working
-        # model picks it up rather than leaving it parked for ever.
-        settled = await _col("ai_decisions").find_one(
-            {"address": address}, {"verdict": 1})
-        await _mark_judged(address, (settled or {}).get("verdict") != "pending")
+        await _mark_judged(address)
 
     return judged
+
+
+async def _retry_pending(session: aiohttp.ClientSession) -> int:
+    """Ask the model again about launches that cleared the gates while it was down."""
+    rows = await _col("ai_decisions").find({"verdict": "pending"}).sort(
+        "at", 1).limit(RETRY_PENDING_PER_CYCLE).to_list(RETRY_PENDING_PER_CYCLE)
+    done = 0
+    for d in rows:
+        token = {"address": d["address"], "symbol": d.get("symbol") or "",
+                 "name": d.get("name") or ""}
+        row = {"excerpt": d.get("excerpt") or "", "kind": d.get("kind") or "none",
+               "link": d.get("link") or ""}
+        profile = x_client.XProfile(
+            handle=d.get("handle") or "", verified=bool(d.get("verified")),
+            verified_type=d.get("verified_type") or "",
+            followers=int(d.get("followers") or 0), bio=d.get("excerpt") or "",
+            found=True)
+        await _judge(session, token, row, profile)
+        done += 1
+    return done
 
 
 async def _mark_judged(address: str, judged: bool = True) -> None:
