@@ -104,6 +104,12 @@ MAX_PER_NAME_PER_DAY = 5
 OG_BURST_COUNT = 5
 OG_BURST_WINDOW = 60
 
+# X can simply not answer — a timeout, a 429, a bad minute at the mirror. That
+# is not the same as an account being unverified, and dropping the launch for it
+# loses a real token silently. Retried this many times, this far apart.
+X_RETRIES = 3
+X_RETRY_DELAY = 20
+
 # name_key -> launches seen inside the window, oldest first. Held in memory: it
 # is a minute of traffic, and it must not cost a database round trip per launch.
 _recent_launches: dict[str, list[dict]] = {}
@@ -631,12 +637,14 @@ async def _handle_launch(session: aiohttp.ClientSession,
             meta = await _fetch_metadata(session, msg.get("uri") or "")
             link = str(meta.get("twitter") or "")
             if not link:
-                return                    # no X account: nothing to judge, no row
+                await _count_drop("no metadata" if not meta else "no twitter link", msg)
+                return
 
             mint = msg["mint"].strip()
             ref = x_client.parse_ref(link)
             if ref.kind == "none":
-                return                    # not an account — a community link, say
+                await _count_drop("link is not an account", msg)
+                return
 
             day = ist_date_str(time.time())
             name_key = (f"{(msg.get('name') or '').lower().strip()}|"
@@ -644,19 +652,30 @@ async def _handle_launch(session: aiohttp.ClientSession,
             already = await _col("x_links").count_documents(
                 {"name_key": name_key, "day": day})
             if already >= MAX_PER_NAME_PER_DAY:
-                log.debug(f"[PUMP] {msg.get('symbol')} skipped — "
-                          f"{already} today already under this name")
+                await _count_drop("name already at the daily cap", msg)
                 return
 
             prof = await x_client.fetch_profile(session, ref.handle)
+            for attempt in range(X_RETRIES):
+                if not prof.lookup_failed:
+                    break
+                # No answer from X. Wait and ask again rather than treat silence
+                # as "unverified" — that is how a real token goes missing.
+                await asyncio.sleep(X_RETRY_DELAY)
+                prof = await x_client.fetch_profile(session, ref.handle)
+            if prof.lookup_failed:
+                await _count_drop("x lookup failed", msg, ref.handle)
+                log.info(f"[PUMP] {msg.get('symbol')} dropped — X gave no answer "
+                         f"for @{ref.handle} after {X_RETRIES} tries")
+                return
+
             # Verified or nothing. Any kind counts — individual, business,
             # government — but an unverified account is not worth a row: on this
             # chain anyone can point a launch at any handle, and the tick is the
             # only cheap evidence that somebody stands behind it. Not stored
             # either, which keeps the collection to the rows actually shown.
             if not prof.verified:
-                log.debug(f"[PUMP] {msg.get('symbol')} skipped — "
-                          f"@{ref.handle} not verified")
+                await _count_drop("not verified", msg, ref.handle)
                 return
             post = await x_client.fetch_post(session, ref)
 
@@ -776,6 +795,40 @@ async def _promote_og(name_key: str, first: dict) -> None:
         await hub.broadcast("x_link", row)
     except Exception as exc:  # noqa: BLE001
         log.debug(f"[PUMP] could not promote OG for {name_key}: {exc}")
+
+
+async def _count_drop(reason: str, msg: dict, handle: str = "") -> None:
+    """Record that a launch did not become a row, and why.
+
+    Counted by the hour rather than kept per launch: most drops are the filter
+    doing its job — thousands a day with no X link or an unverified account —
+    and a document each would be a lot of noise to store. The exceptions are the
+    ones worth chasing, so a launch dropped because X would not answer keeps its
+    mint alongside the count.
+    """
+    try:
+        hour = time.strftime("%d-%m-%Y %H:00", time.localtime())
+        update: dict = {"$inc": {"count": 1},
+                        "$set": {"reason": reason, "hour": hour, "dt": _utc_now()}}
+        if reason == "x lookup failed":
+            update["$push"] = {
+                "mints": {"$each": [{"mint": msg.get("mint"),
+                                     "symbol": msg.get("symbol"),
+                                     "handle": handle, "at": time.time()}],
+                          "$slice": -50},
+            }
+        await _col("x_drops").update_one({"_id": f"{hour}|{reason}"}, update, upsert=True)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[PUMP] could not count drop: {exc}")
+
+
+async def drops(hours: int = 24) -> list[dict]:
+    """Drop counts by reason, newest hour first — the audit for what was filtered."""
+    rows = await _col("x_drops").find({}).sort("hour", -1).limit(hours * 8).to_list(200)
+    for r in rows:
+        r.pop("_id", None)
+        r.pop("dt", None)
+    return rows
 
 
 async def _fetch_metadata(session: aiohttp.ClientSession, uri: str) -> dict:

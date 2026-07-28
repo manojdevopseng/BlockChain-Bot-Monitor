@@ -78,7 +78,11 @@ class XProfile:
     followers: int = 0
     bio: str = ""
     website: str = ""
-    found: bool = False              # False when no mirror could answer
+    found: bool = False              # we have the account's details
+    # True when the mirror gave us no answer at all — a timeout, a 5xx, a
+    # rate-limit. Different from an account that genuinely is not there, and
+    # the difference decides whether the launch is retried or dropped.
+    lookup_failed: bool = False
 
 
 @dataclass
@@ -148,15 +152,33 @@ async def fetch_profile(session: aiohttp.ClientSession, handle: str) -> XProfile
 
     prof = XProfile(handle=handle)
     try:
+        # Redirects are not followed on purpose: a handle that does not exist
+        # answers 302, and following it hides that behind whatever the redirect
+        # lands on. The difference matters — a missing account is settled, a
+        # sulking mirror is worth asking again.
         async with session.get(f"{FXTWITTER}/{handle}", headers=_UA,
-                               timeout=_TIMEOUT) as r:
+                               timeout=_TIMEOUT, allow_redirects=False) as r:
             if r.status == 200:
                 body = await r.json(content_type=None)
                 user = body.get("user")
                 if user:
                     prof = _profile_from_user(user)
+            elif r.status in (301, 302, 303, 307, 308, 404):
+                pass                      # no such account; nothing to retry
+            else:
+                # 401/403/429/5xx and anything else: the mirror is unhappy, not
+                # the account missing.
+                prof.lookup_failed = True
+                log.debug(f"[X] @{handle}: mirror returned {r.status}")
     except Exception as exc:  # noqa: BLE001
+        prof.lookup_failed = True
         log.debug(f"[X] profile lookup failed for @{handle}: {exc}")
+
+    if prof.lookup_failed:
+        # Never cached. Caching a failure meant one bad minute silenced that
+        # handle for the next fifteen, and every launch pointing at it was
+        # dropped as unverified.
+        return prof
 
     _cache[key] = (time.time(), prof)
     if len(_cache) > 2000:

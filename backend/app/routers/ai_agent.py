@@ -73,6 +73,18 @@ async def xcheck(
                                   min_followers=min_followers, day=date)
 
 
+@router.get("/drops")
+async def drops(hours: int = Query(24, ge=1, le=168)):
+    """What the filters threw away, by reason and hour.
+
+    Most drops are the filter working — thousands a day with no X link or an
+    unverified account — so they are counted, not kept one by one. A launch
+    dropped because X would not answer keeps its mint, since that is the kind
+    worth chasing.
+    """
+    return {"items": await ai_agent.drops(hours=hours)}
+
+
 @router.get("/watching")
 async def watching():
     """Profiles reported as Launching, still being re-checked for a contract."""

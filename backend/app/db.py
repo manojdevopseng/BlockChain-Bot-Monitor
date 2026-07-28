@@ -215,6 +215,8 @@ _TTL_COLLECTIONS = {
     # Rolling record of tokens and their X links, so the page has something to
     # paint before the next loop pass.
     "x_links": "log_retention_days",
+    # Hourly counts of launches that did not become a row, and why.
+    "x_drops": "log_retention_days",
 }
 
 
