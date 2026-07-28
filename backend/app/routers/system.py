@@ -16,6 +16,37 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 _BOOT = time.time()
 
 
+# Resolved once, at import: a deploy restarts the process, so this changing is
+# exactly the signal that the browser is holding a previous build.
+def _build_id() -> str:
+    import subprocess
+    from pathlib import Path
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parents[3], capture_output=True,
+            text=True, timeout=5,
+        ).stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+_BUILD = _build_id()
+_STARTED = time.time()
+
+
+@router.get("/version")
+async def version():
+    """What is deployed right now.
+
+    A dashboard tab left open across a deploy keeps running the previous
+    build's JavaScript — its polling intervals, its columns, its bugs — and
+    nothing on screen says so. The page compares this against what it saw when
+    it loaded and offers a reload when they differ.
+    """
+    return {"build": _BUILD, "started_at": _STARTED}
+
+
 @router.get("/overview")
 async def overview():
     return {

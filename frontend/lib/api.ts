@@ -95,7 +95,12 @@ export function useApi<T = any>(path: string | null, cfg?: SWRConfiguration) {
     // only a safety net for what no event covers. At 5s it was mostly redundant
     // work that repainted the page for nothing.
     refreshInterval: 12000,
-    revalidateOnFocus: false,
+    // Back on. It was off to stop the page repainting on every tab switch, but
+    // the cause of that was the cache being wiped on revalidation, which is
+    // fixed — and with it off, coming back to a tab showed whatever was on
+    // screen when you left it. SWR also pauses polling while a tab is hidden,
+    // so focus is exactly when a refresh is most wanted.
+    revalidateOnFocus: true,
     // Keep showing the data we have while a new key loads. Without this a
     // filter or search change blanks the table for one frame before refilling.
     keepPreviousData: true,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Brain, CheckCircle2, Rocket, XCircle, ExternalLink, Eye, Twitter } from "lucide-react";
+import { Brain, CheckCircle2, Rocket, XCircle, ExternalLink, Eye, RefreshCw, Twitter } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -64,7 +64,8 @@ function XCheck() {
   // Polls faster than the server caches: a poll inside the cache window is
   // answered from memory and costs nothing upstream, so this only tightens how
   // stale the page can be.
-  const { data } = useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 15000 });
+  const { data, mutate: refetch, isValidating } =
+    useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 15000 });
   useTick(1000);
   const items: any[] = data?.items ?? [];
 
@@ -74,6 +75,14 @@ function XCheck() {
       title="X Links — live check"
       icon={<Twitter size={14} />}
       count={items.length}
+      controls={
+        // A visible way to force a read. Polling covers the normal case, but a
+        // tab left open across a deploy is running the previous build's timers,
+        // and this is faster than explaining that.
+        <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isValidating}>
+          <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> Refresh
+        </Button>
+      }
     >
       {data?.error ? (
         <p className="text-xs text-accent-amber">{data.error}</p>

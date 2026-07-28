@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { mutate } from "swr";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { StatusBar } from "./StatusBar";
 import { useWebSocket } from "@/lib/ws";
-import { getToken } from "@/lib/api";
+import { getToken, useApi } from "@/lib/api";
 import { ThemeProvider } from "@/lib/theme";
 
 // Map a realtime WS event to the API path-prefixes whose SWR caches should
@@ -43,6 +43,36 @@ function revalidate(prefixes: string[]) {
     // once, when the new response lands.
     mutate((key) => typeof key === "string" && due.some((p) => key.startsWith(p)));
   }, REVALIDATE_WINDOW_MS);
+}
+
+// A tab left open across a deploy keeps running the old build — old polling
+// intervals, old columns — and looks merely broken. This notices and offers the
+// reload rather than leaving it to be guessed at.
+function BuildWatcher() {
+  const { data } = useApi<any>("/api/system/version", { refreshInterval: 60000 });
+  const seen = useRef<string | null>(null);
+  const [stale, setStale] = useState(false);
+
+  useEffect(() => {
+    const build = data?.build;
+    if (!build || build === "unknown") return;
+    if (seen.current === null) {
+      seen.current = build;
+    } else if (seen.current !== build) {
+      setStale(true);
+    }
+  }, [data?.build]);
+
+  if (!stale) return null;
+  return (
+    <button
+      onClick={() => window.location.reload()}
+      className="flex w-full items-center justify-center gap-2 bg-brand/15 px-3 py-1.5 text-xs
+                 text-brand-soft hover:bg-brand/25"
+    >
+      A new build is deployed — click to reload
+    </button>
+  );
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -125,6 +155,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           onCloseMobile={() => setMobileOpen(false)}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <BuildWatcher />
           <Topbar connected={connected} onOpenMobile={() => setMobileOpen(true)} />
           <main className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5">
             <div className="animate-fade-in">{children}</div>
