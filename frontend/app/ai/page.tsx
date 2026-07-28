@@ -469,9 +469,8 @@ export default function AiPage() {
         </CollapsibleSection>
       )}
 
-      {/* Decisions first: it is the answer, and the two sections under it
-          are the working that produced it — the burst originals, then the
-          raw feed they came from. */}
+      {/* Decisions first: it is the answer. Under it comes the working — the
+          raw feed of verified launches, then the originals picked out of it. */}
       <CollapsibleSection
         id="ai-decisions"
         title="Decisions"
@@ -561,9 +560,9 @@ export default function AiPage() {
         </TableScroll>
       </CollapsibleSection>
 
-      <OGSection />
-
       <XCheck />
+
+      <OGSection />
     </div>
     </TickProvider>
   );
