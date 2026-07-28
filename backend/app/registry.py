@@ -62,6 +62,12 @@ DEFAULT_SERVICES: list[dict] = [
     {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",
      "chain": None,  "key": "outcome_replies",  "enabled": True},
 
+    # Reads each new Robinhood token's X link, checks the account is verified
+    # and asks Grok whether it matches a watched narrative. Needs XAI_API_KEY;
+    # idle without one.
+    {"id": "ai_agent",              "category": BOT, "label": "AI Narrative Agent",
+     "chain": "rbh", "key": "ai_agent",         "enabled": False},
+
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth",
      "key": "chain_eth", "enabled": True},

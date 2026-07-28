@@ -2,11 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard, Bell, Coins, Link2, Send, Terminal,
-  BarChart3, ScrollText, Settings, Radio, Server, Cpu, Crosshair,
-  PanelLeftClose, PanelLeftOpen, X,
-} from "lucide-react";
+import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -17,6 +13,7 @@ const NAV = [
   { href: "/chains", label: "Chains", icon: Link2 },
   { href: "/forwarder", label: "Forwarder", icon: Send },
   { href: "/commands", label: "Commands", icon: Terminal },
+  { href: "/ai", label: "AI Narrative", icon: Brain },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },

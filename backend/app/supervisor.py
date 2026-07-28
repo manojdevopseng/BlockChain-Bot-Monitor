@@ -29,6 +29,7 @@ _client = None            # GMGNClient
 _sol = None               # SolanaScanner
 _watchdog: Optional[asyncio.Task] = None   # heartbeat.watch()
 _outcomes: Optional[asyncio.Task] = None   # outcomes.watch()
+_ai_agent: Optional[asyncio.Task] = None  # ai_agent.watch()
 _digest: Optional[asyncio.Task] = None     # digest.watch()
 _instances: dict = {}     # logical name -> scanner instance ('eth' | 'rbh')
 _tasks: dict[str, asyncio.Task] = {}   # logical name -> task ('sol' | 'eth' | 'rbh')
@@ -81,7 +82,7 @@ async def start() -> None:
 
 async def stop() -> None:
     global _watchdog, _outcomes, _digest
-    for attr in ("_watchdog", "_outcomes", "_digest"):
+    for attr in ("_watchdog", "_outcomes", "_digest", "_ai_agent"):
         task = globals().get(attr)
         if task is not None and not task.done():
             task.cancel()
@@ -170,9 +171,11 @@ async def reconcile() -> None:
     # The outcome tracker is a standalone task rather than a scanner worker,
     # but its switch has to behave the same: turning it off stops the task, not
     # just its output.
-    from . import outcomes
+    from . import ai_agent, outcomes
     await _set_standalone("_outcomes", bool(enabled.get("outcome_tracker", True)),
                           outcomes.watch, "outcomes")
+    await _set_standalone("_ai_agent", bool(enabled.get("ai_agent")),
+                          ai_agent.watch, "ai-agent")
 
     # Push the live toggle map into a running forwarder so per-source gates
     # (BBCAnalyser2 / DexSignalCall / ETH otto / Premium Callers) update live.

@@ -207,6 +207,11 @@ _TTL_COLLECTIONS = {
     # Per-day forwarder counters — tiny, but no reason to keep them longer
     # than the logs they correspond to.
     "forwarder_counters": "log_retention_days",
+    # AI narrative decisions and their dedup keys. Kept as long as alerts, so
+    # "why was this token ignored" stays answerable for the same window.
+    "ai_decisions": "alert_retention_days",
+    "ai_seen": "log_retention_days",
+    "ai_watch": "alert_retention_days",
 }
 
 

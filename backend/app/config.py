@@ -106,6 +106,41 @@ class Settings(BaseSettings):
     sol_bonkers_program: str = ""
     sol_bags_program: str = ""
 
+    # ── AI narrative agent (Robinhood) ──────────────────────
+    # Reads a new token's X (Twitter) link, checks the account is verified, and
+    # asks Grok whether the post matches one of the watched narratives.
+    xai_api_key: str = ""
+    xai_base_url: str = "https://api.x.ai/v1"
+    # Grok 4 Fast. Non-reasoning is the cheaper of the pair and this is a
+    # classification job, not a reasoning one.
+    xai_model: str = "grok-4-fast-non-reasoning"
+    # Seconds between passes over the Robinhood new-pairs feed.
+    ai_scan_interval: int = 60
+    # Decisions are recorded but nothing is sent while this is on. Leave it on
+    # for the first day and read the log before letting it post.
+    ai_dry_run: bool = True
+    # Verdict must reach this to notify.
+    ai_min_confidence: int = 7
+    # A narrative of "other" is the catch-all, so it has to clear a higher bar
+    # or it becomes a free pass for everything.
+    ai_other_min_confidence: int = 8
+    # Which kinds of verified account count. Paid blue is `individual`; drop it
+    # from this list if blue-tick spam gets through.
+    ai_verified_types: str = "government,business,individual"
+    # Profile-owner branch skips accounts this big — a token riding a name like
+    # the White House tells you nothing about the token.
+    ai_big_account_followers: int = 1_000_000
+    # A tweet older than this is stale news; the token is not about it.
+    ai_tweet_max_age_hours: int = 24
+    # One X link is reused across many tokens, so it is analysed at most this
+    # many times a day. Straight from the reference bot, where a single viral
+    # link otherwise cost an AI call per copycat token.
+    ai_max_link_reads: int = 2
+    # How long a "Launching" profile is re-checked for a contract address.
+    ai_launching_watch_hours: int = 24
+    # Where notifications go. Blank = ROBINHOOD_CHAT_ID.
+    ai_chat_id: str = ""
+
     # ── Daily digest ────────────────────────────────────────
     # One summary message a day to ALERT_CHAT_ID: what fired and how it did.
     digest_enabled: bool = True

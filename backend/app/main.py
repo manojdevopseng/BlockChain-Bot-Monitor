@@ -22,8 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
-    alerts, analytics, auth, chains, chat_lookup, commands, dashboard,
-    forwarder, logs, outcomes as outcomes_router, rpc,
+    ai_agent as ai_router, alerts, analytics, auth, chains, chat_lookup,
+    commands, dashboard, forwarder, logs, outcomes as outcomes_router, rpc,
     settings as settings_router, system, tokens,
 )
 from .ws_hub import hub
@@ -145,7 +145,7 @@ app.add_middleware(
 # The auth router itself stays open — the login has to be reachable.
 _PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
               analytics, logs, rpc, system, settings_router, chat_lookup,
-              outcomes_router)
+              outcomes_router, ai_router)
 
 app.include_router(auth.router)
 for r in _PROTECTED:
