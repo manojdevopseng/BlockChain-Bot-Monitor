@@ -62,6 +62,11 @@ DEFAULT_SERVICES: list[dict] = [
     {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",
      "chain": None,  "key": "outcome_replies",  "enabled": True},
 
+    # PumpPortal's realtime socket — every pump.fun launch with a verified X
+    # account, which is what the AI Narrative page's live section lists. Runs
+    # without the model, and the model has nothing to judge without it.
+    {"id": "x_feed",                "category": BOT, "label": "X Links Feed",
+     "chain": "sol", "key": "x_feed",           "enabled": True},
     # Reads each new pump.fun token's X link, checks the account is verified and
     # asks Grok whether it matches a watched narrative. Needs XAI_API_KEY; idle
     # without one.

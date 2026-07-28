@@ -132,9 +132,11 @@ class Settings(BaseSettings):
     # Which kinds of verified account count. Paid blue is `individual`; drop it
     # from this list if blue-tick spam gets through.
     ai_verified_types: str = "government,business,individual"
-    # Profile-owner branch skips accounts this big — a token riding a name like
-    # the White House tells you nothing about the token.
-    ai_big_account_followers: int = 1_000_000
+    # Profile branch: skip accounts with at least this many followers. The idea
+    # was that a token riding the White House's name says nothing about the
+    # token — but it also threw away every genuinely big account, so it is off.
+    # 0 = no follower limit anywhere; set a number to bring the rule back.
+    ai_big_account_followers: int = 0
     # A tweet older than this is stale news; the token is not about it.
     ai_tweet_max_age_hours: int = 24
     # One X link is reused across many tokens, so it is analysed at most this

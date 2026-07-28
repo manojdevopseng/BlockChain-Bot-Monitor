@@ -177,9 +177,9 @@ async def reconcile() -> None:
                           outcomes.watch, "outcomes")
     await _set_standalone("_ai_agent", bool(enabled.get("ai_agent")),
                           ai_agent.watch, "ai-agent")
-    # The X feed is what the dashboard's live section is built from, so it runs
-    # on the chain toggle rather than the model's: useful with Grok switched off.
-    await _set_standalone("_x_feed", bool(enabled.get("chain_sol", True)),
+    # Its own switch rather than the chain's or the model's: the feed is useful
+    # with Grok off, and sometimes wants stopping without touching SOL.
+    await _set_standalone("_x_feed", bool(enabled.get("x_feed", True)),
                           ai_agent.x_feed_watch, "x-feed")
 
     # Push the live toggle map into a running forwarder so per-source gates

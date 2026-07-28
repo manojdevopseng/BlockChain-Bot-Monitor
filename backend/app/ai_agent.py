@@ -315,7 +315,11 @@ async def _handle_tweet(session, token: dict, ref, profile, row: dict) -> None:
 
 
 async def _handle_profile(session, token: dict, ref, profile) -> None:
-    if profile.followers >= settings.ai_big_account_followers:
+    # Follower count is not a gate. It was one — accounts over a million were
+    # skipped — and it is kept only as an opt-in knob, off by default: a large
+    # account is as likely to be the real story as a small one.
+    if (settings.ai_big_account_followers
+            and profile.followers >= settings.ai_big_account_followers):
         await _record(token, ref, profile, "skipped",
                       {"reason": f"account too big ({profile.followers:,})"})
         return
