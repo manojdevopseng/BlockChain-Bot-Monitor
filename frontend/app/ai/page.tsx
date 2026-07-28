@@ -61,11 +61,11 @@ function useDebounced(value: string, ms = 250): string {
 // two halves fail for completely different reasons — no credits versus a dead
 // Nitter instance — and a decisions table cannot tell them apart.
 function XCheck() {
-  // Polls faster than the server caches: a poll inside the cache window is
-  // answered from memory and costs nothing upstream, so this only tightens how
-  // stale the page can be.
+  // Rows arrive over the WebSocket, one per token, as the feed finds them —
+  // Shell revalidates this key on an `x_link` event. The interval is only a
+  // safety net for a dropped socket, so it can be slow.
   const { data, mutate: refetch, isValidating } =
-    useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 15000 });
+    useApi<any>("/api/ai/xcheck?limit=40", { refreshInterval: 60000 });
   useTick(1000);
   const items: any[] = data?.items ?? [];
 
@@ -90,12 +90,10 @@ function XCheck() {
         <>
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
-            live through fxtwitter with Nitter behind it, no X API key. Newest
-            first.
+            live through fxtwitter with Nitter behind it, no X API key. Each row
+            is pushed the moment it is found, newest first.
             {data && (
-              <> <span className="text-text">{data.with_link}</span> of{" "}
-                <span className="text-text">{data.pairs}</span> tokens carry a
-                link; of the {data.checked} checked,{" "}
+              <> 
                 <span className="text-text">{data.resolved}</span> accounts
                 resolved, <span className="text-text">{data.verified}</span>{" "}
                 verified, <span className="text-text">{data.posts}</span> with

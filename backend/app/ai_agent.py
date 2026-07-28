@@ -525,28 +525,52 @@ async def watch() -> None:
 
 # ── Reporting (dashboard) ──────────────────────────────────────────────────────
 
-# A live X check, for the dashboard. Cached, because it is served to a polling
-# page: without this, every refresh would re-read the feed and re-ask fxtwitter
-# for the same handles. Sixty seconds, not longer — Robinhood is busy enough
-# that the whole hundred-pair window is only about six minutes wide, so a
-# three-minute cache was showing half a window of stale rows. Thirty seconds
-# keeps a row from ever being much more than half a minute behind the chain,
-# while still collapsing a page's repeated polls into one read.
-_PROBE_TTL = 30
-_probe_cache: tuple[float, dict] = (0.0, {})
+# How often the X feed is read. This is the one GMGN call the loop makes, and it
+# goes through the shared client at its existing pace, so gmgn.ai sees no change
+# in request rate — only in which requests fill the same budget.
+X_FEED_INTERVAL = 15
 
 
-async def x_probe(client, session: aiohttp.ClientSession, limit: int = 12) -> dict:
-    """Resolve the X link on the newest Robinhood tokens, and report what came back.
+async def x_feed_watch() -> None:
+    """Read the X feed continuously and push each new token as it appears.
 
-    This answers "is the X side actually working" on its own, without the model
-    being involved — which matters, because the two fail for entirely different
-    reasons and the difference is invisible from a decisions table.
+    This used to be an on-demand endpoint the page polled, which meant tokens
+    arrived in clumps a poll apart and a row could be a minute behind the chain
+    before anyone saw it. Reading on a loop and broadcasting each new row
+    instead makes them appear one at a time, the moment they are found — the
+    dashboard stops asking and starts being told.
+
+    Runs whether or not the model is enabled: knowing the X side is alive is
+    useful in its own right, and it is one call per pass either way.
     """
-    now = time.time()
-    if _probe_cache[1] and now - _probe_cache[0] < _PROBE_TTL:
-        return _probe_cache[1]
+    from . import supervisor
+    from .ws_hub import hub
 
+    log.info(f"[X-FEED] started — reading every {X_FEED_INTERVAL}s")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                await asyncio.sleep(X_FEED_INTERVAL)
+                client = getattr(supervisor, "_client", None)
+                if client is None:
+                    continue          # scanners down: no client to borrow
+                for row in await _read_x_feed(client, session):
+                    await _col("x_links").update_one(
+                        {"address": row["address"]},
+                        {"$set": {**row, "dt": _utc_now()}}, upsert=True)
+                    await hub.broadcast("x_link", row)
+                    log.debug(f"[X-FEED] {row['symbol']} @{row['handle']} "
+                              f"({row['kind']})")
+            except asyncio.CancelledError:
+                log.info("[X-FEED] stopped")
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"[X-FEED] pass failed: {exc}")
+
+
+async def _read_x_feed(client, session: aiohttp.ClientSession,
+                       limit: int = 12) -> list[dict]:
+    """The newest linked tokens we have not already recorded."""
     pairs = await client.get_chain_new_pairs("robinhood", 100)
     linked = [(p, _social_link(p)) for p in pairs]
     linked = [(p, l) for p, l in linked if l]
@@ -554,6 +578,11 @@ async def x_probe(client, session: aiohttp.ClientSession, limit: int = 12) -> di
     rows: list[dict] = []
     for pair, link in linked[:limit]:
         info = pair.get("base_token_info") or {}
+        address = (pair.get("base_address") or info.get("address") or "")
+        if not address:
+            continue
+        if await _col("x_links").find_one({"address": address}, {"_id": 1}):
+            continue                  # already pushed; not news any more
         ref = x_client.parse_ref(link)
         prof = (await x_client.fetch_profile(session, ref.handle)
                 if ref.kind != "none" else x_client.XProfile(handle=""))
@@ -576,24 +605,33 @@ async def x_probe(client, session: aiohttp.ClientSession, limit: int = 12) -> di
             "post_age_minutes": (round(post.age_minutes)
                                  if post.age_minutes is not None else None),
             "excerpt": (post.text or prof.bio or "")[:160],
+            "found_at": time.time(),
         })
+    # Oldest first, so the page receives them in the order they happened.
+    rows.reverse()
+    return rows
 
-    out = {
-        "at": now,
-        # The feed is ordered newest-first by GMGN (verified: strictly
-        # descending), and the rows below are the newest ones carrying a link.
-        "newest_age_minutes": (round((now - rows[0]["open_timestamp"]) / 60, 1)
-                               if rows and rows[0]["open_timestamp"] else None),
-        "pairs": len(pairs),
-        "with_link": len(linked),
-        "checked": len(rows),
-        "resolved": sum(1 for r in rows if r["resolved"]),
-        "verified": sum(1 for r in rows if r["verified"]),
-        "posts": sum(1 for r in rows if r["post_found"]),
+
+async def x_links(limit: int = 40) -> dict:
+    """What the loop has found, newest first. Read from Mongo — no upstream call."""
+    rows = await _col("x_links").find({}).to_list(400)
+    rows.sort(key=lambda r: r.get("open_timestamp") or r.get("found_at") or 0,
+              reverse=True)
+    rows = rows[:limit]
+    for r in rows:
+        r.pop("_id", None)
+        r.pop("dt", None)
+    return {
+        "at": time.time(),
+        "interval": X_FEED_INTERVAL,
+        "newest_age_minutes": (round((time.time() - rows[0]["open_timestamp"]) / 60, 1)
+                               if rows and rows[0].get("open_timestamp") else None),
+        "total": len(rows),
+        "resolved": sum(1 for r in rows if r.get("resolved")),
+        "verified": sum(1 for r in rows if r.get("verified")),
+        "posts": sum(1 for r in rows if r.get("post_found")),
         "items": rows,
     }
-    globals()["_probe_cache"] = (now, out)
-    return out
 
 
 async def recent(limit: int = 100, verdict: Optional[str] = None) -> list[dict]:

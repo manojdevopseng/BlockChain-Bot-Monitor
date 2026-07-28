@@ -37,21 +37,14 @@ async def decisions(
 
 
 @router.get("/xcheck")
-async def xcheck(limit: int = Query(12, ge=1, le=25)):
-    """Live check of the X side, independent of the model.
+async def xcheck(limit: int = Query(40, ge=1, le=200)):
+    """What the X feed loop has found, newest first.
 
-    Borrows the scanners' GMGN client rather than opening one, so this cannot
-    add traffic outside the shared rate limiter.
+    Served straight from Mongo: the reading happens on a background loop that
+    broadcasts each new token over the WebSocket, so this is only what the page
+    needs on first paint or after a reconnect — never an upstream call.
     """
-    import aiohttp
-
-    from .. import supervisor
-    client = getattr(supervisor, "_client", None)
-    if client is None:
-        return {"error": "scanners are not running, so there is no GMGN client "
-                         "to borrow", "items": []}
-    async with aiohttp.ClientSession() as session:
-        return await ai_agent.x_probe(client, session, limit=limit)
+    return await ai_agent.x_links(limit=limit)
 
 
 @router.get("/watching")

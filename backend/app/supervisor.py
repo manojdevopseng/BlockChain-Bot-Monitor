@@ -30,6 +30,7 @@ _sol = None               # SolanaScanner
 _watchdog: Optional[asyncio.Task] = None   # heartbeat.watch()
 _outcomes: Optional[asyncio.Task] = None   # outcomes.watch()
 _ai_agent: Optional[asyncio.Task] = None  # ai_agent.watch()
+_x_feed: Optional[asyncio.Task] = None    # ai_agent.x_feed_watch()
 _digest: Optional[asyncio.Task] = None     # digest.watch()
 _instances: dict = {}     # logical name -> scanner instance ('eth' | 'rbh')
 _tasks: dict[str, asyncio.Task] = {}   # logical name -> task ('sol' | 'eth' | 'rbh')
@@ -82,7 +83,7 @@ async def start() -> None:
 
 async def stop() -> None:
     global _watchdog, _outcomes, _digest
-    for attr in ("_watchdog", "_outcomes", "_digest", "_ai_agent"):
+    for attr in ("_watchdog", "_outcomes", "_digest", "_ai_agent", "_x_feed"):
         task = globals().get(attr)
         if task is not None and not task.done():
             task.cancel()
@@ -176,6 +177,10 @@ async def reconcile() -> None:
                           outcomes.watch, "outcomes")
     await _set_standalone("_ai_agent", bool(enabled.get("ai_agent")),
                           ai_agent.watch, "ai-agent")
+    # The X feed is what the dashboard's live section is built from, so it runs
+    # on the chain toggle rather than the model's: useful with Grok switched off.
+    await _set_standalone("_x_feed", bool(enabled.get("chain_rbh", True)),
+                          ai_agent.x_feed_watch, "x-feed")
 
     # Push the live toggle map into a running forwarder so per-source gates
     # (BBCAnalyser2 / DexSignalCall / ETH otto / Premium Callers) update live.

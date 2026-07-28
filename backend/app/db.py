@@ -212,6 +212,9 @@ _TTL_COLLECTIONS = {
     "ai_decisions": "alert_retention_days",
     "ai_seen": "log_retention_days",
     "ai_watch": "alert_retention_days",
+    # Rolling record of tokens and their X links, so the page has something to
+    # paint before the next loop pass.
+    "x_links": "log_retention_days",
 }
 
 

@@ -18,6 +18,10 @@ const EVENT_KEYS: Record<string, string[]> = {
   log: ["/api/logs"],
   service_changed: ["/api/settings/services", "/api/chains", "/api/rpc", "/api/system", "/api/dashboard"],
   premium_detection: ["/api/forwarder"],
+  // One token, pushed the moment the X feed finds it. Revalidating the section
+  // on the event is what makes rows arrive one at a time instead of a poll at a
+  // time.
+  x_link: ["/api/ai/xcheck"],
 };
 
 const COLLAPSE_KEY = "sidebar_collapsed";
