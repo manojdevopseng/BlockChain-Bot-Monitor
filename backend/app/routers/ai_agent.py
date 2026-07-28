@@ -20,7 +20,7 @@ async def stats():
 
 @router.get("/decisions")
 async def decisions(
-    limit: int = Query(100, le=500),
+    limit: int = Query(200, ge=1, le=5000),
     verdict: str | None = Query(None, pattern="^(matched|launching|rejected|skipped|error)$"),
     q: str | None = None,
 ):
@@ -48,7 +48,7 @@ async def xdates(og: bool = False):
 
 @router.get("/og")
 async def og(
-    limit: int = Query(40, ge=1, le=200),
+    limit: int = Query(200, ge=1, le=5000),
     q: str | None = None,
     date: str | None = None,
 ):
@@ -62,7 +62,7 @@ async def og(
 
 @router.get("/xcheck")
 async def xcheck(
-    limit: int = Query(40, ge=1, le=200),
+    limit: int = Query(200, ge=1, le=5000),
     q: str | None = None,
     min_followers: int = Query(0, ge=0),
     date: str | None = None,          # DD-MM-YYYY (IST) — History filter
