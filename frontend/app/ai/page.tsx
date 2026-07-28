@@ -51,6 +51,49 @@ function ageLabel(ts: number): string {
   return `${h}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
+// Highlighting the Settings keywords where they appear. Whole-word and
+// case-insensitive, matching app/keywords.py exactly — "ai" lights up in "AI
+// token" and "ai-agent" but not in "main road" — so what the page marks is what
+// the forwarder would have matched. Keywords are fetched rather than baked in,
+// so one added in Settings shows up here without a deploy.
+function useKeywordRegex(): RegExp | null {
+  const { data } = useApi<any>("/api/settings/keywords", { refreshInterval: 120000 });
+  const words: string[] = data?.items ?? [];
+  if (!words.length) return null;
+  // Longest first, so "New Token Launchpad" wins over "Token Launchpad".
+  const alts = [...words]
+    .sort((a, b) => b.length - a.length)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  try {
+    return new RegExp(`\\b(${alts})\\b`, "gi");
+  } catch {
+    return null;
+  }
+}
+
+function Highlighted({ text, rx }: { text: string; rx: RegExp | null }) {
+  if (!text) return <>—</>;
+  if (!rx) return <>{text}</>;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  // A global regex carries state between calls, so it is reset per render.
+  rx.lastIndex = 0;
+  for (let m = rx.exec(text); m !== null; m = rx.exec(text)) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(
+      <mark key={`${m.index}-${m[0]}`}
+        className="rounded bg-brand/25 px-0.5 font-medium text-brand-soft">
+        {m[0]}
+      </mark>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (!parts.length) return <>{text}</>;
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
+}
+
 function useDebounced(value: string, ms = 250): string {
   const [out, setOut] = useState(value.trim());
   useEffect(() => {
@@ -69,6 +112,7 @@ function XCheck() {
   // safety net for a dropped socket, so it can be slow.
   const { data, mutate: refetch, isValidating } =
     useApi<any>("/api/ai/xcheck?limit=40", { refreshInterval: 60000 });
+  const rx = useKeywordRegex();
   useTick(1000);
   const items: any[] = data?.items ?? [];
 
@@ -174,7 +218,7 @@ function XCheck() {
                         : <span className="text-text-dim">—</span>}
                     </td>
                     <td className="max-w-[300px] px-3 py-3 text-text-muted">
-                      {r.excerpt || "—"}
+                      <Highlighted text={r.excerpt || ""} rx={rx} />
                     </td>
                     <td className="px-3 py-3">
                       <span className="font-mono text-xs text-text-muted">
