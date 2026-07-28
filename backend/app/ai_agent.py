@@ -529,8 +529,10 @@ async def watch() -> None:
 # page: without this, every refresh would re-read the feed and re-ask fxtwitter
 # for the same handles. Sixty seconds, not longer — Robinhood is busy enough
 # that the whole hundred-pair window is only about six minutes wide, so a
-# three-minute cache was showing half a window of stale rows.
-_PROBE_TTL = 60
+# three-minute cache was showing half a window of stale rows. Thirty seconds
+# keeps a row from ever being much more than half a minute behind the chain,
+# while still collapsing a page's repeated polls into one read.
+_PROBE_TTL = 30
 _probe_cache: tuple[float, dict] = (0.0, {})
 
 

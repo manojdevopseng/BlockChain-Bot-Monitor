@@ -28,6 +28,26 @@ const TONE: Record<string, "green" | "purple" | "amber" | "gray" | "red"> = {
   skipped: "gray", error: "red",
 };
 
+// Ages were rendered once per fetch, so a row sat on "1m ago" for a whole
+// minute and the section looked frozen between refreshes. This re-renders every
+// second, which is what makes a live counter live.
+function useTick(ms = 1000): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setN((v) => v + 1), ms);
+    return () => clearInterval(t);
+  }, [ms]);
+  return n;
+}
+
+// Seconds matter here — these tokens are a minute or two old — so the age is
+// shown to the second rather than rounded to whole minutes.
+function ageLabel(ts: number): string {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
 function useDebounced(value: string, ms = 250): string {
   const [out, setOut] = useState(value.trim());
   useEffect(() => {
@@ -41,7 +61,11 @@ function useDebounced(value: string, ms = 250): string {
 // two halves fail for completely different reasons — no credits versus a dead
 // Nitter instance — and a decisions table cannot tell them apart.
 function XCheck() {
-  const { data } = useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 60000 });
+  // Polls faster than the server caches: a poll inside the cache window is
+  // answered from memory and costs nothing upstream, so this only tightens how
+  // stale the page can be.
+  const { data } = useApi<any>("/api/ai/xcheck?limit=12", { refreshInterval: 15000 });
+  useTick(1000);
   const items: any[] = data?.items ?? [];
 
   return (
@@ -58,7 +82,7 @@ function XCheck() {
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
             live through fxtwitter with Nitter behind it, no X API key. Newest
-            first, refreshed every minute.
+            first.
             {data && (
               <> <span className="text-text">{data.with_link}</span> of{" "}
                 <span className="text-text">{data.pairs}</span> tokens carry a
@@ -104,8 +128,8 @@ function XCheck() {
                         {shortAddr(r.address)}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-text-muted">
-                      {r.open_timestamp ? timeAgo(r.open_timestamp) : "—"}
+                    <td className="px-3 py-3 font-mono text-xs text-text-muted">
+                      {r.open_timestamp ? ageLabel(r.open_timestamp) : "—"}
                     </td>
                     <td className="px-3 py-3">
                       <Badge variant={r.kind === "tweet" ? "purple" : r.kind === "profile" ? "blue" : "gray"}>
