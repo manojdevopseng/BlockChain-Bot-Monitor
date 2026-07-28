@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useApi } from "@/lib/api";
+import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,14 +17,7 @@ const LEVEL: Record<string, string> = {
 
 export default function LogsPage() {
   const [q, setQ] = useState("");
-  const [query, setQuery] = useState("");
-
-  // Debounced: without this every keystroke changed the SWR key, and the list
-  // emptied and refilled once per character.
-  useEffect(() => {
-    const t = setTimeout(() => setQuery(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const query = useDebounced(q);
 
   const { data: stats } = useApi<any>("/api/logs/stats", { refreshInterval: 15000 });
   const { data, isLoading } = useApi<any>(

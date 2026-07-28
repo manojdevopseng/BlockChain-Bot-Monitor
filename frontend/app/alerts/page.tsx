@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Bell, AlertTriangle, ShieldCheck, Eye } from "lucide-react";
 import { useApi } from "@/lib/api";
+import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,14 +15,8 @@ import { fmtClock } from "@/lib/utils";
 
 export default function AlertsPage() {
   const [q, setQ] = useState("");
-  const [query, setQuery] = useState("");
   const [date, setDate] = useState("");
-
-  // Debounced so a fast typist doesn't fire a request per keystroke.
-  useEffect(() => {
-    const t = setTimeout(() => setQuery(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const query = useDebounced(q);
 
   const params = new URLSearchParams({ limit: "50" });
   if (query) params.set("q", query);

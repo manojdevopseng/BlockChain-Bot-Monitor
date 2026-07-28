@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Brain, CheckCircle2, Rocket, XCircle, ExternalLink, Eye, RefreshCw, Twitter } from "lucide-react";
 import { useApi } from "@/lib/api";
+import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Badge } from "@/components/ui/badge";
@@ -96,15 +97,6 @@ function Highlighted({ text, rx }: { text: string; rx: RegExp | null }) {
   if (!parts.length) return <>{text}</>;
   if (last < text.length) parts.push(text.slice(last));
   return <>{parts}</>;
-}
-
-function useDebounced(value: string, ms = 250): string {
-  const [out, setOut] = useState(value.trim());
-  useEffect(() => {
-    const t = setTimeout(() => setOut(value.trim()), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return out;
 }
 
 // Proves the X side works on its own, with the model out of the picture. The

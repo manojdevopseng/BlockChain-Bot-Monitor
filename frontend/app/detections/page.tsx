@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Layers, Fuel, ExternalLink, ArrowRightLeft } from "lucide-react";
 import { useApi } from "@/lib/api";
+import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,17 +17,6 @@ import { CopyButton } from "@/components/CopyButton";
 import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
-
-// Every search box on this page feeds straight into an SWR key, so an
-// un-debounced one fired a request per character typed.
-function useDebounced(value: string, ms = 250): string {
-  const [out, setOut] = useState(value.trim());
-  useEffect(() => {
-    const t = setTimeout(() => setOut(value.trim()), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return out;
-}
 
 /* ── 1-3: premium caller detection panels (RBH / ETH / SOL) ─────────────── */
 
