@@ -531,6 +531,43 @@ async def watch() -> None:
 X_FEED_INTERVAL = 15
 
 
+async def note_onchain_token(address: str, symbol: str, name: str,
+                             dex: str = "") -> None:
+    """Record a token the instant our own detector sees it, X link or not.
+
+    Measured against GMGN's Robinhood feed: it publishes in bursts every 30-45
+    seconds, and its newest pair is typically 20 to 60 seconds old when read —
+    best case 5. So a feed-driven list can never show a fresh token, however
+    fast it is polled. Our RBH WebSocket sees the pair about a second after it
+    is created, which is where a live list has to start.
+
+    The X link is not available here — only GMGN carries it — so the row lands
+    with the link pending and is filled in when the feed catches up.
+    """
+    address = (address or "").lower()
+    if not address:
+        return
+    from .ws_hub import hub
+    try:
+        if await _col("x_links").find_one({"address": address}, {"_id": 1}):
+            return
+        row = {
+            "address": address, "symbol": symbol or "?", "name": name or "",
+            "dex": dex, "link": "", "kind": "pending", "handle": "",
+            "resolved": False, "verified": False, "verified_type": "",
+            "followers": 0, "post_found": False, "post_source": "",
+            "post_age_minutes": None, "excerpt": "",
+            "open_timestamp": time.time(), "found_at": time.time(),
+            "source": "onchain",
+        }
+        await _col("x_links").update_one({"address": address},
+                                         {"$set": {**row, "dt": _utc_now()}},
+                                         upsert=True)
+        await hub.broadcast("x_link", row)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[X-FEED] could not note {symbol}: {exc}")
+
+
 async def x_feed_watch() -> None:
     """Read the X feed continuously and push each new token as it appears.
 
@@ -544,7 +581,6 @@ async def x_feed_watch() -> None:
     useful in its own right, and it is one call per pass either way.
     """
     from . import supervisor
-    from .ws_hub import hub
 
     log.info(f"[X-FEED] started — reading every {X_FEED_INTERVAL}s")
     async with aiohttp.ClientSession() as session:
@@ -554,13 +590,7 @@ async def x_feed_watch() -> None:
                 client = getattr(supervisor, "_client", None)
                 if client is None:
                     continue          # scanners down: no client to borrow
-                for row in await _read_x_feed(client, session):
-                    await _col("x_links").update_one(
-                        {"address": row["address"]},
-                        {"$set": {**row, "dt": _utc_now()}}, upsert=True)
-                    await hub.broadcast("x_link", row)
-                    log.debug(f"[X-FEED] {row['symbol']} @{row['handle']} "
-                              f"({row['kind']})")
+                await _read_x_feed(client, session, on_row=_publish)
             except asyncio.CancelledError:
                 log.info("[X-FEED] stopped")
                 return
@@ -568,9 +598,23 @@ async def x_feed_watch() -> None:
                 log.warning(f"[X-FEED] pass failed: {exc}")
 
 
+async def _publish(row: dict) -> None:
+    from .ws_hub import hub
+    await _col("x_links").update_one({"address": row["address"]},
+                                     {"$set": {**row, "dt": _utc_now()}},
+                                     upsert=True)
+    await hub.broadcast("x_link", row)
+    log.debug(f"[X-FEED] {row['symbol']} @{row['handle']} ({row['kind']})")
+
+
 async def _read_x_feed(client, session: aiohttp.ClientSession,
-                       limit: int = 12) -> list[dict]:
-    """The newest linked tokens we have not already recorded."""
+                       limit: int = 12, on_row=None) -> list[dict]:
+    """Resolve the newest linked tokens, publishing each one as it is ready.
+
+    Published per row, not per pass: the X lookups take a second or two each, so
+    holding a batch until the end of a pass was what made four or five tokens
+    land at the same moment.
+    """
     pairs = await client.get_chain_new_pairs("robinhood", 100)
     linked = [(p, _social_link(p)) for p in pairs]
     linked = [(p, l) for p, l in linked if l]
@@ -581,8 +625,10 @@ async def _read_x_feed(client, session: aiohttp.ClientSession,
         address = (pair.get("base_address") or info.get("address") or "")
         if not address:
             continue
-        if await _col("x_links").find_one({"address": address}, {"_id": 1}):
-            continue                  # already pushed; not news any more
+        known = await _col("x_links").find_one({"address": address},
+                                               {"_id": 1, "kind": 1})
+        if known and known.get("kind") != "pending":
+            continue                  # already resolved; not news any more
         ref = x_client.parse_ref(link)
         prof = (await x_client.fetch_profile(session, ref.handle)
                 if ref.kind != "none" else x_client.XProfile(handle=""))
@@ -606,9 +652,10 @@ async def _read_x_feed(client, session: aiohttp.ClientSession,
                                  if post.age_minutes is not None else None),
             "excerpt": (post.text or prof.bio or "")[:160],
             "found_at": time.time(),
+            "source": "gmgn",
         })
-    # Oldest first, so the page receives them in the order they happened.
-    rows.reverse()
+        if on_row is not None:
+            await on_row(rows[-1])
     return rows
 
 
