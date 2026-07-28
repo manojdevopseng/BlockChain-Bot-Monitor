@@ -214,16 +214,20 @@ function OGSection() {
       id="ai-og"
       title="OG Pump.Fun Tokens"
       icon={<Crown size={14} />}
-      count={items.length}
+      count={data?.total ?? items.length}
       controls={<>
         <SearchBox value={q} onChange={setQ} placeholder="address / @username / word" />
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
       </>}
     >
       <p className="mb-3 text-xs text-text-dim">
-        The first launch of a name and ticker that then came back five times in
-        the same IST day. Five is not a coincidence — it is somebody working at
-        it — and the original is the one that ran before the copies.
+        The first launch of a name and ticker that then came back five times
+        inside a minute. Five is not a coincidence — it is somebody working at it
+        — and the original is the one that ran before the copies.
+        {data && (
+          <> <span className="text-text">{data.total}</span> stored, showing the
+            newest <span className="text-text">{data.shown}</span>.</>
+        )}
       </p>
       <LaunchTable
         items={items}
@@ -270,7 +274,7 @@ function XCheck() {
       id="ai-xcheck"
       title="X Links — live check"
       icon={<Twitter size={14} />}
-      count={items.length}
+      count={data?.total ?? items.length}
       controls={<>
         <SearchBox value={q} onChange={setQ} placeholder="address / @username / word" />
         <Input
@@ -301,10 +305,10 @@ function XCheck() {
             day, so a relaunch loop cannot fill the table.
             {data && (
               <> 
-                <span className="text-text">{data.resolved}</span> accounts
-                resolved, <span className="text-text">{data.verified}</span>{" "}
-                verified, <span className="text-text">{data.posts}</span> with
-                post text.</>
+                <span className="text-text">{data.total}</span> stored,{" "}
+                showing the newest <span className="text-text">{data.shown}</span>{" "}
+                — <span className="text-text">{data.verified}</span> verified,{" "}
+                <span className="text-text">{data.posts}</span> with post text.</>
             )}
           </p>
           <LaunchTable items={items} rx={rx} empty={emptyText} />
@@ -414,7 +418,7 @@ export default function AiPage() {
         id="ai-decisions"
         title="Decisions"
         icon={<Brain size={14} />}
-        count={items.length}
+        count={data?.total ?? items.length}
         controls={<>
           <SearchBox value={q} onChange={setQ} placeholder="symbol / address / handle / narrative" />
           {VERDICTS.map((v) => (

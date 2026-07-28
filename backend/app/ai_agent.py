@@ -882,6 +882,10 @@ async def x_links(limit: int = 40, q: str | None = None,
         flt["$or"] = [{f: rx} for f in
                       ("address", "handle", "excerpt", "symbol", "name", "link")]
 
+    # Counted with the same filter, before the limit. `total` was len(rows),
+    # so a section holding two thousand launches reported forty — the page size,
+    # dressed up as the total.
+    total = await _col("x_links").count_documents(flt)
     rows = await _col("x_links").find(flt).sort(
         "found_at", -1).limit(limit).to_list(limit)
     for r in rows:
@@ -891,7 +895,8 @@ async def x_links(limit: int = 40, q: str | None = None,
         "at": time.time(),
         "newest_age_minutes": (round((time.time() - rows[0]["open_timestamp"]) / 60, 1)
                                if rows and rows[0].get("open_timestamp") else None),
-        "total": len(rows),
+        "total": total,
+        "shown": len(rows),
         "resolved": sum(1 for r in rows if r.get("resolved")),
         "verified": sum(1 for r in rows if r.get("verified")),
         "posts": sum(1 for r in rows if r.get("post_found")),
@@ -899,17 +904,19 @@ async def x_links(limit: int = 40, q: str | None = None,
     }
 
 
-async def recent(limit: int = 100, verdict: Optional[str] = None) -> list[dict]:
+async def recent(limit: int = 100, verdict: Optional[str] = None) -> dict:
+    """Decisions newest first, with the count of everything the filter matches."""
     flt: dict[str, Any] = {}
     if verdict:
         flt["verdict"] = verdict
+    total = await _col("ai_decisions").count_documents(flt)
     docs = await _col("ai_decisions").find(flt).sort("at", -1).limit(limit).to_list(limit)
-    out = []
+    out: list[dict] = []
     for d in docs:
         d.pop("_id", None)
         d["gmgn_url"] = _gmgn(d.get("address", ""))
         out.append(d)
-    return out
+    return {"total": total, "shown": len(out), "items": out}
 
 
 async def stats() -> dict:

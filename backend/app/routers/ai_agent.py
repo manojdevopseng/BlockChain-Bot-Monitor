@@ -24,8 +24,11 @@ async def decisions(
     verdict: str | None = Query(None, pattern="^(matched|launching|rejected|skipped|error)$"),
     q: str | None = None,
 ):
-    items = await ai_agent.recent(limit=limit, verdict=verdict)
+    got = await ai_agent.recent(limit=limit, verdict=verdict)
+    items = got["items"]
     if q:
+        # Searching narrows the page in hand, so the count has to narrow with it
+        # rather than keep reporting the unfiltered total.
         needle = q.lower()
         items = [
             d for d in items
@@ -33,7 +36,8 @@ async def decisions(
                          f"{d.get('address','')} {d.get('handle','')} "
                          f"{d.get('narrative','')}".lower()
         ]
-    return {"total": len(items), "items": items}
+        return {"total": len(items), "shown": len(items), "items": items}
+    return {"total": got["total"], "shown": got["shown"], "items": items}
 
 
 @router.get("/xdates")
