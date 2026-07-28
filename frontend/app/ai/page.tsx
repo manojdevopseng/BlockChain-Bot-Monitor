@@ -407,10 +407,9 @@ export default function AiPage() {
         </CollapsibleSection>
       )}
 
-      <XCheck />
-
-      <OGSection />
-
+      {/* Decisions first: it is the answer, and the two sections under it
+          are the working that produced it — the burst originals, then the
+          raw feed they came from. */}
       <CollapsibleSection
         id="ai-decisions"
         title="Decisions"
@@ -499,6 +498,10 @@ export default function AiPage() {
           </table>
         </TableScroll>
       </CollapsibleSection>
+
+      <OGSection />
+
+      <XCheck />
     </div>
   );
 }
