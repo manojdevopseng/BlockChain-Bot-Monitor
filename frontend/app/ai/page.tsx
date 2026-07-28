@@ -11,7 +11,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { SearchBox } from "@/components/SectionFilters";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
-import { rowKey, shortAddr, timeAgo } from "@/lib/utils";
+import { fmtDateTime, rowKey, shortAddr, timeAgo } from "@/lib/utils";
 
 // Verdicts, in the order they matter. `skipped` and `rejected` are deliberately
 // browsable: a filter you cannot audit is a filter you cannot trust.
@@ -105,11 +105,12 @@ function XCheck() {
                   <th className="px-3 py-2.5 font-medium">Followers</th>
                   <th className="px-3 py-2.5 font-medium">Post</th>
                   <th className="px-3 py-2.5 font-medium">Text</th>
+                  <th className="px-3 py-2.5 font-medium">When</th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 ? (
-                  <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
+                  <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
                     Nothing checked yet
                   </td></tr>
                 ) : items.map((r: any, i: number) => (
@@ -164,6 +165,11 @@ function XCheck() {
                     </td>
                     <td className="max-w-[300px] px-3 py-3 text-text-muted">
                       {r.excerpt || "—"}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="font-mono text-xs text-text-muted">
+                        {r.open_timestamp ? fmtDateTime(r.open_timestamp) : "—"}
+                      </span>
                     </td>
                   </tr>
                 ))}
