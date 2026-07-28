@@ -284,7 +284,8 @@ async def _judge(session, token: dict, row: dict, profile) -> None:
 
     verdict = await ask_grok(session, token, text, profile)
     if not verdict:
-        await _record(token, row, profile, "error", {"reason": "no verdict from Grok"})
+        await _record(token, row, profile, "pending",
+                      {"reason": "passed every gate — waiting for the model"})
         return
 
     narrative = str(verdict.get("narrative") or "none")
@@ -344,10 +345,13 @@ async def run_once(session: aiohttp.ClientSession) -> int:
 
         prior = await _col("ai_decisions").find_one(
             {"address": address}, {"verdict": 1, "tries": 1})
-        if prior and prior.get("verdict") != "error":
+        # `pending` is not a verdict, it is a queue: the gates said yes and the
+        # model was not reachable. Asked again, like an error.
+        if prior and prior.get("verdict") not in ("error", "pending"):
             await _mark_judged(address)
             continue                      # one verdict per token
-        if prior and int(prior.get("tries") or 0) >= MAX_ERROR_RETRIES:
+        if (prior and prior.get("verdict") == "error"
+                and int(prior.get("tries") or 0) >= MAX_ERROR_RETRIES):
             await _mark_judged(address)
             continue                      # never could be judged; stop asking
 
@@ -390,14 +394,18 @@ async def run_once(session: aiohttp.ClientSession) -> int:
 
         judged += 1
         await _judge(session, token, row, profile)
-        await _mark_judged(address)
+        # Left unjudged when it is only queued, so the next pass with a working
+        # model picks it up rather than leaving it parked for ever.
+        settled = await _col("ai_decisions").find_one(
+            {"address": address}, {"verdict": 1})
+        await _mark_judged(address, (settled or {}).get("verdict") != "pending")
 
     return judged
 
 
-async def _mark_judged(address: str) -> None:
+async def _mark_judged(address: str, judged: bool = True) -> None:
     await _col("x_links").update_one({"address": address},
-                                     {"$set": {"judged": True}})
+                                     {"$set": {"judged": judged}})
 
 
 async def watch() -> None:
@@ -408,8 +416,10 @@ async def watch() -> None:
         while True:
             try:
                 await asyncio.sleep(settings.ai_scan_interval)
-                if not settings.xai_api_key:
-                    continue              # nothing to ask; stay idle, stay quiet
+                # Run even without a key. The gates are most of the work and
+                # they are worth seeing on their own — what they let through
+                # lands in `pending`, and that is exactly the list the model
+                # will be given.
                 await run_once(session)
             except asyncio.CancelledError:
                 log.info("[AI] narrative agent stopped")
@@ -804,7 +814,8 @@ async def recent(limit: int = 200, verdict: Optional[str] = None,
 async def stats() -> dict:
     col = _col("ai_decisions")
     counts = {v: await col.count_documents({"verdict": v})
-              for v in ("matched", "launching", "rejected", "skipped", "error")}
+              for v in ("matched", "launching", "rejected", "skipped",
+                        "pending", "error")}
     return {
         "enabled": bool(settings.xai_api_key),
         "dry_run": settings.ai_dry_run,

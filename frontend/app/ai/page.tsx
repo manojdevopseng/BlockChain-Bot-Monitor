@@ -16,6 +16,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { fmtDateTime, rowKey, shortAddr, timeAgo } from "@/lib/utils";
 
 // Verdicts, in the order they matter:
+//   pending   — cleared every gate; this is the list the model will be given
 //   matched   — a narrative, and the model could stand behind it being real
 //   launching — the narrative fits but nothing confirms it yet
 //   rejected  — the model read it and found no narrative
@@ -25,15 +26,16 @@ import { fmtDateTime, rowKey, shortAddr, timeAgo } from "@/lib/utils";
 // filter you cannot audit is a filter you cannot trust.
 const VERDICTS = [
   { id: "", label: "All" },
+  { id: "pending", label: "Pending" },
   { id: "matched", label: "Matched" },
   { id: "launching", label: "Launching" },
   { id: "rejected", label: "Rejected" },
   { id: "skipped", label: "Skipped" },
 ] as const;
 
-const TONE: Record<string, "green" | "purple" | "amber" | "gray" | "red"> = {
+const TONE: Record<string, "green" | "purple" | "amber" | "gray" | "blue" | "red"> = {
   matched: "green", launching: "purple", rejected: "amber",
-  skipped: "gray", error: "red",
+  skipped: "gray", pending: "blue", error: "red",
 };
 
 // Rows fetched at a time. The sections hold thousands, and rendering all of
@@ -418,7 +420,7 @@ export default function AiPage() {
         <StatCard label="Matched" value={stats?.matched ?? 0} icon={CheckCircle2} tone="green" />
         <StatCard label="Launching" value={stats?.launching ?? 0} icon={Rocket} tone="purple" />
         <StatCard label="Rejected" value={stats?.rejected ?? 0} icon={XCircle} tone="amber" />
-        <StatCard label="Judged" value={stats?.total ?? 0} icon={Brain} tone="blue" />
+        <StatCard label="Pending" value={stats?.pending ?? 0} icon={Brain} tone="blue" />
       </div>
 
       {/* The agent is quiet by default and easy to forget about, so its state
