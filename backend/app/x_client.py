@@ -59,6 +59,15 @@ _HANDLE_RE = re.compile(r"^@?([A-Za-z0-9_]{1,15})/?$")
 _CACHE_TTL = 15 * 60
 _cache: dict[str, tuple[float, "XProfile"]] = {}
 
+# Nitter is unreachable from a datacenter IP: measured from our own server, all
+# six instances fail (connection refused, 403, or a redirect to nowhere) while
+# fxtwitter answers 200. Without a breaker every profile-link token walked the
+# whole list and burned up to forty seconds of the loop to learn that again.
+# One failed sweep parks it; a single instance is retried after the cooldown so
+# it comes back on its own if the network changes.
+_NITTER_COOLDOWN = 30 * 60
+_nitter_down_until = 0.0
+
 
 @dataclass
 class XProfile:
@@ -192,10 +201,15 @@ async def fetch_post(session: aiohttp.ClientSession, ref: XRef) -> XPost:
 
 async def _nitter_latest(session: aiohttp.ClientSession,
                          handle: str) -> tuple[str, Optional[float]]:
-    for instance in NITTER_INSTANCES:
+    global _nitter_down_until
+    now = time.time()
+    # Parked: try one instance to see whether it is back, not the whole list.
+    instances = (NITTER_INSTANCES if now >= _nitter_down_until
+                 else NITTER_INSTANCES[:1])
+    for instance in instances:
         try:
             async with session.get(f"{instance}/{handle}/rss", headers=_UA,
-                                   timeout=aiohttp.ClientTimeout(total=8)) as r:
+                                   timeout=aiohttp.ClientTimeout(total=5)) as r:
                 if r.status != 200:
                     continue
                 items = ET.fromstring((await r.text()).strip()).findall(".//item")
@@ -208,9 +222,14 @@ async def _nitter_latest(session: aiohttp.ClientSession,
                 clean = re.sub(r"&(amp|lt|gt|#\d+);", " ", clean)
                 clean = re.sub(r"\s+", " ", clean).strip()
                 if len(clean) > 10:
+                    _nitter_down_until = 0.0
                     return clean, _age_minutes(items[0].findtext("pubDate") or "")
         except Exception:  # noqa: BLE001
             continue
+    if len(instances) > 1:
+        _nitter_down_until = now + _NITTER_COOLDOWN
+        log.info("[X] every Nitter instance failed — parked for "
+                 f"{_NITTER_COOLDOWN // 60} min; profile links fall back to the bio")
     return "", None
 
 
