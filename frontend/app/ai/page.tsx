@@ -90,10 +90,10 @@ function XCheck() {
         <>
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
-            only tokens that carry an X link. The pair is seen by our own socket
-            a second after it is created, but the link itself comes from GMGN,
-            which publishes in bursts every 30-45 seconds — so a row appears when
-            that arrives, and its Age is the real time since launch.
+            new pump.fun tokens that carry an X link. The mint is seen by our own
+            on-chain discovery about a second after it is created, but the link
+            itself comes from GMGN — so a row appears when that arrives, and its
+            Age is the real time since launch.
             {data && (
               <> 
                 <span className="text-text">{data.resolved}</span> accounts
@@ -126,7 +126,7 @@ function XCheck() {
                   <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
                     <td className="px-3 py-3">
                       <span className="flex items-center gap-1.5">
-                        <a href={`https://gmgn.ai/robinhood/token/${r.address}`}
+                        <a href={`https://gmgn.ai/sol/token/${r.address}`}
                            target="_blank" rel="noopener noreferrer"
                            title="View on GMGN"
                            className="font-semibold text-brand-soft hover:underline">
@@ -211,7 +211,7 @@ export default function AiPage() {
     <div className="space-y-5">
       <PageHeader
         title="AI Narrative"
-        subtitle="Robinhood tokens judged by the X account behind them"
+        subtitle="pump.fun tokens judged by the X account behind them"
       />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

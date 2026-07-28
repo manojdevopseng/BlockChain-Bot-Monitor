@@ -220,7 +220,7 @@ async def _record(token: dict, ref, profile, verdict: str, detail: dict) -> None
 # ── Telegram ───────────────────────────────────────────────────────────────────
 
 def _gmgn(address: str) -> str:
-    return f"https://gmgn.ai/robinhood/token/{address}"
+    return f"https://gmgn.ai/sol/token/{address}"
 
 
 def _message(heading: str, token: dict, address: str, lines: list[str]) -> str:
@@ -417,6 +417,17 @@ async def _recheck_launching(session) -> None:
 
 # ── Pass ───────────────────────────────────────────────────────────────────────
 
+def _is_pump(pair: dict) -> bool:
+    """pump.fun and nothing else.
+
+    Read from the pair, not guessed from the mint's "pump" suffix — a token can
+    carry that suffix and be listed under another launchpad.
+    """
+    info = pair.get("base_token_info") or {}
+    label = (pair.get("launchpad") or info.get("launchpad") or "").lower()
+    return "pump" in label
+
+
 def _social_link(pair: dict) -> str:
     info = pair.get("base_token_info") or {}
     links = info.get("social_links") or {}
@@ -535,18 +546,18 @@ _PENDING_MAX_AGE = 10 * 60
 
 async def note_onchain_token(address: str, symbol: str, name: str,
                              dex: str = "") -> None:
-    """Record a token the instant our own detector sees it, X link or not.
+    """Record a mint the instant on-chain discovery sees it, X link or not.
 
-    Measured against GMGN's Robinhood feed: it publishes in bursts every 30-45
-    seconds, and its newest pair is typically 20 to 60 seconds old when read —
-    best case 5. So a feed-driven list can never show a fresh token, however
-    fast it is polled. Our RBH WebSocket sees the pair about a second after it
-    is created, which is where a live list has to start.
+    The pump.fun program's own CreateEvent reaches us about a second after the
+    mint exists, where GMGN's feed takes longer. Recording it here is what makes
+    the Age column the real time since launch rather than the time GMGN got
+    round to listing it.
 
-    The X link is not available here — only GMGN carries it — so the row lands
-    with the link pending and is filled in when the feed catches up.
+    The X link is not knowable at this point — only GMGN carries it — so the row
+    lands pending and is filled in when the feed catches up. A row that never
+    gets one is dropped.
     """
-    address = (address or "").lower()
+    address = (address or "").strip()
     if not address:
         return
     from .ws_hub import hub
@@ -623,14 +634,15 @@ async def _read_x_feed(client, session: aiohttp.ClientSession,
     holding a batch until the end of a pass was what made four or five tokens
     land at the same moment.
     """
-    pairs = await client.get_chain_new_pairs("robinhood", 100)
+    pairs = await client.get_sol_new_pairs(limit=200)
+    pairs = [p for p in pairs if _is_pump(p)]
     linked = [(p, _social_link(p)) for p in pairs]
     linked = [(p, l) for p, l in linked if l]
 
     rows: list[dict] = []
     for pair, link in linked[:limit]:
         info = pair.get("base_token_info") or {}
-        address = (pair.get("base_address") or info.get("address") or "")
+        address = (pair.get("base_address") or info.get("address") or "").strip()
         if not address:
             continue
         known = await _col("x_links").find_one({"address": address},

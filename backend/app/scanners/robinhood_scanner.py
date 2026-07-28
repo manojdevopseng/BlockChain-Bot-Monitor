@@ -70,13 +70,6 @@ class RobinhoodScanner:
                 await self._session.close()
 
     async def _on_token(self, tok: DetectedToken) -> None:
-        # Every new pair, before any cross-chain filtering: this is the only
-        # place a Robinhood token is known within a second of being created,
-        # and the dashboard's live list is built from it.
-        from app import ai_agent
-        storage._schedule(ai_agent.note_onchain_token(
-            tok.address, tok.symbol, tok.name, tok.dex))
-
         symbol = tok.symbol.upper().strip()
         if not symbol:
             return

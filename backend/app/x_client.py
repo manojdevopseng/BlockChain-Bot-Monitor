@@ -255,14 +255,20 @@ def _age_minutes(created) -> Optional[float]:
         return None
 
 
-# An EVM contract address, for the profile branch: a launch account usually
-# posts the address in its bio or its latest post once the token is live.
-_CA_RE = re.compile(r"0x[a-fA-F0-9]{40}")
+# A Solana mint, for the profile branch: a launch account usually posts the
+# address in its bio or its latest post once the token is live. Base58 excludes
+# 0, O, I and l, which is most of what stops ordinary words matching — and a
+# pump.fun mint ends in "pump", so that wins when a line holds more than one
+# candidate. Case is preserved: a Solana address is case-sensitive.
+_CA_RE = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")
 
 
 def find_contract(*texts: str) -> Optional[str]:
+    fallback: Optional[str] = None
     for t in texts:
-        m = _CA_RE.search(t or "")
-        if m:
-            return m.group(0).lower()
-    return None
+        for cand in _CA_RE.findall(t or ""):
+            if cand.lower().endswith("pump"):
+                return cand
+            if fallback is None:
+                fallback = cand
+    return fallback
