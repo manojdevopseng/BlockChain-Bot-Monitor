@@ -607,7 +607,16 @@ async def _handle_launch(session: aiohttp.ClientSession,
                 return                    # not an account — a community link, say
 
             prof = await x_client.fetch_profile(session, ref.handle)
-            post = await x_client.fetch_post(session, ref) if prof.found else x_client.XPost()
+            # Verified or nothing. Any kind counts — individual, business,
+            # government — but an unverified account is not worth a row: on this
+            # chain anyone can point a launch at any handle, and the tick is the
+            # only cheap evidence that somebody stands behind it. Not stored
+            # either, which keeps the collection to the rows actually shown.
+            if not prof.verified:
+                log.debug(f"[PUMP] {msg.get('symbol')} skipped — "
+                          f"@{ref.handle} not verified")
+                return
+            post = await x_client.fetch_post(session, ref)
 
             row = {
                 "address": mint,
@@ -661,14 +670,16 @@ async def _fetch_metadata(session: aiohttp.ClientSession, uri: str) -> dict:
 
 # Link types that count as an account behind the token. A launch whose metadata
 # names something else — an X community, a bare contract address — is not worth
-# a row, and one with no twitter field at all never becomes a row in the first
-# place.
+# a row; one with no twitter field at all never becomes a row; and neither does
+# one whose account is unverified.
 _LINKED_KINDS = ("tweet", "profile")
 
 
 async def x_links(limit: int = 40) -> dict:
     """Tokens with an X link, newest first. Read from Mongo — no upstream call."""
-    rows = await _col("x_links").find({"kind": {"$in": list(_LINKED_KINDS)}}).to_list(400)
+    rows = await _col("x_links").find(
+        {"kind": {"$in": list(_LINKED_KINDS)}, "verified": True}
+    ).to_list(400)
     rows.sort(key=lambda r: r.get("open_timestamp") or r.get("found_at") or 0,
               reverse=True)
     rows = rows[:limit]

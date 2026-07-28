@@ -90,10 +90,11 @@ function XCheck() {
         <>
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
-            new pump.fun launches that carry an X link, pushed by PumpPortal as
-            they happen. The link comes from the token's own metadata, so it
-            arrives with the launch rather than a minute later — a row is
-            typically a second or two old.
+            new pump.fun launches whose X account is verified, pushed by
+            PumpPortal as they happen. The link comes from the token's own
+            metadata, so it arrives with the launch — a row is typically a second
+            or two old. Any kind of tick counts; unverified accounts are not
+            listed.
             {data && (
               <> 
                 <span className="text-text">{data.resolved}</span> accounts
@@ -156,9 +157,7 @@ function XCheck() {
                       )}
                     </td>
                     <td className="px-3 py-3">
-                      {r.verified
-                        ? <Badge variant="green">{r.verified_type || "yes"}</Badge>
-                        : <span className="text-text-dim">no</span>}
+                      <Badge variant="green">{r.verified_type || "verified"}</Badge>
                     </td>
                     <td className="px-3 py-3 text-text-muted">
                       {r.followers ? Number(r.followers).toLocaleString() : "—"}
