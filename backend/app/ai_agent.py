@@ -279,18 +279,24 @@ async def _notify(session: aiohttp.ClientSession, text: str, address: str) -> bo
 
 # ── Judging ────────────────────────────────────────────────────────────────────
 
-async def _judge(session, token: dict, row: dict, profile) -> None:
-    """Read the post behind the launch and put it to the model."""
+async def _judge(session, token: dict, row: dict, profile,
+                 preview: bool = True) -> bool:
+    """Read the post behind the launch and put it to the model.
+
+    Returns False when the model could not be reached, so the caller can stop
+    rather than spend a pass collecting the same failure.
+    """
     text = row.get("excerpt") or ""
     if not text.strip():
         await _record(token, row, profile, "skipped", {"reason": "no post text to read"})
-        return
+        return True
 
     verdict = await ask_grok(session, token, text, profile)
     if not verdict:
-        await _record(token, row, profile, "pending",
-                      {"reason": "passed every gate — waiting for the model"})
-        return
+        if preview:
+            await _record(token, row, profile, "pending",
+                          {"reason": "passed every gate — waiting for the model"})
+        return False
 
     narrative = str(verdict.get("narrative") or "none")
     confidence = int(verdict.get("confidence") or 0)
@@ -301,7 +307,7 @@ async def _judge(session, token: dict, row: dict, profile) -> None:
     if not verdict.get("match") or confidence < settings.ai_min_confidence:
         detail["reason"] = detail["reason"] or "no narrative match"
         await _record(token, row, profile, "rejected", detail)
-        return
+        return True
 
     # Matched the narrative but the model could not stand behind it being real.
     # Worth seeing, not worth acting on — that is what Launching is for.
@@ -309,7 +315,7 @@ async def _judge(session, token: dict, row: dict, profile) -> None:
         await _record(token, row, profile, "launching", detail)
         log.info(f"[AI] LAUNCHING {token.get('symbol')} — {narrative} "
                  f"({confidence}/10), unverified")
-        return
+        return True
 
     text_out = _message("🎯 <b>NARRATIVE MATCH</b>", token, token["address"], [
         f"Narrative: <b>{esc(narrative)}</b> ({confidence}/10)",
@@ -322,6 +328,7 @@ async def _judge(session, token: dict, row: dict, profile) -> None:
     await _record(token, row, profile, "matched", detail)
     log.info(f"[AI] MATCH {token.get('symbol')} — {narrative} ({confidence}/10) "
              f"via @{profile.handle}")
+    return True
 
 
 async def run_once(session: aiohttp.ClientSession) -> int:
@@ -339,13 +346,16 @@ async def run_once(session: aiohttp.ClientSession) -> int:
         {"judged": {"$ne": True}, "kind": {"$in": list(_LINKED_KINDS)}}
     ).sort("found_at", 1).limit(200).to_list(200)
 
+    from . import registry
+    preview = await registry.is_enabled("ai_gate_preview")
+
     judged = 0
     today = ist_date_str(time.time())
 
     # Anything queued waiting for the model gets a few attempts each pass,
     # ahead of new work but on a budget of its own — a backlog of queued rows
     # must not be able to starve the launches still arriving.
-    judged += await _retry_pending(session)
+    judged += await _retry_pending(session, preview)
 
     for row in rows:
         if judged >= MAX_PER_CYCLE:
@@ -402,13 +412,20 @@ async def run_once(session: aiohttp.ClientSession) -> int:
             continue
 
         judged += 1
-        await _judge(session, token, row, profile)
+        ok = await _judge(session, token, row, profile, preview)
+        if not ok and not preview:
+            # The model is down and we are not recording a queue. Leave the
+            # launch for a later pass rather than burning through the rest of
+            # them collecting the same failure.
+            await _mark_judged(address, False)
+            break
         await _mark_judged(address)
 
     return judged
 
 
-async def _retry_pending(session: aiohttp.ClientSession) -> int:
+async def _retry_pending(session: aiohttp.ClientSession,
+                         preview: bool = True) -> int:
     """Ask the model again about launches that cleared the gates while it was down."""
     rows = await _col("ai_decisions").find({"verdict": "pending"}).sort(
         "at", 1).limit(RETRY_PENDING_PER_CYCLE).to_list(RETRY_PENDING_PER_CYCLE)
@@ -423,7 +440,8 @@ async def _retry_pending(session: aiohttp.ClientSession) -> int:
             verified_type=d.get("verified_type") or "",
             followers=int(d.get("followers") or 0), bio=d.get("excerpt") or "",
             found=True)
-        await _judge(session, token, row, profile)
+        if not await _judge(session, token, row, profile, preview):
+            break                         # still no model; try again next pass
         done += 1
     return done
 

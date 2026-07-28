@@ -72,6 +72,11 @@ DEFAULT_SERVICES: list[dict] = [
     # without one.
     {"id": "ai_agent",              "category": BOT, "label": "AI Narrative Agent",
      "chain": "sol", "key": "ai_agent",         "enabled": False},
+    # With no model reachable, record what the gates let through as `pending` —
+    # the list the model would be given. Useful for checking the filters, and
+    # noisy once they are trusted, so it is a switch of its own.
+    {"id": "ai_gate_preview",       "category": BOT, "label": "Gate Preview (pending)",
+     "chain": "sol", "key": "ai_gate_preview",  "enabled": True},
 
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth",
