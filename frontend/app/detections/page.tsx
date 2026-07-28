@@ -75,8 +75,15 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
 
 function GasSection() {
   const [q, setQ] = useState("");
+  const [date, setDate] = useState("");
   const query = useDebounced(q);
-  const { data } = useApi<any>(`/api/rpc/gas/recent${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (date) params.set("date", date);
+  const qs = params.toString();
+
+  const { data } = useApi<any>(`/api/rpc/gas/recent${qs ? `?${qs}` : ""}`);
+  const { data: datesData } = useApi<any>("/api/rpc/gas/dates");
   const { data: summary } = useApi<any>("/api/rpc/gas");
   const items = data?.items ?? [];
 
@@ -85,9 +92,10 @@ function GasSection() {
       id="gas"
       title="ETH Gas Fees — High-Gas Early Buys"
       icon={<Fuel size={14} />}
-      count={items.length}
+      count={data?.total ?? items.length}
       controls={<>
         <SearchBox value={q} onChange={setQ} placeholder="symbol / address / tx" />
+        <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
         <span className="text-xs text-text-dim">
           threshold <span className="text-text">{fmtEth(summary?.min_fee_eth)}</span>
         </span>
@@ -118,7 +126,9 @@ function GasSection() {
             <tbody>
               {items.length === 0 ? (
                 <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
-                  No high-gas buys caught yet
+                  {query ? "No high-gas buy matches this search"
+                    : date ? `No high-gas buys on ${date}`
+                    : "No high-gas buys caught yet"}
                 </td></tr>
               ) : items.map((r: any, i: number) => (
                 <tr key={rowKey(r, i)} className="border-b border-border-soft hover:bg-bg-hover/40">

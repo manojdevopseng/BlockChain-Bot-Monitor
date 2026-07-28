@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from datetime import datetime
+
 from .. import db, registry, supervisor
 from ..config import settings
 from ..scanners import scfg
-from ..util import clean_list
+from ..util import clean_list, ist_date_str
 
 router = APIRouter(prefix="/api/rpc", tags=["rpc"])
 
@@ -114,12 +116,32 @@ async def gas():
     }
 
 
+@router.get("/gas/dates")
+async def gas_dates():
+    """IST days that have a high-gas buy, newest first — the History dropdown.
+
+    Parsed before sorting: DD-MM-YYYY compared as text puts 31-01 after 01-02,
+    which put the dropdown out of order at every month boundary.
+    """
+    docs = await db.get_collection("gas_alerts").find({}).to_list(5000)
+    days = {ist_date_str(d.get("created_at") or 0) for d in docs if d.get("created_at")}
+    return {"dates": sorted(days, key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
+                            reverse=True)}
+
+
 @router.get("/gas/recent")
-async def gas_recent(limit: int = 50, q: str | None = None):
-    """Recent high-gas early buys — feeds the dashboard's ETH Gas Fees panel."""
+async def gas_recent(limit: int = 50, q: str | None = None, date: str | None = None):
+    """Recent high-gas early buys — feeds the dashboard's ETH Gas Fees panel.
+
+    `date` pins the panel to one IST day (History); without it the panel is the
+    live view. Search applies to either, so a search on a past day filters that
+    day rather than being ignored.
+    """
     gas_on = await registry.is_enabled("eth_gas_fees")
-    docs = await db.get_collection("gas_alerts").find({}).to_list(1000)
+    docs = await db.get_collection("gas_alerts").find({}).to_list(5000)
     docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
+    if date:
+        docs = [d for d in docs if ist_date_str(d.get("created_at") or 0) == date]
     if q:
         ql = q.lower()
         docs = [d for d in docs
@@ -139,4 +161,6 @@ async def gas_recent(limit: int = 50, q: str | None = None):
             "created_at": d.get("created_at"),
             "gmgn_url": f"https://gmgn.ai/eth/token/{addr}" if addr else None,
         })
-    return {"enabled": gas_on, "total": len(out), "items": out}
+    # total counts everything that matched, not just the page — otherwise a day
+    # with more hits than `limit` reports the limit as its total.
+    return {"enabled": gas_on, "total": len(docs), "items": out}
