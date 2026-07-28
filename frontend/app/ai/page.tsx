@@ -30,6 +30,20 @@ const TONE: Record<string, "green" | "purple" | "amber" | "gray" | "red"> = {
   skipped: "gray", error: "red",
 };
 
+// Both launch sections are fed by the one PumpPortal socket, so they are on the
+// one Settings switch — "X Links Feed". Neither has its own. The state is shown
+// in both headers because a stopped feed otherwise reads as a quiet market.
+function useFeedEnabled(): boolean | undefined {
+  const { data } = useApi<any>("/api/settings/services", { refreshInterval: 30000 });
+  const svc = (data?.bot ?? []).find((x: any) => x.id === "x_feed");
+  return svc ? Boolean(svc.enabled) : undefined;
+}
+
+function FeedState({ enabled }: { enabled: boolean | undefined }) {
+  if (enabled !== false) return null;
+  return <Badge variant="amber">feed off — Settings → Bots → X Links Feed</Badge>;
+}
+
 // Ages were rendered once per fetch, so a row sat on "1m ago" for a whole
 // minute and the section looked frozen between refreshes. This re-renders every
 // second, which is what makes a live counter live.
@@ -199,6 +213,7 @@ function OGSection() {
   const [date, setDate] = useState("");
   const query = useDebounced(q);
   const rx = useKeywordRegex();
+  const feedOn = useFeedEnabled();
   useTick(1000);
 
   const params = new URLSearchParams({ limit: "40" });
@@ -216,6 +231,7 @@ function OGSection() {
       icon={<Crown size={14} />}
       count={data?.total ?? items.length}
       controls={<>
+        <FeedState enabled={feedOn} />
         <SearchBox value={q} onChange={setQ} placeholder="address / @username / word" />
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
       </>}
@@ -224,7 +240,8 @@ function OGSection() {
         The first launch of a name and ticker that came back five times inside
         five minutes, counting only launches that carry an X link. Five is not a
         coincidence — it is somebody working at it — and the original is the one
-        that ran before the copies.
+        that ran before the copies. Same feed and same switch as the live section
+        below.
         {data && (
           <> <span className="text-text">{data.total}</span> stored, showing the
             newest <span className="text-text">{data.shown}</span>.</>
@@ -264,6 +281,7 @@ function XCheck() {
     useApi<any>(`/api/ai/xcheck?${params.toString()}`, { refreshInterval: 60000 });
   const { data: datesData } = useApi<any>("/api/ai/xdates", { refreshInterval: 300000 });
   const rx = useKeywordRegex();
+  const feedOn = useFeedEnabled();
   useTick(1000);
   const items: any[] = data?.items ?? [];
   const emptyText = query || minFollowers ? "Nothing matches this filter"
@@ -277,6 +295,7 @@ function XCheck() {
       icon={<Twitter size={14} />}
       count={data?.total ?? items.length}
       controls={<>
+        <FeedState enabled={feedOn} />
         <SearchBox value={q} onChange={setQ} placeholder="address / @username / word" />
         <Input
           value={followers}
