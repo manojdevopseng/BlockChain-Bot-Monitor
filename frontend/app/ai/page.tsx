@@ -90,11 +90,10 @@ function XCheck() {
         <>
           <p className="mb-3 text-xs text-text-dim">
             The newest Robinhood tokens, their X link, and what came back — read
-            pushed the moment our own RBH socket sees the pair — about a second
-            after it is created. The X link comes from GMGN, which publishes in
-            bursts every 30-45 seconds, so a row starts as
-            <span className="text-accent-amber"> pending</span> and fills in when
-            that arrives.
+            only tokens that carry an X link. The pair is seen by our own socket
+            a second after it is created, but the link itself comes from GMGN,
+            which publishes in bursts every 30-45 seconds — so a row appears when
+            that arrives, and its Age is the real time since launch.
             {data && (
               <> 
                 <span className="text-text">{data.resolved}</span> accounts
@@ -143,9 +142,7 @@ function XCheck() {
                       {r.open_timestamp ? ageLabel(r.open_timestamp) : "—"}
                     </td>
                     <td className="px-3 py-3">
-                      <Badge variant={r.kind === "tweet" ? "purple"
-                        : r.kind === "profile" ? "blue"
-                        : r.kind === "pending" ? "amber" : "gray"}>
+                      <Badge variant={r.kind === "tweet" ? "purple" : "blue"}>
                         {r.kind}
                       </Badge>
                     </td>
@@ -153,10 +150,6 @@ function XCheck() {
                       {r.handle ? (
                         <a href={`https://x.com/${r.handle}`} target="_blank" rel="noopener noreferrer"
                            className="text-accent-blue hover:underline">@{r.handle}</a>
-                      ) : r.kind === "pending" ? (
-                        // Seen on-chain a second after launch; GMGN has not
-                        // published its socials yet, and may never.
-                        <span className="text-xs text-text-dim">waiting for GMGN…</span>
                       ) : <span className="font-mono text-xs text-text-dim">{r.link?.slice(0, 24)}</span>}
                       {!r.resolved && r.handle && (
                         <span className="ml-2 text-xs text-accent-amber">not found</span>

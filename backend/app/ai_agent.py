@@ -529,6 +529,8 @@ async def watch() -> None:
 # goes through the shared client at its existing pace, so gmgn.ai sees no change
 # in request rate — only in which requests fill the same budget.
 X_FEED_INTERVAL = 15
+# How long a token is kept while it has no X link of its own.
+_PENDING_MAX_AGE = 10 * 60
 
 
 async def note_onchain_token(address: str, symbol: str, name: str,
@@ -591,6 +593,12 @@ async def x_feed_watch() -> None:
                 if client is None:
                     continue          # scanners down: no client to borrow
                 await _read_x_feed(client, session, on_row=_publish)
+                # GMGN publishes a pair's socials within a minute or so of it
+                # appearing. A row still pending well past that has none, and
+                # keeping it costs a document per token launched — which on this
+                # chain is thousands a day.
+                await _col("x_links").delete_many(
+                    {"kind": "pending", "found_at": {"$lt": time.time() - _PENDING_MAX_AGE}})
             except asyncio.CancelledError:
                 log.info("[X-FEED] stopped")
                 return
@@ -659,9 +667,17 @@ async def _read_x_feed(client, session: aiohttp.ClientSession,
     return rows
 
 
+# Link types that count as having an account behind them. A row starts as
+# `pending` — recorded from our own socket a second after the pair exists — and
+# only becomes displayable once GMGN publishes its socials. `none` means GMGN
+# published something that is not an account at all (a contract address in the
+# field, an X community link), which is not worth a row either.
+_LINKED_KINDS = ("tweet", "profile")
+
+
 async def x_links(limit: int = 40) -> dict:
-    """What the loop has found, newest first. Read from Mongo — no upstream call."""
-    rows = await _col("x_links").find({}).to_list(400)
+    """Tokens with an X link, newest first. Read from Mongo — no upstream call."""
+    rows = await _col("x_links").find({"kind": {"$in": list(_LINKED_KINDS)}}).to_list(400)
     rows.sort(key=lambda r: r.get("open_timestamp") or r.get("found_at") or 0,
               reverse=True)
     rows = rows[:limit]
