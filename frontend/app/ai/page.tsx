@@ -184,7 +184,7 @@ function LaunchTable({ items, rx, empty, total, onMore }: {
                     </span>
                   </td>
                   <td className="px-3 py-3 font-mono text-xs text-text-muted">
-                    {r.open_timestamp ? ageLabel(r.open_timestamp) : "—"}
+                    <Age ts={r.open_timestamp} />
                   </td>
                   <td className="px-3 py-3">
                     <Badge variant={r.kind === "tweet" ? "purple" : "blue"}>
@@ -470,6 +470,7 @@ export default function AiPage() {
               <tr className={`${STICKY_HEAD} border-b border-border`}>
                 <th className="px-3 py-2.5 font-medium">Verdict</th>
                 <th className="px-3 py-2.5 font-medium">Token</th>
+                <th className="px-3 py-2.5 font-medium">Age</th>
                 <th className="px-3 py-2.5 font-medium">Account</th>
                 <th className="px-3 py-2.5 font-medium">Narrative</th>
                 <th className="px-3 py-2.5 font-medium">Reason</th>
@@ -479,7 +480,7 @@ export default function AiPage() {
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-10 text-center text-text-dim">
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
                   {query || verdict || minFollowers ? "Nothing matches this filter"
                     : date ? `No decisions on ${date}`
                     : "No decisions yet — the agent is off, or has no key"}
@@ -492,6 +493,11 @@ export default function AiPage() {
                   <td className="px-3 py-3">
                     <div className="font-semibold text-text">{d.symbol || "?"}</div>
                     <div className="text-xs text-text-dim">{d.name}</div>
+                  </td>
+                  {/* Age from the launch, not from the moment we judged it, so
+                      it reads the same as the age in the live section above. */}
+                  <td className="px-3 py-3 font-mono text-xs text-text-muted">
+                    <Age ts={d.open_timestamp || d.at} />
                   </td>
                   <td className="px-3 py-3">
                     {d.handle ? (

@@ -227,6 +227,10 @@ async def _record(token: dict, row, profile, verdict: str, detail: dict) -> None
                 "kind": (row or {}).get("kind", "none"),
                 "link": (row or {}).get("link", ""),
                 "excerpt": (row or {}).get("excerpt", ""),
+                # When the token launched, so Age here means the same thing it
+                # means in the live section: time since launch, not time since
+                # we got round to judging it.
+                "open_timestamp": (row or {}).get("open_timestamp"),
                 "verdict": verdict, **detail,
                 "at": time.time(), "dt": _utc_now(),
                 # The IST day this was decided — the same boundary the archives
