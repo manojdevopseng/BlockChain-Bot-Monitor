@@ -119,6 +119,12 @@ async def drops(hours: int = Query(24, ge=1, le=168)):
     return {"items": await ai_agent.drops(hours=hours)}
 
 
+@router.get("/feed-audit")
+async def feed_audit(hours: int = Query(3, ge=1, le=48)):
+    """Does the feed's arithmetic close? received = stored + dropped, or not."""
+    return {"items": await ai_agent.feed_audit(hours=hours)}
+
+
 @router.get("/why")
 async def why(address: str = Query(..., min_length=32, max_length=64)):
     """Why is this launch not in X Links? One query, one answer.

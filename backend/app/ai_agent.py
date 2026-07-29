@@ -841,6 +841,13 @@ async def x_feed_watch() -> None:
                         # fetches finish out of order, and the burst has to be
                         # ordered by when the launch happened.
                         msg["_seen_at"] = time.time()
+                        # Counted before anything can filter or lose it, so the
+                        # arithmetic closes: what the socket delivered should
+                        # equal what was stored plus what was dropped. A gap on
+                        # this side means PumpPortal did not send it; a gap on
+                        # the other means we lost it after receiving it. Those
+                        # want opposite fixes and looked identical until now.
+                        await _count_drop("_received", msg)
                         # The market cap clock starts here, not after the
                         # metadata fetch: that fetch costs up to 1.4s, and a
                         # minute measured from 1.4s in is not the first minute.
@@ -1101,12 +1108,49 @@ async def why_dropped(mint: str) -> Optional[dict]:
     return {"reason": doc.get("reason"), "hour": doc.get("hour"), **entry}
 
 
+async def feed_audit(hours: int = 3) -> list[dict]:
+    """Per hour: delivered by the socket, stored, dropped, and unexplained.
+
+    `_received` is counted the moment a launch arrives, before any filter can
+    touch it, so `received - stored - dropped` is the number of launches that
+    reached this process and then went nowhere. If that is zero, anything
+    missing was never delivered.
+    """
+    out: list[dict] = []
+    rows = await _col("x_drops").find({}).sort("hour", -1).limit(hours * 10).to_list(200)
+    by_hour: dict[str, dict] = {}
+    for r in rows:
+        h = by_hour.setdefault(r["hour"], {"hour": r["hour"], "received": 0,
+                                           "dropped": 0, "reasons": {}})
+        if r["reason"] == "_received":
+            h["received"] = r["count"]
+        else:
+            h["dropped"] += r["count"]
+            h["reasons"][r["reason"]] = r["count"]
+
+    for hour, h in sorted(by_hour.items(), reverse=True)[:hours]:
+        # The bucket label is local time; x_links is stamped in epoch seconds.
+        start = time.mktime(time.strptime(hour, "%d-%m-%Y %H:00"))
+        h["stored"] = await _col("x_links").count_documents(
+            {"found_at": {"$gte": start, "$lt": start + 3600}})
+        h["unexplained"] = h["received"] - h["stored"] - h["dropped"]
+        out.append(h)
+    return out
+
+
 async def drops(hours: int = 24) -> list[dict]:
-    """Drop counts by reason, newest hour first — the audit for what was filtered."""
-    rows = await _col("x_drops").find({}).sort("hour", -1).limit(hours * 8).to_list(200)
+    """Drop counts by reason, newest hour first — the audit for what was filtered.
+
+    `_received` shares this collection but is not a drop — it is the arrival
+    count the audit measures everything else against, so it is left out here.
+    """
+    rows = await _col("x_drops").find(
+        {"reason": {"$ne": "_received"}}
+    ).sort("hour", -1).limit(hours * 8).to_list(200)
     for r in rows:
         r.pop("_id", None)
         r.pop("dt", None)
+        r.pop("mints", None)      # the audit trail, not something to render
     return rows
 
 
