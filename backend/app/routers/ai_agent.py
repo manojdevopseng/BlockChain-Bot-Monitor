@@ -21,7 +21,7 @@ async def stats():
 @router.get("/decisions")
 async def decisions(
     limit: int = Query(200, ge=1, le=5000),
-    verdict: str | None = Query(None, pattern="^(matched|launching|rejected|skipped|pending|error)$"),
+    verdict: str | None = Query(None, pattern="^(matched|launching|rejected|skipped|pending|error|telegram)$"),
     q: str | None = None,
     min_followers: int = Query(0, ge=0),
     date: str | None = None,          # DD-MM-YYYY (IST) — History filter

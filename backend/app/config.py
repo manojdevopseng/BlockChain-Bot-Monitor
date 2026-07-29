@@ -148,6 +148,19 @@ class Settings(BaseSettings):
     # Where notifications go. Blank = ROBINHOOD_CHAT_ID.
     ai_chat_id: str = ""
 
+    # ── The burst, and what it has to be worth ──────────────
+    # One X link carrying this many launches inside the window is a coordinated
+    # burst, not a coincidence. Only the first launch of such a burst is put to
+    # the model; the rest ride its answer. Counted per IST day.
+    ai_link_burst_count: int = 5
+    ai_link_burst_window: int = 300
+    # A launch is watched for its market cap for this long after it opens, and
+    # crossing this many dollars inside that minute is what puts it in front of
+    # a person. Measured live: a launch opens at ~28 SOL, so at $74 SOL this is
+    # about a 4x inside the first minute.
+    ai_mcap_watch_seconds: int = 60
+    ai_telegram_mcap_usd: float = 8000.0
+
     # ── Daily digest ────────────────────────────────────────
     # One summary message a day to ALERT_CHAT_ID: what fired and how it did.
     digest_enabled: bool = True

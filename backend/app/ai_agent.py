@@ -37,7 +37,7 @@ from typing import Any, Optional
 
 import aiohttp
 
-from . import db, x_client
+from . import db, pump_mcap, x_client
 from .scanners.bounded_set import BoundedSet
 from .config import settings
 from .scanners.slog import get_logger
@@ -231,6 +231,10 @@ async def _record(token: dict, row, profile, verdict: str, detail: dict) -> None
                 # means in the live section: time since launch, not time since
                 # we got round to judging it.
                 "open_timestamp": (row or {}).get("open_timestamp"),
+                # Whether this launch was part of a link's burst, and where in
+                # it. Only these are eligible for Telegram.
+                "burst": bool((row or {}).get("_burst")),
+                "burst_position": (row or {}).get("_burst_position"),
                 "verdict": verdict, **detail,
                 "at": time.time(), "dt": _utc_now(),
                 # The IST day this was decided — the same boundary the archives
@@ -394,24 +398,28 @@ async def run_once(session: aiohttp.ClientSession) -> int:
         name_key = (f"{(token['name'] or '').lower().strip()}|"
                     f"{(token['symbol'] or '').lower().strip()}")
 
-        # 1. The link, before anything else: it is the broadest gate and the
-        #    cheapest. Measured on live data, one tweet carries up to 45 tokens
-        #    under 15 different names, and the text the model reads is identical
-        #    every time — so the first token on a link is the one that gets
-        #    asked. The rest are skipped carrying that answer in their reason,
-        #    which keeps the audit able to show what they were riding.
-        link = row.get("link") or ""
-        if link:
-            prior_link = await _col("ai_decisions").find_one(
-                {"link": link, "verdict": {"$in": list(SETTLED)}},
-                {"verdict": 1, "symbol": 1})
-            if prior_link:
-                await _record(token, row, profile, "skipped",
-                              {"reason": f"same link — already judged "
-                                         f"({prior_link.get('verdict')}) as "
-                                         f"{prior_link.get('symbol') or '?'}"})
-                await _mark_judged(address)
-                continue
+        # 1. The burst, before anything else. A link is only interesting once
+        #    the same one has carried BURST_COUNT launches inside the window —
+        #    below that it is one person posting, not a campaign. Of those
+        #    launches only the first is put to the model: the text is identical
+        #    across all of them, so asking again buys the same answer.
+        group = await _link_burst(row)
+        if group["state"] == "waiting":
+            continue                      # window still open; ask again next pass
+        if group["state"] == "no burst":
+            await _record(token, row, profile, "skipped",
+                          {"reason": group["reason"], "burst": False})
+            await _mark_judged(address)
+            continue
+        if not group["first"]:
+            await _record(token, row, profile, "skipped",
+                          {"reason": f"#{group['position']} of the "
+                                     f"{group['size']} launches on this link — "
+                                     f"only the first is judged",
+                           "burst": True, "burst_position": group["position"]})
+            await _mark_judged(address)
+            await _check_telegram(session, address)
+            continue
 
         # 2. An account with no followers is nobody, whatever it posted.
         if profile.followers <= 0:
@@ -432,6 +440,9 @@ async def run_once(session: aiohttp.ClientSession) -> int:
             continue
 
         judged += 1
+        # The first of the burst is in the burst too — it has to carry the flag
+        # or it could never reach Telegram, however far it ran.
+        row = {**row, "_burst": True, "_burst_position": 1}
         ok = await _judge(session, token, row, profile, preview)
         if not ok and not preview:
             # The model is down and we are not recording a queue. Leave the
@@ -440,8 +451,145 @@ async def run_once(session: aiohttp.ClientSession) -> int:
             await _mark_judged(address, False)
             break
         await _mark_judged(address)
+        await _check_telegram(session, address)
 
+    await _settle_mcaps()
     return judged
+
+
+# ── The burst ─────────────────────────────────────────────────────────────────
+
+async def _link_burst(row: dict) -> dict:
+    """Where this launch stands in its link's burst.
+
+    The burst is the FIRST `ai_link_burst_count` launches carrying a link on an
+    IST day, and it counts only if they all arrived inside the window. Reading
+    it from the collection rather than from memory means a restart mid-window
+    does not turn a real burst into "never happened", and that the answer for a
+    launch never changes once the window has closed.
+
+    Returns state:
+        waiting  — fewer than the count so far and the window is still open
+        no burst — the window closed without the count being reached
+        burst    — with `first`, `position` and `size`
+    """
+    link = (row.get("link") or "").strip()
+    if not link:
+        return {"state": "no burst", "reason": "no link on the launch"}
+
+    window = int(settings.ai_link_burst_window)
+    need = int(settings.ai_link_burst_count)
+    day = row.get("day") or ist_date_str(row.get("open_timestamp") or time.time())
+
+    members = await _col("x_links").find(
+        {"link": link, "day": day},
+        {"address": 1, "open_timestamp": 1}
+    ).sort("open_timestamp", 1).limit(need).to_list(need)
+    if not members:
+        return {"state": "waiting"}
+
+    started = float(members[0].get("open_timestamp") or 0)
+    position = next((i + 1 for i, m in enumerate(members)
+                     if m["address"] == row["address"]), 0)
+
+    if len(members) < need:
+        if time.time() - started <= window:
+            return {"state": "waiting"}
+        return {"state": "no burst",
+                "reason": f"only {len(members)} launch"
+                          f"{'' if len(members) == 1 else 'es'} on this link in "
+                          f"{window // 60} minutes — {need} needed"}
+
+    span = float(members[-1].get("open_timestamp") or 0) - started
+    if span > window:
+        return {"state": "no burst",
+                "reason": f"the {need} launches on this link took "
+                          f"{round(span / 60)} minutes, not {window // 60}"}
+    if not position:
+        # Later than the fifth. The burst exists but this launch is not in it.
+        return {"state": "no burst",
+                "reason": f"after the first {need} launches on this link"}
+    return {"state": "burst", "first": position == 1,
+            "position": position, "size": len(members)}
+
+
+# ── Telegram: what the burst was actually worth ───────────────────────────────
+
+async def _check_telegram(session: Optional[aiohttp.ClientSession],
+                          address: str) -> bool:
+    """Promote a launch to Telegram if it is in a burst and cleared the bar.
+
+    Both halves have to be true and they can become true in either order — a
+    token can cross $8k eight seconds in, long before the fifth launch on its
+    link exists. So this is called from both sides and does the same check.
+    """
+    dec = await _col("ai_decisions").find_one(
+        {"address": address},
+        {"address": 1, "telegram": 1, "burst": 1, "symbol": 1, "name": 1,
+         "narrative": 1, "verdict": 1, "peak_mcap_usd": 1, "link": 1})
+    if not dec or dec.get("telegram"):
+        return False                       # unknown, or already sent
+    if not dec.get("burst"):
+        return False                       # not one of the burst's launches
+
+    row = await _col("x_links").find_one({"address": address},
+                                         {"peak_mcap_usd": 1}) or {}
+    peak = max(float(dec.get("peak_mcap_usd") or 0),
+               float(row.get("peak_mcap_usd") or 0),
+               pump_mcap.peak_usd(address))
+    if peak < pump_mcap.threshold_usd():
+        return False
+
+    await _col("ai_decisions").update_one(
+        {"address": address},
+        {"$set": {"telegram": True, "peak_mcap_usd": round(peak),
+                  "telegram_at": time.time()}})
+    await _notify_telegram(session, dec, peak)
+    return True
+
+
+async def _notify_telegram(session: Optional[aiohttp.ClientSession],
+                           dec: dict, peak: float) -> None:
+    address = dec.get("address") or ""
+    text = _message(
+        "🔥 <b>Burst + market cap</b>",
+        {"name": dec.get("name"), "symbol": dec.get("symbol")}, address,
+        [f"Peak market cap: <b>${round(peak):,}</b> in the first "
+         f"{pump_mcap.watch_seconds()}s",
+         f"Narrative: {esc(str(dec.get('narrative') or '—'))}",
+         f"Verdict: {esc(str(dec.get('verdict') or '—'))}",
+         f"X: {esc(str(dec.get('link') or '—'))}"])
+    own = session is None
+    session = session or aiohttp.ClientSession()
+    try:
+        await _notify(session, text, address)
+    finally:
+        if own:
+            await session.close()
+    log.info(f"[AI] TELEGRAM {dec.get('symbol')} — ${round(peak):,} peak")
+
+
+async def _on_mcap_cross(mint: str, usd: float) -> None:
+    """A watched launch just crossed the bar. Written down now, sent if it is
+    already known to be part of a burst — otherwise the burst check picks it up.
+    """
+    await _col("x_links").update_one(
+        {"address": mint}, {"$set": {"peak_mcap_usd": round(usd),
+                                     "crossed_mcap": True}})
+    await _check_telegram(None, mint)
+
+
+async def _settle_mcaps() -> None:
+    """Write down what the finished minutes reached, whether or not they crossed."""
+    for mint, peak_sol, peak_usd in pump_mcap.expired():
+        if peak_sol <= 0:
+            continue
+        await _col("x_links").update_one(
+            {"address": mint},
+            {"$set": {"peak_mcap_sol": round(peak_sol, 2),
+                      "peak_mcap_usd": round(peak_usd)}})
+        await _col("ai_decisions").update_one(
+            {"address": mint}, {"$set": {"peak_mcap_usd": round(peak_usd)}})
 
 
 async def _retry_pending(session: aiohttp.ClientSession,
@@ -517,6 +665,10 @@ async def x_feed_watch() -> None:
 
     log.info(f"[PUMP] connecting to {settings.pumpportal_ws}")
     async with aiohttp.ClientSession() as session:
+        # A crossing has to be recognised as it happens, so the dollar price
+        # must already be in hand when the trade arrives — not fetched after.
+        pump_mcap.on_cross = _on_mcap_cross
+        asyncio.create_task(_price_watch(session))
         while True:
             try:
                 import websockets
@@ -545,6 +697,13 @@ async def x_feed_watch() -> None:
                         # fetches finish out of order, and the burst has to be
                         # ordered by when the launch happened.
                         msg["_seen_at"] = time.time()
+                        # The market cap clock starts here, not after the
+                        # metadata fetch: that fetch costs up to 1.4s, and a
+                        # minute measured from 1.4s in is not the first minute.
+                        # Watching every launch is cheap — the window is 60s, so
+                        # a few dozen are held at a time — and it is the only way
+                        # to know what a launch did before we knew we cared.
+                        pump_mcap.watch(mint, msg.get("marketCapSol") or 0)
                         asyncio.create_task(_handle_launch(session, gate, msg))
             except asyncio.CancelledError:
                 log.info("[PUMP] stopped")
@@ -553,6 +712,20 @@ async def x_feed_watch() -> None:
                 log.warning(f"[PUMP] socket error: {exc}")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60.0)
+
+
+async def _price_watch(session: aiohttp.ClientSession) -> None:
+    """Keep SOL's dollar price warm so a crossing is never waiting on an HTTP call."""
+    while True:
+        try:
+            price = await pump_mcap.sol_usd(session)
+            if not price:
+                log.warning("[MCAP] no SOL price from any source")
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[MCAP] price refresh failed: {exc}")
+        await asyncio.sleep(pump_mcap.PRICE_TTL)
 
 
 async def _handle_launch(session: aiohttp.ClientSession,
@@ -857,7 +1030,11 @@ async def recent(limit: int = 200, verdict: Optional[str] = None,
     not a search anyone can trust.
     """
     flt: dict[str, Any] = {}
-    if verdict:
+    # Telegram is not a verdict — a launch can be pending or matched AND have
+    # cleared the market cap bar — so it filters on its own flag.
+    if verdict == "telegram":
+        flt["telegram"] = True
+    elif verdict:
         flt["verdict"] = verdict
     if day:
         flt["day"] = day

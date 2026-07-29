@@ -31,6 +31,10 @@ const VERDICTS = [
   { id: "launching", label: "Launching" },
   { id: "rejected", label: "Rejected" },
   { id: "skipped", label: "Skipped" },
+  // Not a verdict but a flag: a launch that was part of a link's burst AND
+  // crossed the market cap bar in its first minute. It keeps whatever verdict
+  // the model gave it, so it shows up here as well as in its own tab.
+  { id: "telegram", label: "Telegram" },
 ] as const;
 
 const TONE: Record<string, "green" | "purple" | "amber" | "gray" | "blue" | "red"> = {
@@ -459,10 +463,12 @@ export default function AiPage() {
       >
         <p className="mb-3 text-xs text-text-dim">
           Every launch the agent looked at, including the ones it threw away and
-          why. Before the model: the account must be verified and have
-          followers, and only the first launch of a name, ticker and link is
-          asked about — its copies, and any repeat of that name later the same
-          IST day, are skipped.
+          why. Before the model: one X link must carry five launches inside five
+          minutes, and of those five only the first is asked about. The account
+          must also be verified and have followers, and a name and ticker is
+          asked about once per IST day. <b>Telegram</b> holds the launches from
+          those bursts that crossed the market cap bar in their first minute —
+          those are the ones sent to the chat.
         </p>
         <TableScroll>
           <table className="w-full min-w-[900px] text-sm">
@@ -471,6 +477,7 @@ export default function AiPage() {
                 <th className="px-3 py-2.5 font-medium">Verdict</th>
                 <th className="px-3 py-2.5 font-medium">Token</th>
                 <th className="px-3 py-2.5 font-medium">Age</th>
+                <th className="px-3 py-2.5 font-medium">Peak MC</th>
                 <th className="px-3 py-2.5 font-medium">Account</th>
                 <th className="px-3 py-2.5 font-medium">Narrative</th>
                 <th className="px-3 py-2.5 font-medium">Reason</th>
@@ -480,7 +487,7 @@ export default function AiPage() {
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
                   {query || verdict || minFollowers ? "Nothing matches this filter"
                     : date ? `No decisions on ${date}`
                     : "No decisions yet — the agent is off, or has no key"}
@@ -489,6 +496,9 @@ export default function AiPage() {
                 <tr key={rowKey(d, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
                   <td className="px-3 py-3">
                     <Badge variant={TONE[d.verdict] ?? "gray"}>{d.verdict}</Badge>
+                    {d.telegram ? (
+                      <div className="mt-1"><Badge variant="green">telegram</Badge></div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-3">
                     <div className="font-semibold text-text">{d.symbol || "?"}</div>
@@ -498,6 +508,15 @@ export default function AiPage() {
                       it reads the same as the age in the live section above. */}
                   <td className="px-3 py-3 font-mono text-xs text-text-muted">
                     <Age ts={d.open_timestamp || d.at} />
+                  </td>
+                  {/* The highest it reached in its first minute. Green once it
+                      is past the bar, which is the whole reason it is here. */}
+                  <td className="px-3 py-3 font-mono text-xs">
+                    {d.peak_mcap_usd ? (
+                      <span className={d.telegram ? "text-accent-green" : "text-text-muted"}>
+                        ${Number(d.peak_mcap_usd).toLocaleString()}
+                      </span>
+                    ) : <span className="text-text-dim">—</span>}
                   </td>
                   <td className="px-3 py-3">
                     {d.handle ? (

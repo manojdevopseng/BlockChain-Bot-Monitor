@@ -33,6 +33,7 @@ import re
 import struct
 from typing import Callable, Optional
 
+from app import pump_mcap
 from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
@@ -155,6 +156,17 @@ class SolDiscovery:
         lines = value.get("logs") or []
         if not lines:
             return
+
+        # The swaps that make up ~99% of this stream are not waste: each one
+        # carries the bonding curve's reserves, which is a market cap for a
+        # launch we are watching. Reading them here costs one more subscription
+        # of exactly zero — the messages are already on the wire. It returns
+        # immediately when nothing is being watched, which is most of the time.
+        if pump_mcap.watching():
+            for line in lines:
+                if line.startswith("Program data: "):
+                    pump_mcap.note_log_line(line)
+
         # Cheap prefilter first: swaps are ~99% of the stream and this runs on
         # every single message, so it has to stay as light as possible.
         if not any((m := _INSTRUCTION.search(l)) and m.group(1).lower() in _CREATE
