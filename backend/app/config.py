@@ -149,6 +149,12 @@ class Settings(BaseSettings):
     ai_chat_id: str = ""
 
     # ── What a launch has to be worth ───────────────────────
+    # The Telegram rule, and only that — the model's gate is separate and does
+    # not count launches. A link carrying this many launches inside the window
+    # is a coordinated push, whatever names they went out under, and one of
+    # those that also runs is what is worth a message. Counted per IST day.
+    ai_link_burst_count: int = 5
+    ai_link_burst_window: int = 300
     # A launch is watched for its market cap for this long after it opens, and
     # crossing this many dollars inside that minute is what puts it in front of
     # a person. Measured live: a launch opens at ~28 SOL, so at $74 SOL this is

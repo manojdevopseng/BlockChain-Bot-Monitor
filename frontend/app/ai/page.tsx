@@ -31,9 +31,9 @@ const VERDICTS = [
   { id: "launching", label: "Launching" },
   { id: "rejected", label: "Rejected" },
   { id: "skipped", label: "Skipped" },
-  // Not a verdict but a flag: a launch that crossed the market cap bar in its
-  // first minute. It keeps whatever verdict the model gave it, so it shows up
-  // here as well as in its own tab.
+  // Not a verdict but a flag: a launch from a link's burst of five that also
+  // crossed the market cap bar in its first minute. It keeps whatever verdict
+  // the model gave it, so it shows up here as well as in its own tab.
   { id: "telegram", label: "Telegram" },
 ] as const;
 
@@ -466,8 +466,10 @@ export default function AiPage() {
           why. Before the model: the account must be verified and have
           followers, and a link is asked about once — as is a name and ticker,
           once per IST day. Everything else goes to the model.
-          <b>Telegram</b> holds the launches that crossed the market cap bar in
-          their first minute; those are the ones sent to the chat.
+          <b>Telegram</b> is a separate rule: one X link must have carried five
+          launches inside five minutes — the names may differ, the link may not
+          — and the launch must also have crossed the market cap bar in its
+          first minute. Those are the ones sent to the chat.
         </p>
         <TableScroll>
           <table className="w-full min-w-[900px] text-sm">
