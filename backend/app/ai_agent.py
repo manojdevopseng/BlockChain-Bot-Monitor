@@ -604,8 +604,13 @@ async def _retry_pending(session: aiohttp.ClientSession,
         row = {"excerpt": d.get("excerpt") or "", "kind": d.get("kind") or "none",
                "link": d.get("link") or "",
                # Carried through, or the rewritten decision would lose the
-               # launch time and its Age would restart from the retry.
-               "open_timestamp": d.get("open_timestamp")}
+               # launch time and its Age would restart from the retry — and
+               # would lose the burst flag, which is what makes it eligible for
+               # Telegram at all. Anything queued got there by clearing the
+               # burst gate, so it is in a burst by definition.
+               "open_timestamp": d.get("open_timestamp"),
+               "_burst": d.get("burst", True),
+               "_burst_position": d.get("burst_position") or 1}
         profile = x_client.XProfile(
             handle=d.get("handle") or "", verified=bool(d.get("verified")),
             verified_type=d.get("verified_type") or "",
