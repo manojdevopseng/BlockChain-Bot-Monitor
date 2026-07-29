@@ -13,6 +13,17 @@ from .. import ai_agent, db, pump_mcap
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 
+@router.post("/factcheck")
+async def factcheck(address: str = Query(..., min_length=32, max_length=64),
+                    force: bool = False):
+    """Is the post behind this launch real? One token, on a click.
+
+    A POST because it spends a model call. The answer is stored on the
+    decision, so asking again is free unless `force` says to ask afresh.
+    """
+    return await ai_agent.fact_check(address, force=force)
+
+
 @router.get("/mcap")
 async def mcap(address: str = Query(..., min_length=32, max_length=64)):
     """Current and all-time-high market cap for one token, asked for by hand.

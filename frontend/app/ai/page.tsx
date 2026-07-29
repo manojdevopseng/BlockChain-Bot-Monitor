@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { Brain, CheckCircle2, Crown, Rocket, Search, XCircle, ExternalLink, RefreshCw, Twitter } from "lucide-react";
-import { useApi } from "@/lib/api";
+import { apiSend, useApi } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -17,8 +17,10 @@ import { fmtDateTime, rowKey, shortAddr, timeAgo } from "@/lib/utils";
 
 // Verdicts, in the order they matter:
 //   pending   — cleared every gate; this is the list the model will be given
-//   matched   — a narrative, and the model could stand behind it being real
-//   launching — the narrative fits but nothing confirms it yet
+//   matched   — the model found one of the narratives in the post
+//   launching — no longer produced. Whether a post is about something real is
+//               now Fact check, on the row, rather than a verdict decided for
+//               every launch. The tab stays for the rows that already have it.
 //   rejected  — the model read it and found no narrative
 //   skipped   — never reached the model: a gate stopped it first
 // The last two are deliberately browsable. Rejected and skipped answer
@@ -389,6 +391,75 @@ function McapCheck() {
   );
 }
 
+// The reality check, per row, on a click. It is not run for every launch on
+// purpose: it costs a model call, and almost every row is one nobody opens.
+// The answer is stored server-side, so a row that has been checked shows its
+// answer straight away and asking again is deliberate rather than accidental.
+function FactCheck({ row }: { row: any }) {
+  const [fact, setFact] = useState<any>(row.fact ?? null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const ask = async (force: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await apiSend<any>(
+        `/api/ai/factcheck?address=${encodeURIComponent(row.address)}${force ? "&force=true" : ""}`,
+        "POST",
+      );
+      if (r.ok) { setFact(r); setOpen(true); } else { setError(r.error || "no answer"); }
+    } catch (e: any) {
+      setError(e?.message || "request failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!fact) {
+    return (
+      <div className="min-w-[110px]">
+        <Button size="sm" variant="outline" disabled={busy}
+                onClick={() => ask(false)}>
+          {busy ? "Checking…" : "Fact check"}
+        </Button>
+        {error ? (
+          <div className="mt-1 max-w-[200px] text-[11px] text-accent-amber">{error}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const yes = fact.real === "Yes";
+  return (
+    <div className="min-w-[150px] max-w-[280px]">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+              className="flex items-center gap-1.5 text-left">
+        <Badge variant={yes ? "green" : "amber"}>{fact.real}</Badge>
+        <span className="text-[11px] text-text-dim underline decoration-dotted">
+          {open ? "hide" : "read"}
+        </span>
+      </button>
+      {open ? (
+        <div className="mt-2 rounded-lg border border-border bg-bg-soft p-2">
+          <p className="text-xs leading-relaxed text-text-muted">{fact.brief}</p>
+          {fact.reason ? (
+            <p className="mt-1.5 text-[11px] text-text-dim">{fact.reason}</p>
+          ) : null}
+          <Button size="sm" variant="ghost" className="mt-1.5 h-6 px-2 text-[11px]"
+                  disabled={busy} onClick={() => ask(true)}>
+            {busy ? "Asking…" : "Ask again"}
+          </Button>
+          {error ? (
+            <div className="mt-1 text-[11px] text-accent-amber">{error}</div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Stat({ label, value, sub, strong }: {
   label: string; value?: number | null; sub?: string; strong?: boolean;
 }) {
@@ -585,11 +656,12 @@ export default function AiPage() {
                 <th className="px-3 py-2.5 font-medium">Reason</th>
                 <th className="px-3 py-2.5 font-medium">CA</th>
                 <th className="px-3 py-2.5 font-medium">When</th>
+                <th className="px-3 py-2.5 font-medium">Fact check</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
+                <tr><td colSpan={10} className="px-3 py-10 text-center text-text-dim">
                   {query || verdict || minFollowers ? "Nothing matches this filter"
                     : date ? `No decisions on ${date}`
                     : "No decisions yet — the agent is off, or has no key"}
@@ -656,6 +728,7 @@ export default function AiPage() {
                     </span>
                   </td>
                   <td className="px-3 py-3 text-text-muted">{d.at ? timeAgo(d.at) : "—"}</td>
+                  <td className="px-3 py-3"><FactCheck row={d} /></td>
                 </tr>
               ))}
             </tbody>

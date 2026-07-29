@@ -1,18 +1,23 @@
-"""Judge a new Robinhood token by the X account behind it.
+"""Judge a new pump.fun launch by the X account and post behind it.
 
-Robinhood Chain produces a few hundred tokens a day and almost all of them are
-noise. What separates the handful worth looking at is not on-chain: it is
-whether a real, verified account is behind the launch, and whether it is
-attached to something actually happening. So each new token's X link is read
-and put to Grok, and only a match becomes an alert.
+pump.fun produces thousands of tokens a day and almost all of them are noise.
+What separates the handful worth looking at is not on-chain: it is whether a
+real, verified account is behind the launch, and what the post it points at is
+actually about. So each launch's X link is read and put to Grok, and a match
+becomes an alert.
 
-Two branches, because a token's link points at one of two things:
+Two questions, asked in two different places on purpose:
 
-  a post     — judge the post. Does it match one of the watched narratives?
-  a profile  — judge the account. Is it a launch account, and has it published
-               a contract address yet? If not, the token is reported as
-               "Launching" and the profile is re-checked; when an address turns
-               up and matches, it becomes "Matched".
+  which narrative — every launch that clears the gates, automatically. One
+                    question, one call, sixteen narratives to choose from.
+  is it real      — Fact check, per token, when somebody presses the button.
+                    It is the answer a person acts on, so it is asked while
+                    they are looking rather than bought for the thousands of
+                    rows nobody opens.
+
+Separately from either, a launch is watched for its first minute; one from a
+link that carried five launches inside five minutes and that crossed the market
+cap bar in that minute is what reaches Telegram.
 
 What this deliberately does not do:
 
@@ -50,24 +55,29 @@ TELEGRAM_API = "https://api.telegram.org"
 # The narratives a *post* is checked against — the product owner's list, in
 # their order. Grok is asked to pick one or say none.
 TWEET_NARRATIVES = [
-    "Trump",
-    "Elon Musk or one of his companies",
-    "A tech token",
-    "A game",
-    "A new product launch",
-    "A new AI launch",
-    "A new mascot launch",
-    "A pet name",
-    "A new animal introduced at any zoo",
-    "A new token launchpad",
-    "Ethereum or Vitalik",
-    "Viral content",
-    "Robinhood or a Robinhood employee",
+    "Related to Trump",
+    "Related to Elon Musk or his Companies",
+    "Any Tech Token",
+    "Any Gaming Token",
+    "New Product Launch",
+    "New AI",
+    "New Mascot",
+    "New Pet adopted by anyone",
+    'New "Token Launchpad"',
+    "Related to Ethereum or Vitalik",
+    "Viral Content",
+    "Any Latest News of any Celebrity or VIP or Influencer",
+    "Any Latest news of any animal",
+    "Supply or Fees sent to someone or some wallet",
+    "Any Big X account Launching Token",
+    "Related to SOL Owner or its Employees",
 ]
 
-# Rule 14 of the brief: the model must also say whether the thing is real.
-# Without it, "New AI Launch" fires on anyone who types the words — the
-# narrative is the easy half, the verification is the half that costs money.
+# Whether the thing is REAL is deliberately not asked on this pass. The model
+# does one job here — which narrative, if any — and nothing else. Reality is a
+# separate question, asked per token by somebody pressing Fact check: it is the
+# answer a person acts on, and it should be asked while they are looking rather
+# than bought for the thousands of launches nobody ever opens.
 
 # How many tokens get the full treatment in one pass. The feed returns 100 and
 # most are already known; this caps the work when a burst arrives.
@@ -142,43 +152,67 @@ def _prompt(token: dict, content: str, profile) -> str:
         f"Posted by: @{profile.handle} ({profile.followers:,} followers, "
         f"verified: {profile.verified_type or 'no'})\n"
         f"Post:\n{content[:1500]}\n\n"
-        f"Two questions about the post.\n\n"
-        f"First, does it match one of these narratives?\n{listed}\n\n"
-        "Second, is the thing it describes real — an event, product, launch or "
-        "post that actually happened and could be checked — rather than a claim "
-        "the post makes about itself?\n\n"
+        f"Does this post match one of these narratives?\n{listed}\n\n"
         "Reply with JSON only:\n"
         '{"match": true|false, "narrative": "the matched narrative or none", '
-        '"verified": true|false, "confidence": 1-10, '
+        '"confidence": 1-10, '
         '"summary": "one short line on what it is about", '
         '"red_flags": ["..."]}\n\n'
         "Rules:\n"
         "- match false if none of the narratives fit.\n"
         "- match false for pure hype with no substance (moon, 1000x, buy now, "
         "emoji-only, giveaway spam).\n"
-        "- verified true only when the thing is real and checkable. A post that "
-        "merely announces itself is match true, verified false.\n"
         "- The token name does NOT have to match the narrative. Anyone can "
         "launch a token about any real event.\n"
-        "- confidence 8-10 for a clear, current, checkable event.\n"
+        "- confidence 8-10 for a clear, current, specific match.\n"
         "- confidence 1-5 for a weak or guessed match."
     )
 
 
-async def ask_grok(session: aiohttp.ClientSession, token: dict,
-                   content: str, profile) -> Optional[dict]:
-    """One classification. None when the call fails — never a fabricated verdict."""
+# ── Fact check ────────────────────────────────────────────────────────────────
+# Asked about one token, when somebody presses the button. Kept apart from the
+# narrative pass on purpose: it is the answer a person acts on, it costs a call,
+# and running it on every launch would spend that call on the thousands nobody
+# ever opens.
+
+def _fact_prompt(token: dict, content: str, profile: dict) -> str:
+    return (
+        f"A token was launched pointing at this X post.\n\n"
+        f"Token: {token.get('name') or '?'} (${token.get('symbol') or '?'})\n"
+        f"Posted by: @{profile.get('handle') or '?'} "
+        f"({int(profile.get('followers') or 0):,} followers, "
+        f"verified: {profile.get('verified_type') or 'no'})\n"
+        f"Post:\n{content[:1500]}\n\n"
+        "Is what this post describes REAL — something that actually happened "
+        "and could be checked against the outside world — rather than a claim "
+        "the post makes about itself, a rumour, or marketing?\n\n"
+        "Reply with JSON only:\n"
+        '{"real": "Yes" or "No", '
+        '"brief": "2-3 plain sentences a non-expert can read: what the post '
+        'says, and why it is or is not real", '
+        '"reason": "one short line — the single deciding fact"}\n\n'
+        "Rules:\n"
+        '- "Yes" only when the thing is real and checkable.\n'
+        '- A post that merely announces itself, or announces the token, is "No".\n'
+        "- Do not describe the token. Judge the post.\n"
+        "- No jargon in `brief`. Write it for somebody who does not follow "
+        "crypto."
+    )
+
+
+async def _ask_grok_json(session: aiohttp.ClientSession, prompt: str,
+                         system: str) -> Optional[dict]:
+    """One call, one JSON object back. None when it fails — never a made-up answer.
+
+    Shared by the narrative pass and by Fact check: two different questions, one
+    way of asking, so a change to the model or the parsing lands on both.
+    """
     if not settings.xai_api_key:
         return None
     payload = {
         "model": settings.xai_model,
-        "messages": [
-            {"role": "system",
-             "content": ("You classify crypto token launches by the narrative "
-                         "behind them. Reply with JSON only — no markdown, no "
-                         "commentary.")},
-            {"role": "user", "content": _prompt(token, content, profile)},
-        ],
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": prompt}],
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
@@ -203,6 +237,61 @@ async def ask_grok(session: aiohttp.ClientSession, token: dict,
     except Exception as exc:  # noqa: BLE001
         log.warning(f"[AI] could not parse Grok reply: {exc}")
         return None
+
+
+async def ask_grok(session: aiohttp.ClientSession, token: dict,
+                   content: str, profile) -> Optional[dict]:
+    """Which narrative, if any. None when the call fails."""
+    return await _ask_grok_json(
+        session, _prompt(token, content, profile),
+        "You classify crypto token launches by the narrative behind them. "
+        "Reply with JSON only — no markdown, no commentary.")
+
+
+async def fact_check(address: str, force: bool = False) -> dict:
+    """Is the post behind this launch about something real? Asked on a click.
+
+    The answer is stored on the decision, so opening the same token again is
+    free and the judgement survives a reload. `force` asks again, which is worth
+    having when the post has changed or the first answer was plainly wrong.
+    """
+    dec = await _col("ai_decisions").find_one(
+        {"address": address},
+        {"address": 1, "symbol": 1, "name": 1, "handle": 1, "followers": 1,
+         "verified_type": 1, "excerpt": 1, "fact": 1})
+    if not dec:
+        return {"ok": False, "error": "no decision for that address"}
+    if dec.get("fact") and not force:
+        return {"ok": True, "cached": True, **dec["fact"]}
+
+    text = (dec.get("excerpt") or "").strip()
+    if not text:
+        return {"ok": False, "error": "there is no post text to check"}
+
+    token = {"name": dec.get("name"), "symbol": dec.get("symbol")}
+    profile = {"handle": dec.get("handle"), "followers": dec.get("followers"),
+               "verified_type": dec.get("verified_type")}
+    async with aiohttp.ClientSession() as session:
+        answer = await _ask_grok_json(
+            session, _fact_prompt(token, text, profile),
+            "You fact-check claims made in social media posts. You are "
+            "careful, you answer No when something cannot be verified, and you "
+            "write for somebody who does not follow crypto.")
+    if not answer:
+        return {"ok": False,
+                "error": "the model could not be reached — check the xAI key "
+                         "and its credits"}
+
+    real = str(answer.get("real") or "").strip().lower().startswith("y")
+    fact = {"real": "Yes" if real else "No",
+            "brief": str(answer.get("brief") or "")[:600],
+            "reason": str(answer.get("reason") or "")[:200],
+            "at": time.time()}
+    await _col("ai_decisions").update_one({"address": address},
+                                          {"$set": {"fact": fact}})
+    log.info(f"[AI] FACT {dec.get('symbol')} — {fact['real']}: "
+             f"{fact['reason'][:60]}")
+    return {"ok": True, "cached": False, **fact}
 
 
 # ── Decisions ──────────────────────────────────────────────────────────────────
@@ -315,22 +404,16 @@ async def _judge(session, token: dict, row: dict, profile,
     narrative = str(verdict.get("narrative") or "none")
     confidence = int(verdict.get("confidence") or 0)
     detail = {"narrative": narrative, "confidence": confidence,
-              "reason": verdict.get("summary") or "",
-              "verified_claim": bool(verdict.get("verified"))}
+              "reason": verdict.get("summary") or ""}
 
     if not verdict.get("match") or confidence < settings.ai_min_confidence:
         detail["reason"] = detail["reason"] or "no narrative match"
         await _record(token, row, profile, "rejected", detail)
         return True
 
-    # Matched the narrative but the model could not stand behind it being real.
-    # Worth seeing, not worth acting on — that is what Launching is for.
-    if not verdict.get("verified"):
-        await _record(token, row, profile, "launching", detail)
-        log.info(f"[AI] LAUNCHING {token.get('symbol')} — {narrative} "
-                 f"({confidence}/10), unverified")
-        return True
-
+    # Matched, and that is the whole of this pass's job. Whether the post is
+    # about something real is no longer decided here — it is Fact check, on the
+    # row, when somebody wants to know.
     text_out = _message("🎯 <b>NARRATIVE MATCH</b>", token, token["address"], [
         f"Narrative: <b>{esc(narrative)}</b> ({confidence}/10)",
         f"{esc(str(verdict.get('summary') or ''))}",
