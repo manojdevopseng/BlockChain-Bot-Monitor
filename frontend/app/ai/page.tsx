@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { Brain, CheckCircle2, Crown, Rocket, Search, XCircle, ExternalLink, RefreshCw, Twitter } from "lucide-react";
+import { Brain, CheckCircle2, Crown, Rocket, Search, XCircle, RefreshCw, Twitter } from "lucide-react";
 import { apiSend, useApi } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
@@ -116,6 +116,49 @@ function useKeywordRegex(): RegExp | null {
   }
 }
 
+// The token, the way both sections show it: the ticker opens GMGN, the address
+// is there to copy, and the short form sits underneath. Written once because
+// Decisions and the live check are read together and a difference between them
+// reads as a difference in the data.
+function TokenCell({ address, symbol, name }: {
+  address: string; symbol?: string; name?: string;
+}) {
+  return (
+    <td className="px-3 py-3">
+      <span className="flex items-center gap-1.5">
+        <a href={`https://gmgn.ai/sol/token/${address}`}
+           target="_blank" rel="noopener noreferrer"
+           title="View on GMGN"
+           className="font-semibold text-brand-soft hover:underline">
+          {symbol || "?"}
+        </a>
+        <CopyButton value={address} />
+      </span>
+      {name ? <div className="text-xs text-text-dim">{name}</div> : null}
+      <span className="font-mono text-[11px] text-text-dim">
+        {shortAddr(address)}
+      </span>
+    </td>
+  );
+}
+
+// An X link, shown as what it points at rather than as a URL. A post and a
+// profile are different things to click on, and the label says which.
+function XLink({ link, handle, kind }: {
+  link?: string; handle?: string; kind?: string;
+}) {
+  if (!link) return <span className="text-text-dim">—</span>;
+  const label = handle ? `@${handle}` : "open";
+  return (
+    <a href={link} target="_blank" rel="noopener noreferrer" title={link}
+       className="inline-flex items-center gap-1 text-accent-blue hover:underline">
+      <Twitter size={11} className="shrink-0" />
+      <span className="truncate">{label}</span>
+      {kind ? <span className="text-[10px] text-text-dim">{kind}</span> : null}
+    </a>
+  );
+}
+
 function Highlighted({ text, rx }: { text: string; rx: RegExp | null }) {
   if (!text) return <>—</>;
   if (!rx) return <>{text}</>;
@@ -175,20 +218,7 @@ function LaunchTable({ items, rx, empty, total, onMore }: {
                 </td></tr>
               ) : items.map((r: any, i: number) => (
                 <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
-                  <td className="px-3 py-3">
-                    <span className="flex items-center gap-1.5">
-                      <a href={`https://gmgn.ai/sol/token/${r.address}`}
-                         target="_blank" rel="noopener noreferrer"
-                         title="View on GMGN"
-                         className="font-semibold text-brand-soft hover:underline">
-                        {r.symbol}
-                      </a>
-                      <CopyButton value={r.address} />
-                    </span>
-                    <span className="font-mono text-[11px] text-text-dim">
-                      {shortAddr(r.address)}
-                    </span>
-                  </td>
+                  <TokenCell address={r.address} symbol={r.symbol} />
                   <td className="px-3 py-3 font-mono text-xs text-text-muted">
                     <Age ts={r.open_timestamp} />
                   </td>
@@ -221,8 +251,15 @@ function LaunchTable({ items, rx, empty, total, onMore }: {
                         </span>
                       : <span className="text-text-dim">—</span>}
                   </td>
+                  {/* The text is what the link says, so it is the link. Reading
+                      it and opening it were two separate hunts across the row. */}
                   <td className="max-w-[300px] px-3 py-3 text-text-muted">
-                    <Highlighted text={r.excerpt || ""} rx={rx} />
+                    {r.link ? (
+                      <a href={r.link} target="_blank" rel="noopener noreferrer"
+                         title={r.link} className="hover:underline">
+                        <Highlighted text={r.excerpt || ""} rx={rx} />
+                      </a>
+                    ) : <Highlighted text={r.excerpt || ""} rx={rx} />}
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-mono text-xs text-text-muted">
@@ -654,7 +691,7 @@ export default function AiPage() {
                 <th className="px-3 py-2.5 font-medium">Account</th>
                 <th className="px-3 py-2.5 font-medium">Narrative</th>
                 <th className="px-3 py-2.5 font-medium">Reason</th>
-                <th className="px-3 py-2.5 font-medium">CA</th>
+                <th className="px-3 py-2.5 font-medium">X link</th>
                 <th className="px-3 py-2.5 font-medium">When</th>
                 <th className="px-3 py-2.5 font-medium">Fact check</th>
               </tr>
@@ -674,10 +711,7 @@ export default function AiPage() {
                       <div className="mt-1"><Badge variant="green">telegram</Badge></div>
                     ) : null}
                   </td>
-                  <td className="px-3 py-3">
-                    <div className="font-semibold text-text">{d.symbol || "?"}</div>
-                    <div className="text-xs text-text-dim">{d.name}</div>
-                  </td>
+                  <TokenCell address={d.address} symbol={d.symbol} name={d.name} />
                   {/* Age from the launch, not from the moment we judged it, so
                       it reads the same as the age in the live section above. */}
                   <td className="px-3 py-3 font-mono text-xs text-text-muted">
@@ -715,17 +749,8 @@ export default function AiPage() {
                   <td className="max-w-[280px] px-3 py-3">
                     <span className="text-text-muted">{d.reason || "—"}</span>
                   </td>
-                  <td className="px-3 py-3">
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs text-text-muted">{shortAddr(d.address)}</span>
-                      <CopyButton value={d.address} />
-                      {d.gmgn_url && (
-                        <a href={d.gmgn_url} target="_blank" rel="noopener noreferrer" title="View on GMGN"
-                           className="inline-grid h-5 w-5 place-items-center rounded text-text-dim hover:text-brand-soft">
-                          <ExternalLink size={12} />
-                        </a>
-                      )}
-                    </span>
+                  <td className="max-w-[170px] px-3 py-3">
+                    <XLink link={d.link} handle={d.handle} kind={d.kind} />
                   </td>
                   {/* The clock time, the way the live section above shows it —
                       "3m ago" answers how long, not when, and the two sections
