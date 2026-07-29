@@ -925,9 +925,11 @@ async def _handle_launch(session: aiohttp.ClientSession,
                 "website": str(meta.get("website") or "")[:200],
                 "market_cap_sol": float(msg.get("marketCapSol") or 0),
                 "creator": msg.get("traderPublicKey") or "",
-                # The launch is now, so this is the launch time — not the time
-                # some aggregator got round to listing it.
-                "open_timestamp": time.time(),
+                # Stamped when PumpPortal pushed the launch, not when this row
+                # was finally written — the metadata fetch and the X lookups in
+                # between take 0.3-1.4s, and stamping it here made every age and
+                # every timestamp on the page that much later than the truth.
+                "open_timestamp": float(msg.get("_seen_at") or time.time()),
                 "found_at": time.time(),
                 "source": "pumpportal",
                 "judged": False,

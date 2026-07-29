@@ -67,6 +67,36 @@ EDITABLE: dict[str, dict] = {
                 "match. Applies to newly triggered tokens; ones already being "
                 "watched keep the window they started with.",
     },
+    "AI_SCAN_INTERVAL": {
+        "label": "AI judging interval (seconds)", "kind": "int", "group": "AI",
+        "min": 1, "applies": "live",
+        "help": "How often the agent looks for launches to judge. A launch "
+                "waits up to this long before it is asked about, so it is most "
+                "of the gap between when a token appears in X Links and when it "
+                "appears in Decisions. Measured at 20s: median 22.6s from "
+                "launch to verdict. Lower does not cost more model calls — the "
+                "same tokens are judged, just sooner — but the loop queries the "
+                "database each pass.",
+    },
+    "AI_TELEGRAM_MCAP_USD": {
+        "label": "Telegram market cap bar ($)", "kind": "number", "group": "AI",
+        "min": 0.0, "applies": "live",
+        "help": "A launch from a link's burst of five that reaches this inside "
+                "its first minute is flagged Telegram and sent to the chat. "
+                "Raise it to send fewer.",
+    },
+    "AI_MIN_CONFIDENCE": {
+        "label": "Minimum narrative confidence", "kind": "int", "group": "AI",
+        "min": 1, "applies": "live",
+        "help": "The model scores its match 1-10. Below this the verdict is "
+                "rejected rather than matched.",
+    },
+    "AI_DRY_RUN": {
+        "label": "Dry run (record, send nothing)", "kind": "bool", "group": "AI",
+        "applies": "live",
+        "help": "On, decisions are recorded and the Telegram flag is set but no "
+                "message is sent. Turn it off when the filters look right.",
+    },
     "RBH_V3_ENABLED": {
         "label": "Robinhood — watch Uniswap V3", "kind": "bool", "group": "Detection Tuning",
         "applies": "worker:rbh",

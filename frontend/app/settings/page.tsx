@@ -307,6 +307,12 @@ const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
       "GMGN ka fingerprint expire ho jaye to yahin naya paste karo — .env me purana " +
       "replace hoke save hoga aur turant apply bhi ho jayega (restart nahi chahiye).",
   },
+  "AI": {
+    icon: Brain,
+    blurb:
+      "Agent ke numbers. Ye .env me likhe jate hain aur turant apply hote hain — " +
+      "restart nahi chahiye, aur server restart hone par bhi bane rehte hain.",
+  },
   "Detection Tuning": {
     icon: SlidersHorizontal,
     blurb:
@@ -391,13 +397,19 @@ function EnvField({ envKey, meta }: { envKey: string; meta: any }) {
   );
 }
 
-function CredentialsManager() {
+// One card per group of .env fields. `only` and `exclude` let a group be placed
+// where it belongs on the page — the AI numbers sit with the AI switches, not
+// in a column of GMGN credentials — without a second copy of this component.
+function CredentialsManager({ only, exclude }: { only?: string; exclude?: string }) {
   const { data } = useApi<any>("/api/settings/credentials");
   const items: Record<string, any> = data?.items ?? {};
 
   const groups: Record<string, [string, any][]> = {};
   for (const [key, meta] of Object.entries(items)) {
-    (groups[meta.group ?? "Other"] ||= []).push([key, meta]);
+    const group = meta.group ?? "Other";
+    if (only && group !== only) continue;
+    if (exclude && group === exclude) continue;
+    (groups[group] ||= []).push([key, meta]);
   }
 
   return (
@@ -441,6 +453,7 @@ export default function SettingsPage() {
             two places on the page. */}
         <div className="space-y-5">
           <ServiceGroup cat="ai" items={data?.ai ?? []} />
+          <CredentialsManager only="AI" />
           <NarrativeManager />
         </div>
         <div className="space-y-5">
@@ -448,7 +461,7 @@ export default function SettingsPage() {
           <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
           <KeywordManager />
           <ChatIdFinder />
-          <CredentialsManager />
+          <CredentialsManager exclude="AI" />
         </div>
       </div>
     </div>
