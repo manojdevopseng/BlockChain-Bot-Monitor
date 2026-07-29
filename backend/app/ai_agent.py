@@ -239,16 +239,17 @@ def _fact_prompt(token: dict, content: str, profile: dict) -> str:
 
 
 async def _ask_grok_json(session: aiohttp.ClientSession, prompt: str,
-                         system: str) -> Optional[dict]:
+                         system: str, model: str = "") -> Optional[dict]:
     """One call, one JSON object back. None when it fails — never a made-up answer.
 
-    Shared by the narrative pass and by Fact check: two different questions, one
-    way of asking, so a change to the model or the parsing lands on both.
+    Shared by the narrative pass and by Fact check: two different questions and
+    two different models, but one way of asking, so a change to the parsing or
+    the error handling lands on both.
     """
     if not settings.xai_api_key:
         return None
     payload = {
-        "model": settings.xai_model,
+        "model": model or settings.xai_model,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": prompt}],
         "temperature": 0,
@@ -314,7 +315,12 @@ async def fact_check(address: str, force: bool = False) -> dict:
             session, _fact_prompt(token, text, profile),
             "You fact-check claims made in social media posts. You are "
             "careful, you answer No when something cannot be verified, and you "
-            "write for somebody who does not follow crypto.")
+            "write for somebody who does not follow crypto.",
+            # A reasoning model here, a fast one on the narrative pass. This
+            # runs on a click a few times a day, so its extra tokens cost
+            # nothing worth counting, and "is this real" is the judgement that
+            # benefits from the model thinking before it answers.
+            model=settings.xai_fact_model or settings.xai_model)
     if not answer:
         return {"ok": False,
                 "error": "the model could not be reached — check the xAI key "
@@ -1181,6 +1187,10 @@ async def stats() -> dict:
         "enabled": bool(settings.xai_api_key),
         "dry_run": settings.ai_dry_run,
         "model": settings.xai_model,
+        # Two models now: the fast one reads narratives on every launch, the
+        # reasoning one answers Fact check on a click.
+        "fact_model": settings.xai_fact_model or settings.xai_model,
+        "telegram": await col.count_documents({"telegram": True}),
         "total": await col.count_documents({}),
         **counts,
     }

@@ -117,9 +117,20 @@ class Settings(BaseSettings):
     # asks Grok whether the post matches one of the watched narratives.
     xai_api_key: str = ""
     xai_base_url: str = "https://api.x.ai/v1"
-    # Grok 4 Fast. Non-reasoning is the cheaper of the pair and this is a
-    # classification job, not a reasoning one.
-    xai_model: str = "grok-4-fast-non-reasoning"
+    # The narrative pass: one label out of sixteen, on every launch that clears
+    # the gates — a few hundred an hour, so this is the call that costs money.
+    # Measured on ten posts: grok-4.3 got 10/10, and the cheaper
+    # grok-4.20-non-reasoning got 9/10, its miss being a false positive — it
+    # read "wen lambo ser" as Elon Musk. For a filter, a false positive is the
+    # expensive error, so the accurate one wins even at ~7x the latency.
+    xai_model: str = "grok-4.3"
+    # Fact check: asked about one token when somebody presses the button, a few
+    # times a day. Volume that small buys the reasoning model, and "is this
+    # real" is the judgement worth thinking about.
+    #
+    # Note it has no live data: xAI retired Live Search in favour of the Agent
+    # Tools API, so this answers from training knowledge until that is wired in.
+    xai_fact_model: str = "grok-4.20-reasoning"
     # PumpPortal's public realtime feed: pump.fun launches, pushed. No key —
     # the key on that site is for its trading endpoints, which nothing here
     # touches. Each token carries its own metadata URI, and that URI carries the
