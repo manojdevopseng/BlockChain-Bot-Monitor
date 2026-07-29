@@ -450,6 +450,75 @@ async def _notify(session: aiohttp.ClientSession, text: str, address: str) -> bo
 
 # ── Judging ────────────────────────────────────────────────────────────────────
 
+async def _judge_profile(session, token: dict, row: dict, profile,
+                         preview: bool = True) -> bool:
+    """A launch whose X link points at an account rather than at a post.
+
+    A post says what it is about; an account does not, so the question becomes
+    whether the account has published a contract address, and whether it is
+    this token's. Three answers, and they are the whole of it:
+
+        the account names THIS token   -> launching, with the address confirmed
+        the account names another one  -> skipped, it is not about this launch
+        the account names none yet     -> launching, still waiting
+
+    These stay in Launching either way — it is the list of accounts being
+    watched, and the confirmed ones are marked inside it rather than moved out.
+    The narrative is still read, because "which narrative" and "has it published
+    an address" are separate questions and the first one is worth having on the
+    row whichever way the second goes.
+
+    Only the bio is available to read. The account's latest tweet would be the
+    better text, but every free mirror for it is unreachable from this server —
+    measured across 353 profile launches, not one returned a post.
+    """
+    text = " ".join(filter(None, [row.get("excerpt"), row.get("description")]))
+    if not text.strip():
+        await _record(token, row, profile, "skipped",
+                      {"reason": "nothing on the account to read"})
+        return True
+
+    address = token["address"]
+    # The exact address, not "an address that looks like this one" — the
+    # question is whether the account named THIS token, and near-misses are not
+    # an answer to it.
+    named = address in text
+    other = None if named else x_client.find_contract(text)
+    if other:
+        await _record(token, row, profile, "skipped",
+                      {"reason": f"the account publishes a different contract "
+                                 f"({other[:12]}…)",
+                       "ca_found": other, "ca_matched": False})
+        return True
+
+    # Same bio, same narrative — so the model is asked once per account and the
+    # other launches on it read the answer off the first.
+    detail: dict = {"ca_matched": named}
+    prior = await _col("ai_decisions").find_one(
+        {"link": row.get("link") or "", "narrative": {"$exists": True}},
+        {"narrative": 1, "confidence": 1})
+    if prior:
+        detail["narrative"] = prior.get("narrative")
+        detail["confidence"] = prior.get("confidence")
+    else:
+        verdict = await ask_grok(session, token, text, profile)
+        if not verdict:
+            if preview:
+                await _record(token, row, profile, "pending",
+                              {"reason": "passed every gate — waiting for the model",
+                               "ca_matched": named})
+            return False
+        detail["narrative"] = str(verdict.get("narrative") or "none")
+        detail["confidence"] = int(verdict.get("confidence") or 0)
+
+    detail["reason"] = ("the account names this token's contract" if named
+                        else "watching the account for a contract address")
+    await _record(token, row, profile, "launching", detail)
+    log.info(f"[AI] LAUNCHING {token.get('symbol')} — @{profile.handle}"
+             f"{' · CA matched' if named else ''}")
+    return True
+
+
 async def _judge(session, token: dict, row: dict, profile,
                  preview: bool = True) -> bool:
     """Read the post behind the launch and put it to the model.
@@ -549,6 +618,19 @@ async def run_once(session: aiohttp.ClientSession) -> int:
 
         name_key = (f"{(token['name'] or '').lower().strip()}|"
                     f"{(token['symbol'] or '').lower().strip()}")
+
+        # A profile link is a different question from a post, so it takes a
+        # different route — and it takes it before the link gate, because that
+        # gate judges one launch per link and this check has to run on each of
+        # them separately. An account whose bio names its contract names ONE
+        # token; deduplicating by link would test the wrong one.
+        if row.get("kind") == "profile":
+            judged += 1
+            if not await _judge_profile(session, token, row, profile, preview):
+                await _mark_judged(address, False)
+                break                     # model unreachable; try again later
+            await _mark_judged(address)
+            continue
 
         # 1. The link, before anything else, and it takes only two launches to
         #    matter — not a burst of five. The text the model reads is the same

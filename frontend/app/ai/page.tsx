@@ -18,9 +18,10 @@ import { fmtDateTime, rowKey, shortAddr, timeAgo } from "@/lib/utils";
 // Verdicts, in the order they matter:
 //   pending   — cleared every gate; this is the list the model will be given
 //   matched   — the model found one of the narratives in the post
-//   launching — no longer produced. Whether a post is about something real is
-//               now Fact check, on the row, rather than a verdict decided for
-//               every launch. The tab stays for the rows that already have it.
+//   launching — the link points at an account, not a post. These stay here
+//               while the account is watched for a contract address; the ones
+//               that have published this token's address are marked inside the
+//               tab rather than moved out of it.
 //   rejected  — the model read it and found no narrative
 //   skipped   — never reached the model: a gate stopped it first
 // The last two are deliberately browsable. Rejected and skipped answer
@@ -709,6 +710,11 @@ export default function AiPage() {
                     <Badge variant={TONE[d.verdict] ?? "gray"}>{d.verdict}</Badge>
                     {d.telegram ? (
                       <div className="mt-1"><Badge variant="green">telegram</Badge></div>
+                    ) : null}
+                    {/* Inside Launching, the ones that have named their own
+                        contract — the thing the whole branch is waiting for. */}
+                    {d.ca_matched ? (
+                      <div className="mt-1"><Badge variant="green">CA matched</Badge></div>
                     ) : null}
                   </td>
                   <TokenCell address={d.address} symbol={d.symbol} name={d.name} />
