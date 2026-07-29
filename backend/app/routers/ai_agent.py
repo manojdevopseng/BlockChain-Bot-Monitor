@@ -8,9 +8,31 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from .. import ai_agent
+from .. import ai_agent, db, pump_mcap
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+@router.get("/mcap")
+async def mcap(address: str = Query(..., min_length=32, max_length=64)):
+    """Current and all-time-high market cap for one token, asked for by hand.
+
+    The live watch freezes at the moment a launch crosses the bar, because that
+    is the figure that goes out in the message and it must not move afterwards.
+    This is the other question — how far it went in the end — and it is asked
+    one token at a time rather than measured for every launch.
+    """
+    out = await pump_mcap.lookup(address)
+    # What we recorded ourselves, when we have it, so the two can be compared
+    # side by side rather than taken on trust.
+    row = await db.get_collection("x_links").find_one(
+        {"address": address},
+        {"peak_mcap_usd": 1, "symbol": 1, "open_timestamp": 1, "link": 1}) or {}
+    out["our_peak_usd"] = row.get("peak_mcap_usd")
+    out["our_watch_seconds"] = pump_mcap.watch_seconds()
+    if not out.get("symbol") and row.get("symbol"):
+        out["symbol"] = row["symbol"]
+    return out
 
 
 @router.get("/stats")

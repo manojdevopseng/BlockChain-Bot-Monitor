@@ -170,10 +170,15 @@ def note_log_line(line: str) -> None:
         return
     mint, mcap_sol = parsed
     entry = _watched.get(mint)
-    if entry is None or mcap_sol <= entry["peak_sol"]:
+    # Frozen at the crossing. What is wanted is the figure that made the launch
+    # worth sending, and that figure has to stay put: it has already gone out in
+    # a message, and a number that keeps moving afterwards means the chat and
+    # the table disagree. Measured, 11 of 19 crossings went on climbing — one to
+    # +353% — so this is not a hypothetical difference.
+    if entry is None or entry["crossed"] or mcap_sol <= entry["peak_sol"]:
         return
     entry["peak_sol"] = mcap_sol
-    if not entry["crossed"] and _price:
+    if _price:
         usd = mcap_sol * _price
         if usd >= threshold_usd():
             entry["crossed"] = True
@@ -222,6 +227,73 @@ def expired() -> list[tuple[str, float, float]]:
     for mint in done:
         entry = _watched.pop(mint)
         out.append((mint, entry["peak_sol"], entry["peak_sol"] * _price))
+    return out
+
+
+# ── Manual lookup ─────────────────────────────────────────────────────────────
+# The live watch freezes at the crossing on purpose, so it cannot answer "how
+# far did it actually go". pump.fun's own API can: it publishes ath_market_cap
+# per token. Checked against our own figures — CURGRE read $36,254 here and
+# $36,256 there — so the two agree where they overlap, and this fills in the
+# part we deliberately stopped measuring.
+#
+# Not GMGN, and not on any automatic path: this is asked for one token at a
+# time, by someone clicking.
+LOOKUP_URL = "https://frontend-api-v3.pump.fun/coins/{}"
+LOOKUP_TTL = 15.0
+_lookup_cache: dict[str, tuple[float, dict]] = {}
+
+
+async def lookup(mint: str,
+                 session: Optional[aiohttp.ClientSession] = None) -> dict:
+    """Current and all-time-high market cap for one pump.fun token."""
+    mint = (mint or "").strip()
+    if not mint:
+        return {"ok": False, "error": "no address given"}
+
+    hit = _lookup_cache.get(mint)
+    if hit and time.time() - hit[0] < LOOKUP_TTL:
+        return hit[1]
+
+    own = session is None
+    session = session or aiohttp.ClientSession()
+    try:
+        async with session.get(
+                LOOKUP_URL.format(mint),
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=aiohttp.ClientTimeout(total=12)) as r:
+            if r.status == 404:
+                return {"ok": False, "error": "pump.fun does not know this token"}
+            if r.status != 200:
+                return {"ok": False, "error": f"pump.fun returned {r.status}"}
+            d = await r.json(content_type=None)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"lookup failed: {exc}"}
+    finally:
+        if own:
+            await session.close()
+
+    ath_at = d.get("ath_market_cap_timestamp")
+    out = {
+        "ok": True,
+        "address": mint,
+        "symbol": d.get("symbol") or "?",
+        "name": d.get("name") or "",
+        "market_cap_usd": d.get("usd_market_cap"),
+        "ath_market_cap_usd": d.get("ath_market_cap"),
+        # pump.fun stamps these in milliseconds; everything here is seconds.
+        "ath_at": (ath_at / 1000) if ath_at else None,
+        "created_at": ((d.get("created_timestamp") or 0) / 1000) or None,
+        "complete": bool(d.get("complete")),
+        "image": d.get("image_uri") or "",
+        "twitter": d.get("twitter") or "",
+    }
+    _lookup_cache[mint] = (time.time(), out)
+    if len(_lookup_cache) > 500:
+        cut = time.time() - LOOKUP_TTL
+        for k, (at, _) in list(_lookup_cache.items()):
+            if at < cut:
+                _lookup_cache.pop(k, None)
     return out
 
 
