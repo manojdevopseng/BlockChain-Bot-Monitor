@@ -535,8 +535,12 @@ export default function AiPage() {
         <span className="font-mono text-text">{stats?.model ?? "—"}</span>
       </div>
 
-      {/* Decisions first: it is the answer. Under it comes the working — the
-          raw feed of verified launches, then the originals picked out of it. */}
+      {/* The manual check sits at the top: it is the one thing here you come to
+          the page to ask rather than to read. Under it, Decisions — the answer —
+          then the working: the raw feed of verified launches, and the originals
+          picked out of it. */}
+      <McapCheck />
+
       <CollapsibleSection
         id="ai-decisions"
         title="Decisions"
@@ -668,8 +672,6 @@ export default function AiPage() {
           </div>
         )}
       </CollapsibleSection>
-
-      <McapCheck />
 
       <XCheck />
 
