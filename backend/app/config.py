@@ -148,12 +148,7 @@ class Settings(BaseSettings):
     # Where notifications go. Blank = ROBINHOOD_CHAT_ID.
     ai_chat_id: str = ""
 
-    # ── The burst, and what it has to be worth ──────────────
-    # One X link carrying this many launches inside the window is a coordinated
-    # burst, not a coincidence. Only the first launch of such a burst is put to
-    # the model; the rest ride its answer. Counted per IST day.
-    ai_link_burst_count: int = 5
-    ai_link_burst_window: int = 300
+    # ── What a launch has to be worth ───────────────────────
     # A launch is watched for its market cap for this long after it opens, and
     # crossing this many dollars inside that minute is what puts it in front of
     # a person. Measured live: a launch opens at ~28 SOL, so at $74 SOL this is

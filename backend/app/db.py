@@ -279,9 +279,6 @@ async def ensure_indexes() -> None:
         ("x_links",            [("name_key", 1), ("day", 1)]),   # per-day cap
         ("x_links",            [("day", -1)]),                   # History filter
         ("x_links",            [("og", 1), ("found_at", -1)]),   # OG section
-        # The burst gate runs on every unjudged launch, and it asks for one
-        # link's launches on one day in launch order.
-        ("x_links",            [("link", 1), ("day", 1), ("open_timestamp", 1)]),
         ("ai_decisions",       "address"),
         ("ai_decisions",       [("at", -1)]),
         ("ai_decisions",       [("verdict", 1), ("at", -1)]),   # verdict tabs

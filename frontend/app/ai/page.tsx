@@ -31,9 +31,9 @@ const VERDICTS = [
   { id: "launching", label: "Launching" },
   { id: "rejected", label: "Rejected" },
   { id: "skipped", label: "Skipped" },
-  // Not a verdict but a flag: a launch that was part of a link's burst AND
-  // crossed the market cap bar in its first minute. It keeps whatever verdict
-  // the model gave it, so it shows up here as well as in its own tab.
+  // Not a verdict but a flag: a launch that crossed the market cap bar in its
+  // first minute. It keeps whatever verdict the model gave it, so it shows up
+  // here as well as in its own tab.
   { id: "telegram", label: "Telegram" },
 ] as const;
 
@@ -463,12 +463,11 @@ export default function AiPage() {
       >
         <p className="mb-3 text-xs text-text-dim">
           Every launch the agent looked at, including the ones it threw away and
-          why. Before the model: one X link must carry five launches inside five
-          minutes, and of those five only the first is asked about. The account
-          must also be verified and have followers, and a name and ticker is
-          asked about once per IST day. <b>Telegram</b> holds the launches from
-          those bursts that crossed the market cap bar in their first minute —
-          those are the ones sent to the chat.
+          why. Before the model: the account must be verified and have
+          followers, and a link is asked about once — as is a name and ticker,
+          once per IST day. Everything else goes to the model.
+          <b>Telegram</b> holds the launches that crossed the market cap bar in
+          their first minute; those are the ones sent to the chat.
         </p>
         <TableScroll>
           <table className="w-full min-w-[900px] text-sm">
