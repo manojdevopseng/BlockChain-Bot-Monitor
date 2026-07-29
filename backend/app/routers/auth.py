@@ -20,7 +20,7 @@ class TokenOut(BaseModel):
 
 @router.post("/login", response_model=TokenOut)
 async def login(form: OAuth2PasswordRequestForm = Depends()):
-    role = security.authenticate(form.username, form.password)
+    role = await security.authenticate(form.username, form.password)
     if not role:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return TokenOut(access_token=security.create_token(form.username, role),

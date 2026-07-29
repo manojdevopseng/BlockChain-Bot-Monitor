@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, X } from "lucide-react";
+import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, Users, X } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +18,11 @@ const NAV = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
+  // Hidden rather than disabled for a read-only account: the other locked
+  // pages are things the dashboard does, worth knowing exist. Who can log in
+  // is not — and a greyed "User Management" tells a user exactly where to go
+  // looking.
+  { href: "/users", label: "User Management", icon: Users, hideFromUser: true },
   { href: "/rpc", label: "RPC Monitor", icon: Radio },
   { href: "/system", label: "System", icon: Server },
 ];
@@ -75,12 +80,13 @@ export function Sidebar({
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {NAV.map(({ href, label, icon: Icon, hideFromUser }) => {
             const active = href === "/" ? path === "/" : path.startsWith(href);
-            // Shown either way — a nav that hides pages leaves you wondering
-            // what the dashboard has. Disabled says "not for this account",
-            // which is the true answer.
             const locked = blocks(href);
+            if (locked && hideFromUser) return null;
+            // Otherwise shown either way — a nav that hides pages leaves you
+            // wondering what the dashboard has. Disabled says "not for this
+            // account", which is the true answer.
             if (locked) {
               return (
                 <div

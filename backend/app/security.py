@@ -39,22 +39,26 @@ USER = "user"
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def authenticate(username: str, password: str) -> Optional[str]:
-    """The role these credentials buy, or None."""
+async def authenticate(username: str, password: str) -> Optional[str]:
+    """The role these credentials buy, or None.
+
+    The admin comes from env — it has to work before there is a database to
+    read, and it is the account that creates all the others. Everyone else
+    comes from the `users` collection, made on the User Management page.
+    """
     if (username == settings.admin_username
             and password == settings.admin_password):
         return ADMIN
-    # Blank env means the account does not exist. Without this check, empty
+    # The env-configured read-only account, kept as a way in if the database is
+    # unavailable. Blank means it does not exist — without this check, empty
     # credentials would log in as `user` on any box that never configured one.
     if (settings.user_username and settings.user_password
             and username == settings.user_username
             and password == settings.user_password):
         return USER
-    return None
 
-
-def verify_credentials(username: str, password: str) -> bool:
-    return authenticate(username, password) is not None
+    from . import users
+    return await users.verify(username, password)
 
 
 def create_token(username: str, role: str = ADMIN) -> str:

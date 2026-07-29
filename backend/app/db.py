@@ -288,6 +288,9 @@ async def ensure_indexes() -> None:
         ("ai_decisions",       [("link", 1), ("verdict", 1)]),  # the link gate
         ("ai_decisions",       [("name_key", 1), ("day", 1)]),  # the daily gate
         ("ai_decisions",       [("telegram", 1), ("at", -1)]),  # Telegram tab
+        # Dashboard accounts. Looked up by name on every login, and there must
+        # not be two of the same name.
+        ("users",              "username"),
     ]
     for coll, keys in plan:
         try:
