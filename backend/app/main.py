@@ -148,12 +148,17 @@ _PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
               outcomes_router, ai_router)
 
 app.include_router(auth.router)
+# `require_write` is the login check AND the read-only rule in one dependency:
+# any request that is not a GET needs the admin role. Mounting it on the
+# routers rather than listing endpoints means a new POST is covered the day it
+# is written. What a `user` may not even read — the .env credentials — is
+# guarded at its own endpoint, because it is a GET.
 for r in _PROTECTED:
-    app.include_router(r.router, dependencies=[Depends(security.require_user)])
+    app.include_router(r.router, dependencies=[Depends(security.require_write)])
 
 # CSV endpoints live in the outcomes module but mount under their own paths.
 for extra in (outcomes_router.alerts_csv, outcomes_router.detections_csv):
-    app.include_router(extra, dependencies=[Depends(security.require_user)])
+    app.include_router(extra, dependencies=[Depends(security.require_write)])
 
 
 @app.get("/api/health")

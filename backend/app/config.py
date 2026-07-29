@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 1440
     admin_username: str = "admin"
     admin_password: str = "admin"
+    # The read-only account. It sees the whole dashboard and can change nothing
+    # — Forwarder, Commands and Settings are closed to it. Both blank (the
+    # default) means the account does not exist and only the admin can log in;
+    # set them in .env to create it.
+    user_username: str = ""
+    user_password: str = ""
 
     # ── GMGN ────────────────────────────────────────────────
     gmgn_api_key: str = ""

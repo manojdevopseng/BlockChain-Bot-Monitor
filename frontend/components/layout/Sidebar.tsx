@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, X } from "lucide-react";
+import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, X } from "lucide-react";
+import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -30,6 +31,7 @@ export function Sidebar({
   onCloseMobile: () => void;
 }) {
   const path = usePathname();
+  const { blocks } = useRole();
   // On mobile the rail is always full-width inside the drawer; only desktop collapses.
   const isCollapsed = collapsed;
 
@@ -75,6 +77,27 @@ export function Sidebar({
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = href === "/" ? path === "/" : path.startsWith(href);
+            // Shown either way — a nav that hides pages leaves you wondering
+            // what the dashboard has. Disabled says "not for this account",
+            // which is the true answer.
+            const locked = blocks(href);
+            if (locked) {
+              return (
+                <div
+                  key={href}
+                  aria-disabled
+                  title={isCollapsed ? `${label} — admin only` : "Admin only"}
+                  className={cn(
+                    "flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-dim",
+                    isCollapsed && "lg:justify-center lg:px-2",
+                  )}
+                >
+                  <Icon size={17} className="shrink-0 opacity-50" />
+                  <span className={cn("flex-1", isCollapsed && "lg:hidden")}>{label}</span>
+                  <Lock size={12} className={cn("shrink-0", isCollapsed && "lg:hidden")} />
+                </div>
+              );
+            }
             return (
               <Link
                 key={href}

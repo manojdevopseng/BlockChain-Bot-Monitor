@@ -16,9 +16,9 @@ import re
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
-from .. import db, envfile, registry, supervisor
+from .. import db, envfile, registry, security, supervisor
 from ..keywords import compile_keyword, keyword_matches
 from ..ws_hub import hub
 
@@ -45,9 +45,14 @@ async def toggle_service(service_id: str, payload: dict = Body(...)):
 
 # ── Credentials that expire (GMGN fingerprint) ─────────────────────────────────
 
-@router.get("/credentials")
+@router.get("/credentials", dependencies=[Depends(security.require_admin)])
 async def get_credentials():
-    """Editable .env credentials (secrets masked)."""
+    """Editable .env credentials (secrets masked).
+
+    Admin only, and the one read that is. Everything else on this page is
+    readable by anyone logged in; this hands out the GMGN fingerprint and the
+    chat ids, so being masked is not the same as being safe to show.
+    """
     return {"items": envfile.read_values()}
 
 
