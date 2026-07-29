@@ -79,7 +79,9 @@ DEFAULT_NARRATIVES = [
 
 # Held in memory because the prompt is built on the hot path and a database
 # round trip per launch to read a list of sixteen strings would be silly. Kept
-# honest by reloading whenever Settings changes it.
+# honest by reloading whenever Settings changes it. Only the switched-on ones
+# are in here — a narrative switched off stays on the page but leaves the
+# prompt, which is the difference between pausing one and losing it.
 _narratives: list[str] = list(DEFAULT_NARRATIVES)
 
 
@@ -88,18 +90,26 @@ def narratives() -> list[str]:
     return _narratives
 
 
-async def load_narratives(seed: bool = False) -> list[str]:
-    """Read the list from Mongo, seeding it from the defaults the first time."""
+async def load_narratives(seed: bool = False) -> list[dict]:
+    """Every narrative with its switch, newest last. Seeds on first start.
+
+    Returns all of them, on and off, because that is what the page shows; the
+    prompt cache it refreshes holds only the ones that are on.
+    """
     global _narratives
     col = _col("ai_narratives")
     docs = await col.find({}).sort("order", 1).to_list(200)
     if not docs and seed:
-        await col.insert_many([{"text": n, "order": i, "added_at": time.time()}
+        await col.insert_many([{"text": n, "order": i, "enabled": True,
+                                "added_at": time.time()}
                                for i, n in enumerate(DEFAULT_NARRATIVES)])
         docs = await col.find({}).sort("order", 1).to_list(200)
-    if docs:
-        _narratives = [d["text"] for d in docs]
-    return _narratives
+    # `enabled` missing means on: rows written before the switch existed were
+    # all in use, and defaulting them off would silently empty the prompt.
+    items = [{"text": d["text"], "enabled": d.get("enabled", True)} for d in docs]
+    if items:
+        _narratives = [i["text"] for i in items if i["enabled"]]
+    return items
 
 # Whether the thing is REAL is deliberately not asked on this pass. The model
 # does one job here — which narrative, if any — and nothing else. Reality is a

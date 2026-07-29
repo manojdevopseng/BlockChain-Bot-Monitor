@@ -135,8 +135,8 @@ async def set_narrative(payload: dict = Body(...)):
 
     action = payload.get("action")
     text = str(payload.get("value") or "").strip()
-    if action not in ("add", "remove") or not text:
-        raise HTTPException(400, "action must be add/remove with a non-empty value")
+    if action not in ("add", "remove", "toggle") or not text:
+        raise HTTPException(400, "action must be add/remove/toggle with a non-empty value")
     if len(text) > 120:
         raise HTTPException(400, "a narrative should be a short phrase, not a paragraph")
 
@@ -147,7 +147,12 @@ async def set_narrative(payload: dict = Body(...)):
             return {"items": await ai_agent.load_narratives(), "note": "already there"}
         last = await col.find({}).sort("order", -1).limit(1).to_list(1)
         order = int(last[0].get("order", 0)) + 1 if last else 0
-        await col.insert_one({"text": text, "order": order, "added_at": time.time()})
+        await col.insert_one({"text": text, "order": order, "enabled": True,
+                              "added_at": time.time()})
+    elif action == "toggle":
+        # Off means out of the prompt but still on the page. Removing is for
+        # narratives you are done with; this is for the ones you are pausing.
+        await col.update_one(same, {"$set": {"enabled": bool(payload.get("enabled"))}})
     else:
         await col.delete_many(same)
 

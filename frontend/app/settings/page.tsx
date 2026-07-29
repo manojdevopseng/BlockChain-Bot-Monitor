@@ -20,6 +20,7 @@ type Svc = { id: string; label: string; enabled: boolean; category: string };
 
 const CAT = {
   bot: { title: "Bots", icon: Bot, desc: "Enable or disable each bot / signal source" },
+  ai: { title: "AI", icon: Brain, desc: "The narrative agent, its feed, and what it is asked" },
   chain: { title: "Chains", icon: Link2, desc: "Turn a whole chain on or off" },
   rpc: { title: "RPCs", icon: Radio, desc: "Toggle individual RPC endpoints" },
 };
@@ -114,24 +115,25 @@ function KeywordManager() {
 // The list the AI is asked to choose between. Numbered because that is exactly
 // how it reaches the model — the prompt is this list, in this order — so what
 // is on screen is what is being asked.
+type Narrative = { text: string; enabled: boolean };
+
 function NarrativeManager() {
   const { data } = useApi<any>("/api/settings/narratives");
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
-  const items: string[] = data?.items ?? [];
+  const items: Narrative[] = data?.items ?? [];
+  const on = items.filter((n) => n.enabled);
 
+  async function send(body: any) {
+    await apiSend("/api/settings/narratives", "POST", body);
+    mutate("/api/settings/narratives");
+  }
   async function add() {
     const text = val.trim();
     if (!text || busy) return;
     setBusy(true);
-    try {
-      await apiSend("/api/settings/narratives", "POST", { action: "add", value: text });
-      setVal(""); mutate("/api/settings/narratives");
-    } finally { setBusy(false); }
-  }
-  async function remove(text: string) {
-    await apiSend("/api/settings/narratives", "POST", { action: "remove", value: text });
-    mutate("/api/settings/narratives");
+    try { await send({ action: "add", value: text }); setVal(""); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -139,14 +141,14 @@ function NarrativeManager() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Brain size={14} /> AI Narratives
-          <Badge variant="gray">{items.length}</Badge>
         </CardTitle>
+        <span className="text-[11px] text-text-dim">{on.length}/{items.length} on</span>
       </CardHeader>
       <CardContent>
         <p className="mb-3 text-xs text-text-dim">
           What the model is asked to look for in a post. Added here, it is in the
-          next launch's prompt — no restart. Write a short phrase, the way the
-          others read.
+          next launch's prompt — no restart. Switch one off to drop it from the
+          prompt without losing it; the × is for the ones you are done with.
         </p>
         <div className="flex gap-2">
           <Input value={val} onChange={(e) => setVal(e.target.value)}
@@ -157,15 +159,28 @@ function NarrativeManager() {
           </Button>
         </div>
         <div className="mt-3 space-y-1.5">
-          {items.map((n, i) => (
-            <div key={n}
-              className="flex items-center gap-2 rounded-md border border-border-soft bg-bg-soft px-2.5 py-1.5 text-xs">
-              <span className="w-5 shrink-0 text-right font-mono text-text-dim">{i + 1}.</span>
-              <span className="min-w-0 flex-1 text-text-muted">{n}</span>
-              <button onClick={() => remove(n)}
-                className="shrink-0 text-text-dim hover:text-accent-red"><X size={12} /></button>
-            </div>
-          ))}
+          {/* Numbered by what the model actually sees: an off narrative is not
+              in the prompt, so it does not take a number either. */}
+          {items.map((n) => {
+            const idx = n.enabled ? on.findIndex((o) => o.text === n.text) + 1 : 0;
+            return (
+              <div key={n.text} className={cn(
+                "flex items-center gap-2 rounded-md border border-border-soft px-2.5 py-1.5 text-xs",
+                n.enabled ? "bg-bg-soft" : "bg-transparent",
+              )}>
+                <span className="w-5 shrink-0 text-right font-mono text-text-dim">
+                  {idx ? `${idx}.` : "—"}
+                </span>
+                <span className={cn("min-w-0 flex-1", n.enabled ? "text-text-muted" : "text-text-dim line-through")}>
+                  {n.text}
+                </span>
+                <Switch checked={n.enabled}
+                  onCheckedChange={(v) => send({ action: "toggle", value: n.text, enabled: v })} />
+                <button onClick={() => send({ action: "remove", value: n.text })}
+                  className="shrink-0 text-text-dim hover:text-accent-red"><X size={12} /></button>
+              </div>
+            );
+          })}
           {items.length === 0 && (
             <span className="text-xs text-text-dim">No narratives — the model has nothing to match</span>
           )}
@@ -420,13 +435,18 @@ export default function SettingsPage() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <ServiceGroup cat="bot" items={data?.bot ?? []} />
+        {/* Everything the AI agent needs in one column: its switches first,
+            then the list it is asked to match against. They were spread across
+            Bots and the far column, which meant changing how it behaves took
+            two places on the page. */}
+        <div className="space-y-5">
+          <ServiceGroup cat="ai" items={data?.ai ?? []} />
+          <NarrativeManager />
+        </div>
         <div className="space-y-5">
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
           <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
-        </div>
-        <div className="space-y-5">
           <KeywordManager />
-          <NarrativeManager />
           <ChatIdFinder />
           <CredentialsManager />
         </div>

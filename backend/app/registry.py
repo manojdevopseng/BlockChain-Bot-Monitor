@@ -24,6 +24,7 @@ from . import db
 
 # category ids
 BOT = "bot"
+AI = "ai"
 CHAIN = "chain"
 RPC = "rpc"
 
@@ -65,17 +66,17 @@ DEFAULT_SERVICES: list[dict] = [
     # PumpPortal's realtime socket — every pump.fun launch with a verified X
     # account, which is what the AI Narrative page's live section lists. Runs
     # without the model, and the model has nothing to judge without it.
-    {"id": "x_feed",                "category": BOT, "label": "X Links Feed",
+    {"id": "x_feed",                "category": AI, "label": "X Links Feed",
      "chain": "sol", "key": "x_feed",           "enabled": True},
     # Reads each new pump.fun token's X link, checks the account is verified and
     # asks Grok whether it matches a watched narrative. Needs XAI_API_KEY; idle
     # without one.
-    {"id": "ai_agent",              "category": BOT, "label": "AI Narrative Agent",
+    {"id": "ai_agent",              "category": AI, "label": "AI Narrative Agent",
      "chain": "sol", "key": "ai_agent",         "enabled": False},
     # With no model reachable, record what the gates let through as `pending` —
     # the list the model would be given. Useful for checking the filters, and
     # noisy once they are trusted, so it is a switch of its own.
-    {"id": "ai_gate_preview",       "category": BOT, "label": "Gate Preview (pending)",
+    {"id": "ai_gate_preview",       "category": AI, "label": "Gate Preview (pending)",
      "chain": "sol", "key": "ai_gate_preview",  "enabled": True},
 
     # ── Chains ──
@@ -114,6 +115,15 @@ async def seed() -> None:
             doc.setdefault("status", "running" if doc["enabled"] else "stopped")
             doc["updated_at"] = time.time()
             await col.insert_one(doc)
+        elif (existing.get("category") != svc["category"]
+              or existing.get("label") != svc["label"]):
+            # Where a toggle lives and what it is called belong to the code, not
+            # to the user — only its on/off state is theirs. Without this, a
+            # service moved to a new section would stay in the old one on every
+            # box that had already seeded.
+            await col.update_one({"id": svc["id"]},
+                                 {"$set": {"category": svc["category"],
+                                           "label": svc["label"]}})
 
 
 def _clean(doc: dict) -> dict:
