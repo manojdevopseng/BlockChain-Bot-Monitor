@@ -175,7 +175,17 @@ export function GroupLeaderboard() {
                 <td className="px-3 py-3 text-xs">
                   {g.top_call ? (
                     <span className="text-text-muted">
-                      {g.top_call.symbol} {pct(g.top_call.pct)}
+                      {/* The ticker is the one thing in this table worth
+                          opening, so it opens. Falls back to plain text for
+                          rows recorded before the address travelled with it. */}
+                      {g.top_call.gmgn_url ? (
+                        <a href={g.top_call.gmgn_url} target="_blank" rel="noopener noreferrer"
+                           title="View on GMGN"
+                           className="font-medium text-brand-soft hover:underline">
+                          {g.top_call.symbol}
+                        </a>
+                      ) : g.top_call.symbol}{" "}
+                      {pct(g.top_call.pct)}
                     </span>
                   ) : "—"}
                 </td>

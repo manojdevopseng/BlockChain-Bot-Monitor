@@ -101,3 +101,18 @@ def bare_key(chat_id: Any) -> str:
 def bare_chat_id(chat_id: Any) -> int:
     """Same rule, as an int — for code that stores or compares numeric ids."""
     return int(bare_key(chat_id))
+
+
+# Chain names as GMGN spells them in a token URL. Ours differ in one place —
+# we say "rbh" internally, GMGN says "robinhood" — and anything already in
+# GMGN's spelling passes through.
+_GMGN_SLUG = {"eth": "eth", "ethereum": "eth", "rbh": "robinhood",
+              "robinhood": "robinhood", "sol": "sol", "solana": "sol"}
+
+
+def gmgn_url(chain: str | None, address: str | None) -> str:
+    """A token's page on GMGN, or "" when there is nothing to link to."""
+    if not address:
+        return ""
+    slug = _GMGN_SLUG.get((chain or "").lower(), (chain or "sol").lower())
+    return f"https://gmgn.ai/{slug}/token/{address}"

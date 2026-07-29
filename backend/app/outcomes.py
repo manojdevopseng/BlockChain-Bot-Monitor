@@ -23,7 +23,7 @@ import time
 from typing import Any, Optional
 
 from . import db
-from .util import esc
+from .util import esc, gmgn_url
 from .scanners.slog import get_logger
 
 log = get_logger(__name__)
@@ -445,7 +445,11 @@ async def by_group(days: int = 30, min_calls: int = 1) -> list[dict]:
             if one_h is not None:
                 a["h1"].append(one_h)
             if a["top"] is None or best > a["top"]["pct"]:
-                a["top"] = {"symbol": d.get("symbol"), "pct": round(best, 1)}
+                # The address travels with it: a ticker on its own cannot be
+                # opened, and this column is the one thing here worth opening.
+                a["top"] = {"symbol": d.get("symbol"), "pct": round(best, 1),
+                            "address": d.get("address"), "chain": d.get("chain"),
+                            "gmgn_url": gmgn_url(d.get("chain"), d.get("address"))}
 
     rows = []
     for a in agg.values():

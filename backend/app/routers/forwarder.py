@@ -10,17 +10,13 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db, fwd_counters, registry
 from ..scanners import scfg
-from ..util import clean_list
+from ..util import gmgn_url, clean_list
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
 # GMGN token-page slug per chain (for the "view on GMGN" link).
-_GMGN_SLUG = {"eth": "eth", "rbh": "robinhood", "sol": "sol"}
-
-
 def _gmgn_url(chain: str, address: str) -> str:
-    slug = _GMGN_SLUG.get(chain, chain)
-    return f"https://gmgn.ai/{slug}/token/{address}"
+    return gmgn_url(chain, address)
 
 
 # The four signal channels the userbot listens to, and the registry switch that
