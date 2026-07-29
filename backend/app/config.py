@@ -160,8 +160,6 @@ class Settings(BaseSettings):
     # many times a day. Straight from the reference bot, where a single viral
     # link otherwise cost an AI call per copycat token.
     ai_max_link_reads: int = 2
-    # How long a "Launching" profile is re-checked for a contract address.
-    ai_launching_watch_hours: int = 24
     # Where notifications go. Blank = ROBINHOOD_CHAT_ID.
     ai_chat_id: str = ""
 

@@ -124,8 +124,6 @@ MAX_PER_CYCLE = 12
 # was unreachable. Small on purpose: the queue is worth draining, but never at
 # the price of the launches still coming in.
 RETRY_PENDING_PER_CYCLE = 4
-# Launching profiles re-checked per pass, oldest check first.
-MAX_RECHECK_PER_CYCLE = 6
 # A verdict of "error" means the model could not be reached, not that the token
 # was judged — so it is retried. Capped, because a token nothing can classify
 # should not be asked about forever.
@@ -462,11 +460,12 @@ async def _judge_profile(session, token: dict, row: dict, profile,
         the account names another one  -> skipped, it is not about this launch
         the account names none yet     -> launching, still waiting
 
-    These stay in Launching either way — it is the list of accounts being
-    watched, and the confirmed ones are marked inside it rather than moved out.
-    The narrative is still read, because "which narrative" and "has it published
-    an address" are separate questions and the first one is worth having on the
-    row whichever way the second goes.
+    These stay in Launching either way, and nothing happens to them after that:
+    the account is not re-read, the bio is not polled, no timer runs. Launching
+    is a resting place, not a queue. Judged once on the text the launch arrived
+    with, and left there. The narrative is still read, because "which narrative"
+    and "has it published an address" are separate questions and the first is
+    worth having on the row whichever way the second goes.
 
     Only the bio is available to read. The account's latest tweet would be the
     better text, but every free mirror for it is unreachable from this server —
