@@ -454,7 +454,10 @@ async def _retry_pending(session: aiohttp.ClientSession,
         token = {"address": d["address"], "symbol": d.get("symbol") or "",
                  "name": d.get("name") or ""}
         row = {"excerpt": d.get("excerpt") or "", "kind": d.get("kind") or "none",
-               "link": d.get("link") or ""}
+               "link": d.get("link") or "",
+               # Carried through, or the rewritten decision would lose the
+               # launch time and its Age would restart from the retry.
+               "open_timestamp": d.get("open_timestamp")}
         profile = x_client.XProfile(
             handle=d.get("handle") or "", verified=bool(d.get("verified")),
             verified_type=d.get("verified_type") or "",
