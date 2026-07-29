@@ -283,6 +283,8 @@ async def ensure_indexes() -> None:
         ("ai_decisions",       [("at", -1)]),
         ("ai_decisions",       [("verdict", 1), ("at", -1)]),   # verdict tabs
         ("ai_decisions",       [("day", -1)]),                  # History filter
+        ("ai_decisions",       [("link", 1), ("verdict", 1)]),  # the link gate
+        ("ai_decisions",       [("name_key", 1), ("day", 1)]),  # the daily gate
     ]
     for coll, keys in plan:
         try:

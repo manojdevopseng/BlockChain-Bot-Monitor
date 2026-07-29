@@ -104,6 +104,11 @@ OG_BURST_WINDOW = 300
 X_RETRIES = 3
 X_RETRY_DELAY = 20
 
+# Verdicts that mean a link's question has already been asked. `error` and
+# `skipped` are absent on purpose: neither ever put the post to the model, and
+# a link that failed once must not be shut out for good.
+SETTLED = ("matched", "launching", "rejected", "pending")
+
 # name_key -> launches seen inside the window, oldest first. Held in memory: it
 # is a minute of traffic, and it must not cost a database round trip per launch.
 _recent_launches: dict[str, list[dict]] = {}
@@ -385,26 +390,37 @@ async def run_once(session: aiohttp.ClientSession) -> int:
         name_key = (f"{(token['name'] or '').lower().strip()}|"
                     f"{(token['symbol'] or '').lower().strip()}")
 
-        # 1. An account with no followers is nobody, whatever it posted.
+        # 1. The link, before anything else: it is the broadest gate and the
+        #    cheapest. Measured on live data, one tweet carries up to 45 tokens
+        #    under 15 different names, and the text the model reads is identical
+        #    every time — so the first token on a link is the one that gets
+        #    asked. The rest are skipped carrying that answer in their reason,
+        #    which keeps the audit able to show what they were riding.
+        link = row.get("link") or ""
+        if link:
+            prior_link = await _col("ai_decisions").find_one(
+                {"link": link, "verdict": {"$in": list(SETTLED)}},
+                {"verdict": 1, "symbol": 1})
+            if prior_link:
+                await _record(token, row, profile, "skipped",
+                              {"reason": f"same link — already judged "
+                                         f"({prior_link.get('verdict')}) as "
+                                         f"{prior_link.get('symbol') or '?'}"})
+                await _mark_judged(address)
+                continue
+
+        # 2. An account with no followers is nobody, whatever it posted.
         if profile.followers <= 0:
             await _record(token, row, profile, "skipped", {"reason": "account has no followers"})
             await _mark_judged(address)
             continue
 
-        # 2. The same name, ticker AND link, seen again: the first of those went
-        #    to the model, and the copies would only buy the same answer twice.
-        same = await _col("ai_decisions").find_one(
-            {"name_key": name_key, "link": row.get("link") or ""}, {"_id": 1})
-        if same:
-            await _record(token, row, profile, "skipped",
-                          {"reason": "same name, ticker and link already judged"})
-            await _mark_judged(address)
-            continue
-
-        # 3. The same name and ticker already judged today. The day runs from
-        #    midnight IST, the same boundary the rest of the project uses.
+        # 3. The same name and ticker already asked about today — a relaunch
+        #    under a fresh link is still a relaunch. The day runs from midnight
+        #    IST, the same boundary the rest of the project uses.
         today_same = await _col("ai_decisions").find_one(
-            {"name_key": name_key, "day": today}, {"_id": 1})
+            {"name_key": name_key, "day": today, "verdict": {"$in": list(SETTLED)}},
+            {"_id": 1})
         if today_same:
             await _record(token, row, profile, "skipped",
                           {"reason": "same name and ticker already judged today"})
