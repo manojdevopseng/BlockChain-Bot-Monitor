@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  Bot, Link2, Radio, Plus, X, Tag, KeyRound, Check, Loader2, Search, Hash,
+  Bot, Brain, Link2, Radio, Plus, X, Tag, KeyRound, Check, Loader2, Search, Hash,
   SlidersHorizontal,
 } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
@@ -105,6 +105,70 @@ function KeywordManager() {
             </span>
           ))}
           {items.length === 0 && <span className="text-xs text-text-dim">No keywords yet</span>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// The list the AI is asked to choose between. Numbered because that is exactly
+// how it reaches the model — the prompt is this list, in this order — so what
+// is on screen is what is being asked.
+function NarrativeManager() {
+  const { data } = useApi<any>("/api/settings/narratives");
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const items: string[] = data?.items ?? [];
+
+  async function add() {
+    const text = val.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try {
+      await apiSend("/api/settings/narratives", "POST", { action: "add", value: text });
+      setVal(""); mutate("/api/settings/narratives");
+    } finally { setBusy(false); }
+  }
+  async function remove(text: string) {
+    await apiSend("/api/settings/narratives", "POST", { action: "remove", value: text });
+    mutate("/api/settings/narratives");
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Brain size={14} /> AI Narratives
+          <Badge variant="gray">{items.length}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-3 text-xs text-text-dim">
+          What the model is asked to look for in a post. Added here, it is in the
+          next launch's prompt — no restart. Write a short phrase, the way the
+          others read.
+        </p>
+        <div className="flex gap-2">
+          <Input value={val} onChange={(e) => setVal(e.target.value)}
+            placeholder="e.g. Related to a new football signing"
+            onKeyDown={(e) => e.key === "Enter" && add()} />
+          <Button variant="primary" size="sm" onClick={add} disabled={busy}>
+            <Plus size={14} /> Add
+          </Button>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {items.map((n, i) => (
+            <div key={n}
+              className="flex items-center gap-2 rounded-md border border-border-soft bg-bg-soft px-2.5 py-1.5 text-xs">
+              <span className="w-5 shrink-0 text-right font-mono text-text-dim">{i + 1}.</span>
+              <span className="min-w-0 flex-1 text-text-muted">{n}</span>
+              <button onClick={() => remove(n)}
+                className="shrink-0 text-text-dim hover:text-accent-red"><X size={12} /></button>
+            </div>
+          ))}
+          {items.length === 0 && (
+            <span className="text-xs text-text-dim">No narratives — the model has nothing to match</span>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -362,6 +426,7 @@ export default function SettingsPage() {
         </div>
         <div className="space-y-5">
           <KeywordManager />
+          <NarrativeManager />
           <ChatIdFinder />
           <CredentialsManager />
         </div>

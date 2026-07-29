@@ -118,6 +118,44 @@ async def set_keyword(payload: dict = Body(...)):
     return {"items": [d["word"] for d in docs]}
 
 
+# ── AI narratives ─────────────────────────────────────────────────────────────
+# The list the model is asked to choose between. Seeded from code on first
+# start, edited here after that — the agent reloads it on every change, so a
+# narrative added on this page is in the next prompt without a restart.
+
+@router.get("/narratives")
+async def get_narratives():
+    from .. import ai_agent
+    return {"items": await ai_agent.load_narratives()}
+
+
+@router.post("/narratives")
+async def set_narrative(payload: dict = Body(...)):
+    from .. import ai_agent
+
+    action = payload.get("action")
+    text = str(payload.get("value") or "").strip()
+    if action not in ("add", "remove") or not text:
+        raise HTTPException(400, "action must be add/remove with a non-empty value")
+    if len(text) > 120:
+        raise HTTPException(400, "a narrative should be a short phrase, not a paragraph")
+
+    col = db.get_collection("ai_narratives")
+    same = {"text": {"$regex": f"^{re.escape(text)}$", "$options": "i"}}
+    if action == "add":
+        if await col.find_one(same):
+            return {"items": await ai_agent.load_narratives(), "note": "already there"}
+        last = await col.find({}).sort("order", -1).limit(1).to_list(1)
+        order = int(last[0].get("order", 0)) + 1 if last else 0
+        await col.insert_one({"text": text, "order": order, "added_at": time.time()})
+    else:
+        await col.delete_many(same)
+
+    # Reloaded here rather than on a timer: the person who just pressed Add
+    # should not have to wonder whether it took.
+    return {"items": await ai_agent.load_narratives()}
+
+
 @router.post("/keywords/test")
 async def test_keyword(payload: dict = Body(...)):
     """Convenience: does `word` match `text` under whole-word rules?"""

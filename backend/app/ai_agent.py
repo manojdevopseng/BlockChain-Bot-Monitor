@@ -54,7 +54,11 @@ TELEGRAM_API = "https://api.telegram.org"
 
 # The narratives a *post* is checked against — the product owner's list, in
 # their order. Grok is asked to pick one or say none.
-TWEET_NARRATIVES = [
+#
+# These are the seed, not the source of truth. They are copied into Mongo on
+# first start and edited from Settings after that, so adding one is a click
+# rather than a deploy. `narratives()` is what the prompt reads.
+DEFAULT_NARRATIVES = [
     "Related to Trump",
     "Related to Elon Musk or his Companies",
     "Any Tech Token",
@@ -72,6 +76,30 @@ TWEET_NARRATIVES = [
     "Any Big X account Launching Token",
     "Related to SOL Owner or its Employees",
 ]
+
+# Held in memory because the prompt is built on the hot path and a database
+# round trip per launch to read a list of sixteen strings would be silly. Kept
+# honest by reloading whenever Settings changes it.
+_narratives: list[str] = list(DEFAULT_NARRATIVES)
+
+
+def narratives() -> list[str]:
+    """What the model is currently asked to choose between."""
+    return _narratives
+
+
+async def load_narratives(seed: bool = False) -> list[str]:
+    """Read the list from Mongo, seeding it from the defaults the first time."""
+    global _narratives
+    col = _col("ai_narratives")
+    docs = await col.find({}).sort("order", 1).to_list(200)
+    if not docs and seed:
+        await col.insert_many([{"text": n, "order": i, "added_at": time.time()}
+                               for i, n in enumerate(DEFAULT_NARRATIVES)])
+        docs = await col.find({}).sort("order", 1).to_list(200)
+    if docs:
+        _narratives = [d["text"] for d in docs]
+    return _narratives
 
 # Whether the thing is REAL is deliberately not asked on this pass. The model
 # does one job here — which narrative, if any — and nothing else. Reality is a
@@ -145,7 +173,7 @@ def allowed_verification() -> set[str]:
 # ── Grok ───────────────────────────────────────────────────────────────────────
 
 def _prompt(token: dict, content: str, profile) -> str:
-    listed = "\n".join(f"{i + 1}. {n}" for i, n in enumerate(TWEET_NARRATIVES))
+    listed = "\n".join(f"{i + 1}. {n}" for i, n in enumerate(narratives()))
     return (
         f"Token name: {token.get('name') or '?'}\n"
         f"Token ticker: {token.get('symbol') or '?'}\n"

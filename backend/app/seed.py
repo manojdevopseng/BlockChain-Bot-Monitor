@@ -155,8 +155,20 @@ async def seed_commands() -> None:
         })
 
 
+async def seed_narratives() -> None:
+    """The narratives the AI is asked to choose between.
+
+    Seeded from the module's defaults rather than seed_data.json because that
+    is where they are written and read; from here on they are edited in
+    Settings, so a new one is a click rather than a deploy.
+    """
+    from . import ai_agent
+    await ai_agent.load_narratives(seed=True)
+
+
 async def seed_all() -> None:
     await seed_keywords()
+    await seed_narratives()
     await seed_premium_groups()
     await seed_premium_group_names()
     await seed_otto_rules()
