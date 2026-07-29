@@ -291,6 +291,10 @@ async def ensure_indexes() -> None:
         # Dashboard accounts. Looked up by name on every login, and there must
         # not be two of the same name.
         ("users",              "username"),
+        # "why is this launch not in X Links" searches the mints kept on each
+        # drop bucket. A multikey index, so one token is a lookup rather than a
+        # scan of every bucket in the retention window.
+        ("x_drops",            [("mints.mint", 1)]),
     ]
     for coll, keys in plan:
         try:

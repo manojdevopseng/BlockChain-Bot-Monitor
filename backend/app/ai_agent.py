@@ -152,6 +152,11 @@ OG_BURST_WINDOW = 300
 X_RETRIES = 3
 X_RETRY_DELAY = 20
 
+# Mints kept per drop bucket — per hour, per reason. Enough to answer "why did
+# this one not appear" for anything recent without the collection growing with
+# the feed: a busy hour drops ~1,600 launches across five reasons.
+DROP_MINTS_KEPT = 250
+
 # Verdicts that mean a link's question has already been asked. `error` and
 # `skipped` are absent on purpose: neither ever put the post to the model, and
 # a link that failed once must not be shut out for good.
@@ -161,6 +166,25 @@ SETTLED = ("matched", "launching", "rejected", "pending")
 # is a minute of traffic, and it must not cost a database round trip per launch.
 _recent_launches: dict[str, list[dict]] = {}
 _og_promoted: dict[str, float] = {}
+
+
+# Tasks the event loop is running for us, held so they survive to finish.
+#
+# asyncio keeps only a weak reference to a task, so one nothing else holds can
+# be collected mid-execution — silently, with no exception and no log line.
+# `_handle_launch` waits on a semaphore, which is exactly the suspended state
+# that gives the collector its chance, and the launches lost that way left no
+# trace anywhere: not a row, not a drop, not a log. Measured on one burst, 21 of
+# 41 launches on a single link went missing this way.
+_inflight: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    """Run a coroutine in the background, and keep hold of it until it is done."""
+    task = asyncio.create_task(coro)
+    _inflight.add(task)
+    task.add_done_callback(_inflight.discard)
+    return task
 
 
 def _col(name: str):
@@ -788,7 +812,7 @@ async def x_feed_watch() -> None:
         # A crossing has to be recognised as it happens, so the dollar price
         # must already be in hand when the trade arrives — not fetched after.
         pump_mcap.on_cross = _on_mcap_cross
-        asyncio.create_task(_price_watch(session))
+        _spawn(_price_watch(session))
         while True:
             try:
                 import websockets
@@ -824,7 +848,7 @@ async def x_feed_watch() -> None:
                         # a few dozen are held at a time — and it is the only way
                         # to know what a launch did before we knew we cared.
                         pump_mcap.watch(mint, msg.get("marketCapSol") or 0)
-                        asyncio.create_task(_handle_launch(session, gate, msg))
+                        _spawn(_handle_launch(session, gate, msg))
             except asyncio.CancelledError:
                 log.info("[PUMP] stopped")
                 return
@@ -947,7 +971,15 @@ async def _handle_launch(session: aiohttp.ClientSession,
             # minutes ago when there was no burst yet to qualify it.
             await _burst_formed(link, day)
         except Exception as exc:  # noqa: BLE001
-            log.debug(f"[PUMP] {msg.get('symbol')}: {exc}")
+            # A warning, and a counted drop. At debug this was written nowhere —
+            # both log handlers sit at INFO — and counted nothing, so a launch
+            # lost here was indistinguishable from one that never arrived. That
+            # is the difference between "the feed missed it" and "we broke on
+            # it", and the two want opposite fixes.
+            log.warning(f"[PUMP] handler failed on {msg.get('symbol')} "
+                        f"{(msg.get('mint') or '')[:12]}: "
+                        f"{type(exc).__name__}: {exc}")
+            await _count_drop("handler error", msg)
 
 
 async def _note_for_og(msg: dict, ref) -> None:
@@ -1036,26 +1068,37 @@ async def _promote_og(name_key: str, first: dict) -> None:
 async def _count_drop(reason: str, msg: dict, handle: str = "") -> None:
     """Record that a launch did not become a row, and why.
 
-    Counted by the hour rather than kept per launch: most drops are the filter
-    doing its job — thousands a day with no X link or an unverified account —
-    and a document each would be a lot of noise to store. The exceptions are the
-    ones worth chasing, so a launch dropped because X would not answer keeps its
-    mint alongside the count.
+    Counted by the hour, and the mint is kept alongside the count. It used to be
+    kept only for "x lookup failed", which meant "why did this token never
+    appear" was unanswerable for every other reason — the counts said 489
+    launches had no X link but not which ones, so a token that vanished could
+    not be told apart from one correctly filtered. Bounded per bucket, and the
+    collection expires with the logs, so the cost is fixed.
     """
     try:
         hour = time.strftime("%d-%m-%Y %H:00", time.localtime())
-        update: dict = {"$inc": {"count": 1},
-                        "$set": {"reason": reason, "hour": hour, "dt": _utc_now()}}
-        if reason == "x lookup failed":
-            update["$push"] = {
-                "mints": {"$each": [{"mint": msg.get("mint"),
-                                     "symbol": msg.get("symbol"),
-                                     "handle": handle, "at": time.time()}],
-                          "$slice": -50},
-            }
-        await _col("x_drops").update_one({"_id": f"{hour}|{reason}"}, update, upsert=True)
+        await _col("x_drops").update_one(
+            {"_id": f"{hour}|{reason}"},
+            {"$inc": {"count": 1},
+             "$set": {"reason": reason, "hour": hour, "dt": _utc_now()},
+             "$push": {"mints": {"$each": [{"mint": msg.get("mint"),
+                                            "symbol": msg.get("symbol"),
+                                            "handle": handle,
+                                            "at": time.time()}],
+                                 "$slice": -DROP_MINTS_KEPT}}},
+            upsert=True)
     except Exception as exc:  # noqa: BLE001
-        log.debug(f"[PUMP] could not count drop: {exc}")
+        log.warning(f"[PUMP] could not count drop: {exc}")
+
+
+async def why_dropped(mint: str) -> Optional[dict]:
+    """The reason a launch never became a row, if it was recorded as dropped."""
+    doc = await _col("x_drops").find_one({"mints.mint": mint},
+                                         {"reason": 1, "hour": 1, "mints": 1})
+    if not doc:
+        return None
+    entry = next((m for m in doc.get("mints", []) if m.get("mint") == mint), {})
+    return {"reason": doc.get("reason"), "hour": doc.get("hour"), **entry}
 
 
 async def drops(hours: int = 24) -> list[dict]:

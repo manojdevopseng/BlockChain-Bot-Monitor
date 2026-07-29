@@ -117,3 +117,26 @@ async def drops(hours: int = Query(24, ge=1, le=168)):
     worth chasing.
     """
     return {"items": await ai_agent.drops(hours=hours)}
+
+
+@router.get("/why")
+async def why(address: str = Query(..., min_length=32, max_length=64)):
+    """Why is this launch not in X Links? One query, one answer.
+
+    Answers from the drop record if the launch was filtered, and says so
+    plainly if it was never seen at all — which is a different problem and
+    used to look identical.
+    """
+    row = await db.get_collection("x_links").find_one(
+        {"address": address},
+        {"symbol": 1, "link": 1, "handle": 1, "open_timestamp": 1, "judged": 1})
+    if row:
+        row.pop("_id", None)
+        return {"address": address, "state": "stored", **row}
+
+    dropped = await ai_agent.why_dropped(address)
+    if dropped:
+        return {"address": address, "state": "dropped", **dropped}
+    return {"address": address, "state": "never seen",
+            "note": "the feed never handled this launch — it was not filtered, "
+                    "it did not arrive"}

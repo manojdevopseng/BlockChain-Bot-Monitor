@@ -76,6 +76,9 @@ _watched: dict[str, dict] = {}
 # (mint, peak_usd). Set by whoever cares — nothing here knows about decisions.
 on_cross: Optional[Callable[[str, float], Awaitable[None]]] = None
 
+# Crossing notifications in flight, held so they are not collected mid-send.
+_firing: set = set()
+
 
 def _b58(raw: bytes) -> str:
     n = int.from_bytes(raw, "big")
@@ -185,7 +188,12 @@ def note_log_line(line: str) -> None:
             if on_cross is not None:
                 # Fired now, not on the next sweep: the whole point of reading
                 # the crossing off the trade is that it is not delayed by us.
-                asyncio.get_event_loop().create_task(_fire(mint, usd))
+                # Held in a set until it finishes — asyncio keeps only a weak
+                # reference, so a task nothing else holds can be collected
+                # mid-flight, and this one is what sends the message.
+                task = asyncio.get_event_loop().create_task(_fire(mint, usd))
+                _firing.add(task)
+                task.add_done_callback(_firing.discard)
 
 
 async def _fire(mint: str, usd: float) -> None:
