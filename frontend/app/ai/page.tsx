@@ -727,7 +727,18 @@ export default function AiPage() {
                       )}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-text-muted">{d.at ? timeAgo(d.at) : "—"}</td>
+                  {/* The clock time, the way the live section above shows it —
+                      "3m ago" answers how long, not when, and the two sections
+                      are read side by side. The age stays underneath, since it
+                      is the quicker read of the two. */}
+                  <td className="px-3 py-3">
+                    <span className="whitespace-nowrap font-mono text-xs text-text-muted">
+                      {d.at ? fmtDateTime(d.at) : "—"}
+                    </span>
+                    {d.at && (
+                      <div className="text-[11px] text-text-dim">{timeAgo(d.at)}</div>
+                    )}
+                  </td>
                   <td className="px-3 py-3"><FactCheck row={d} /></td>
                 </tr>
               ))}
