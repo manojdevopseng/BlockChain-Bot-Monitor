@@ -54,12 +54,12 @@ export function DetectionTable(
             {showChain && <th className="px-3 py-2.5 font-medium">Chain</th>}
             <th className="px-3 py-2.5 font-medium">Symbol</th>
             <th className="px-3 py-2.5 font-medium">Name</th>
+            <th className="px-3 py-2.5 font-medium">Age</th>
             <th className="px-3 py-2.5 font-medium">Address</th>
             <th className="px-3 py-2.5 font-medium">Groups</th>
             <th className="px-3 py-2.5 font-medium">Keyword</th>
             <th className="px-3 py-2.5 font-medium">Count</th>
             <th className="px-3 py-2.5 font-medium">When</th>
-            <th className="px-3 py-2.5 font-medium">Age</th>
           </tr>
         </thead>
         <tbody>
@@ -86,6 +86,10 @@ export function DetectionTable(
                     <span className="text-text-muted">{d.name || "—"}</span>
                     {d.name && <CopyButton value={d.name} />}
                   </div>
+                </td>
+                {/* Age — ticks every second, same component as the AI page */}
+                <td className="px-3 py-3">
+                  <span className="font-mono text-xs text-text-muted"><Age ts={d.ts} /></span>
                 </td>
                 {/* Address + copy + GMGN link */}
                 <td className="px-3 py-3">
@@ -150,10 +154,6 @@ export function DetectionTable(
                 {/* When — the absolute time it was recorded */}
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">{d.ts ? fmtDateTime(d.ts) : "—"}</span>
-                </td>
-                {/* Age — ticks every second, same component as the AI page */}
-                <td className="px-3 py-3">
-                  <span className="font-mono text-xs text-text-muted"><Age ts={d.ts} /></span>
                 </td>
               </tr>
             ))

@@ -121,10 +121,10 @@ function GasSection() {
               <tr className={`${STICKY_HEAD} border-b border-border`}>
                 <th className="px-3 py-2.5 font-medium">Symbol</th>
                 <th className="px-3 py-2.5 font-medium">Name</th>
+                <th className="px-3 py-2.5 font-medium">Age</th>
                 <th className="px-3 py-2.5 font-medium">CA</th>
                 <th className="px-3 py-2.5 font-medium">DEX</th>
                 <th className="px-3 py-2.5 font-medium">Gas Fee</th>
-                <th className="px-3 py-2.5 font-medium">Age</th>
                 <th className="px-3 py-2.5 font-medium">Tx</th>
                 <th className="px-3 py-2.5 font-medium">When</th>
               </tr>
@@ -145,6 +145,10 @@ function GasSection() {
                     </div>
                   </td>
                   <td className="px-3 py-3"><span className="text-text-muted">{r.name || "—"}</span></td>
+                  {/* Age — ticks every second, same component as the AI page */}
+                  <td className="px-3 py-3">
+                    <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
+                  </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-xs text-accent-blue">{shortAddr(r.address)}</span>
@@ -160,10 +164,6 @@ function GasSection() {
                   <td className="px-3 py-3"><Badge variant="purple">{(r.dex || "—").toUpperCase()}</Badge></td>
                   <td className="px-3 py-3">
                     <span className="font-mono text-xs font-semibold text-accent-amber">{fmtEth(r.fee_eth)}</span>
-                  </td>
-                  {/* Age — ticks every second, same component as the AI page */}
-                  <td className="px-3 py-3">
-                    <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
                   </td>
                   <td className="px-3 py-3">
                     {r.tx_hash ? (

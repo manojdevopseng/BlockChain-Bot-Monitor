@@ -44,12 +44,12 @@ export function CrossChainTable(
           <tr className={`${STICKY_HEAD} border-b border-border`}>
             {showFlow && <th className="px-3 py-2.5 font-medium">Flow</th>}
             <th className="px-3 py-2.5 font-medium">Symbol</th>
+            <th className="px-3 py-2.5 font-medium">Age</th>
             <th className="px-3 py-2.5 font-medium">SOL Address</th>
             <th className="px-3 py-2.5 font-medium">Matched Address</th>
             <th className="px-3 py-2.5 font-medium">DEX</th>
             <th className="px-3 py-2.5 font-medium">SOL MCap</th>
             <th className="px-3 py-2.5 font-medium">When</th>
-            <th className="px-3 py-2.5 font-medium">Age</th>
           </tr>
         </thead>
         <tbody>
@@ -72,6 +72,10 @@ export function CrossChainTable(
                     <span className="font-semibold text-text">{r.token_symbol || "?"}</span>
                     {r.token_symbol && <CopyButton value={r.token_symbol} />}
                   </div>
+                </td>
+                {/* Age — ticks every second */}
+                <td className="px-3 py-3">
+                  <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
                 </td>
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1.5">
@@ -104,10 +108,6 @@ export function CrossChainTable(
                   <span className="font-mono text-xs text-text-muted">
                     {r.created_at ? fmtDateTime(r.created_at) : "—"}
                   </span>
-                </td>
-                {/* Age — ticks every second */}
-                <td className="px-3 py-3">
-                  <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
                 </td>
               </tr>
             ))
