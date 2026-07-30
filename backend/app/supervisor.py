@@ -359,6 +359,7 @@ _DEPENDS_ON = {
     "eth_gas_fees":           "eth",
     "forwarder":              "fwd",
     "premium_callers_signal": "fwd",
+    "premium_sol_capture":    "fwd",
     "dexsignalcall":          "fwd",
     "bbcanalyser2":           "fwd",
     "eth_otto_group":         "fwd",

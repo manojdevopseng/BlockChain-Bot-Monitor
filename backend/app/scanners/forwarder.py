@@ -67,6 +67,7 @@ GATE_CALL    = "bbcanalyser2"            # CallAnalyser2
 GATE_DEXS    = "dexsignalcall"           # dexssignal
 GATE_OTTO    = "eth_otto_group"          # OttoEthDeployments
 GATE_PREMIUM = "premium_callers_signal"  # premium groups → premium ETH caller
+GATE_PREMIUM_SOL = "premium_sol_capture" # premium groups → SOL panel capture
 
 # Premium groups, trigger keywords and Otto hash rules are NOT hardcoded here.
 # They are seeded once from app/data/seed_data.json into MongoDB and loaded at
@@ -692,7 +693,14 @@ class TelegramForwarder:
                 )
 
     async def _premium_handler(self, event) -> None:
-        if not self._on(GATE_PREMIUM):
+        # Two independent switches share this handler: GATE_PREMIUM covers the
+        # premium-all forward and the ETH side (caller signal + cross-group
+        # counting); GATE_PREMIUM_SOL covers only the SOL panel capture below.
+        # Neither implies the other any more — turning one off must not also
+        # silently stop the other.
+        premium_on = self._on(GATE_PREMIUM)
+        sol_on = self._on(GATE_PREMIUM_SOL)
+        if not premium_on and not sol_on:
             return
         bare = bare_chat_id(event.chat_id)
         if bare not in self._premium_ids:
@@ -704,7 +712,7 @@ class TelegramForwarder:
         if unique_id in self._processed:
             return
 
-        if DEST_PREMIUM_ALL:
+        if premium_on and DEST_PREMIUM_ALL:
             # Highest-volume path: every premium message is mirrored here, so it
             # is the most likely to hit Telegram's per-chat flood limit.
             try:
@@ -742,15 +750,18 @@ class TelegramForwarder:
         bare = bare_chat_id(event.chat_id)
 
         # ── SOL address capture (dashboard-only panel; independent of ETH) ──
-        for sol_addr in set(_SOL_RE.findall(raw)):
-            sol_key = f"{bare}:{sol_addr}"
-            if sol_key not in self._capture_seen:
-                self._capture_seen.add(sol_key)
-                asyncio.create_task(self._capture_premium_sol(
-                    sol_addr, bare, source_name, raw,
-                    username=source_uname, msg_id=event.id,
-                ))
+        if sol_on:
+            for sol_addr in set(_SOL_RE.findall(raw)):
+                sol_key = f"{bare}:{sol_addr}"
+                if sol_key not in self._capture_seen:
+                    self._capture_seen.add(sol_key)
+                    asyncio.create_task(self._capture_premium_sol(
+                        sol_addr, bare, source_name, raw,
+                        username=source_uname, msg_id=event.id,
+                    ))
 
+        if not premium_on:
+            return
         eth_match = _ETH_RE.search(message)
         if not eth_match:
             return

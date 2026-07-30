@@ -36,6 +36,12 @@ DEFAULT_SERVICES: list[dict] = [
      "chain": "eth", "key": "gas_fees",        "enabled": True},
     {"id": "premium_callers_signal","category": BOT, "label": "Premium Callers Signal",
      "chain": "eth", "key": "premium_callers",  "enabled": True},
+    # A Solana address seen in a premium group, captured to the SOL panel after
+    # an on-chain getAccountInfo check. Split out from Premium Callers Signal
+    # (which forwards + does the ETH side) so either can be switched off
+    # without taking the other down with it.
+    {"id": "premium_sol_capture",   "category": BOT, "label": "Premium SOL Capture",
+     "chain": "sol", "key": "premium_sol",      "enabled": True},
     {"id": "dexsignalcall",         "category": BOT, "label": "DexSignalCall",
      "chain": "eth", "key": "dexssignal",       "enabled": True},
     {"id": "bbcanalyser2",          "category": BOT, "label": "BBCAnalyser2",
