@@ -33,14 +33,21 @@ _RPC = {
 
 async def _build() -> list[dict]:
     enabled = await registry.enabled_map()
-    live = supervisor.diagnostics().get("workers", {})
     tokens = db.get_collection("tokens")
 
     out = []
     for c in _CHAINS:
         http, wss = _RPC[c["id"]]()
         on = bool(enabled.get(c["toggle"], True))
-        running = bool(live.get(c["worker"]))
+        # ETH/Robinhood: the real socket state, not just "the reconnect-loop
+        # task hasn't crashed" — that task retries forever on a rejection, so
+        # it stays "alive" through an hours-long 429 outage. SOL deliberately
+        # keeps the worker-alive reading here: this row reflects the GMGN
+        # rolling feed, which keeps working even while on-chain (Helius)
+        # discovery is down — that split shows up as its own row on RPC
+        # Monitor instead of collapsing into one misleading chain status.
+        running = (supervisor.rpc_connected(c["worker"]) if c["id"] in ("eth", "rbh")
+                  else supervisor.diagnostics().get("workers", {}).get(c["worker"], False))
         if not on:
             status = "disabled"
         elif running:

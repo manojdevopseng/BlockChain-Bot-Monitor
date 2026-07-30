@@ -307,6 +307,26 @@ def _worker_alive(name: str) -> bool:
     return isinstance(t, asyncio.Task) and not t.done()
 
 
+def rpc_connected(name: str) -> bool:
+    """Is this chain's RPC socket actually connected right now?
+
+    Deliberately not the same question as `_worker_alive`. ETH/Robinhood's
+    WSProvider and SOL's on-chain discovery both retry forever on a rejection
+    (a 429 loop never lets the task finish), so "the task hasn't crashed" is
+    true the entire time a chain is fully rate-limited and seeing nothing.
+    Reads the real per-socket signal where one exists.
+    """
+    if name in ("eth", "rbh"):
+        inst = _instances.get(name)
+        return bool(inst is not None and getattr(inst, "connected", False))
+    if name == "sol":
+        # Distinct from chain_sol/rpc_sol's task-alive status elsewhere: the
+        # GMGN rolling feed can be working fine while Helius discovery is
+        # 429-looping, so this answers specifically "is the SOL WSS up".
+        return bool(_sol is not None and _sol.discovery_connected())
+    return _worker_alive(name)
+
+
 def status() -> dict[str, str]:
     """service_id -> 'running' | 'stopped' for the workers we own directly."""
     return {
@@ -339,10 +359,18 @@ _DEPENDS_ON = {
     "bot_commands":           "cmd",
 }
 
+# Which dependencies have a real per-socket "connected" signal worth
+# preferring over plain task-alive. ETH/Robinhood's WSProvider tracks it
+# already; SOL's task-alive is left as-is here on purpose (see rpc_connected) —
+# the GMGN feed a "sol" dependent actually cares about keeps working through a
+# Helius outage, so switching this one to socket-state would trade one
+# misleading status for another.
+_CONNECTED_AWARE = {"eth", "rbh"}
+
 _WHY_DOWN = {
     "fwd": "Telegram userbot not logged in (no .session)",
-    "eth": "ETH RPC not reachable or not configured",
-    "rbh": "Robinhood RPC not reachable or not configured",
+    "eth": "ETH RPC not reachable — down, rate-limited, or not configured",
+    "rbh": "Robinhood RPC not reachable — down, rate-limited, or not configured",
     "sol": "Solana scanner not running",
     "cmd": "TELEGRAM_BOT_TOKEN not set (get one from @BotFather)",
 }
@@ -352,7 +380,11 @@ def service_states(enabled: dict[str, bool]) -> dict[str, dict]:
     """service_id -> {status, reason, depends_on} using real worker state.
 
     Single source of truth so the dashboard and the system page can never
-    disagree about whether something is actually up.
+    disagree about whether something is actually up. For eth/rbh dependents
+    this means the actual socket state (rpc_connected), not just whether the
+    reconnect-loop task is still alive — that task never dies even while a
+    quota rejection has it retrying forever, so "alive" alone said "running"
+    for a chain that had been fully down for the better part of an hour.
     """
     workers = diagnostics().get("workers", {})
     out: dict[str, dict] = {}
@@ -362,6 +394,9 @@ def service_states(enabled: dict[str, bool]) -> dict[str, dict]:
             status_, reason = "disabled", "turned off in Settings"
         elif dep is None:
             status_, reason = "running", ""
+        elif dep in _CONNECTED_AWARE:
+            status_, reason = (("running", "") if rpc_connected(dep)
+                              else ("stopped", _WHY_DOWN.get(dep, "worker not running")))
         elif workers.get(dep):
             status_, reason = "running", ""
         else:

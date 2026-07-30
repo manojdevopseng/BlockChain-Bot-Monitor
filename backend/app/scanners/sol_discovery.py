@@ -72,6 +72,15 @@ class SolDiscovery:
         self._tasks: list[asyncio.Task] = []
         self._running = False
         self._shared_pool: Optional[wss_pool.EndpointPool] = None
+        # label -> is this launchpad's socket actually subscribed right now.
+        # The task being alive says nothing — _watch() retries forever on a
+        # rejection, so a launchpad stuck in an endless 429 loop looks exactly
+        # like a healthy one to anything that only checks "is the task done".
+        self._connected: dict[str, bool] = {}
+
+    def connected(self) -> bool:
+        """True if at least one watched launchpad has a live Helius subscription."""
+        return any(self._connected.values())
 
     def _pool(self) -> wss_pool.EndpointPool:
         """One pool for every launchpad socket.
@@ -165,6 +174,7 @@ class SolDiscovery:
                     log.info(f"[SOL-RPC] subscribed to {label} "
                              f"({program_id[:8]}…) via {wss_pool.host_of(url)}")
                     backoff = 1.0
+                    self._connected[label] = True
                     await self._note_success(pool, url, label)
                     async for raw in ws:
                         await self._handle(label, raw)
@@ -172,6 +182,11 @@ class SolDiscovery:
                 raise
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+            finally:
+                # Cleared on the way out for any reason — a clean cancel, a
+                # dropped connection, or the exception above — so "connected"
+                # never lags a socket that just died.
+                self._connected[label] = False
 
             if last_error is not None:
                 kind, detail = pool.note_failure(url, last_error)

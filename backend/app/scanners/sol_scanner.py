@@ -95,6 +95,17 @@ class SolanaScanner:
         self._discovered: dict[str, dict] = {}
         self._discovery = None
 
+    def discovery_connected(self) -> bool:
+        """Is the Helius on-chain discovery socket actually subscribed right now?
+
+        Separate from whether this scanner's own task is alive — the GMGN
+        rolling feed keeps working even while discovery is stuck retrying a
+        429, so this is the only accurate answer to "is the SOL WSS up".
+        `_discovery` is None before `_start_discovery()` runs or if
+        SOL_RPC_WSS was never set — either way, not connected.
+        """
+        return bool(self._discovery and self._discovery.connected())
+
     @property
     def active_watched_tickers(self) -> dict[str, dict]:
         now = time.time()

@@ -36,11 +36,12 @@ async def _build() -> list[dict]:
     """Endpoints actually configured in .env — no invented latency or uptime.
 
     `status` reflects what we truly know: whether the endpoint is configured,
-    whether its toggle is on, and (for WSS) whether the worker holding that
-    socket is currently running.
+    whether its toggle is on, and (for WSS) whether that socket actually has a
+    live connection right now — not just whether its reconnect-loop task is
+    still alive. That task retries forever on a rejection, so a chain stuck in
+    an hours-long 429 loop used to read "connected" the whole time.
     """
     enabled = await registry.enabled_map()
-    live = supervisor.diagnostics().get("workers", {})
 
     rows = [
         ("Ethereum", "eth", "rpc_eth", "eth", scfg.ETH_RPC_HTTP, scfg.ETH_RPC_WSS),
@@ -57,7 +58,7 @@ async def _build() -> list[dict]:
             elif not on:
                 status = "disabled"
             elif kind == "WSS":
-                status = "connected" if live.get(worker) else "stopped"
+                status = "connected" if supervisor.rpc_connected(worker) else "stopped"
             else:
                 status = "configured"
             out.append({
