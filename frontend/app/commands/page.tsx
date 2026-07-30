@@ -33,6 +33,11 @@ export default function CommandsPage() {
       <span className="text-text-muted">{r.description}</span>
     )},
     { key: "category", header: "Category", render: (r) => <Badge variant="purple">{r.category}</Badge> },
+    { key: "permission", header: "Permission", render: (r) => (
+      r.permission === "Group admins"
+        ? <Badge variant="amber">group admins</Badge>
+        : <Badge variant="gray">everyone</Badge>
+    )},
     { key: "live", header: "Live", render: (r) => (
       r.live
         ? <Badge variant="green">answering</Badge>

@@ -119,7 +119,7 @@ async def seed_commands() -> None:
     Nothing here invents usage: every number starts at zero and only moves when
     someone actually runs the command.
     """
-    from .scanners.commands import COMMAND_SPEC
+    from .scanners.commands import ADMIN_ONLY_COMMANDS, COMMAND_SPEC
     col = db.get_collection("commands")
     known = {f"/{name}" for name, _d, _c in COMMAND_SPEC}
 
@@ -133,7 +133,7 @@ async def seed_commands() -> None:
                 "command": cmd,
                 "description": description,
                 "category": category,
-                "permission": "Everyone",
+                "permission": "Group admins" if name in ADMIN_ONLY_COMMANDS else "Everyone",
                 "enabled": True,
                 "uses_total": 0,
                 "errors_total": 0,

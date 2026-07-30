@@ -12,8 +12,10 @@ Runs on the BOT token (TELEGRAM_BOT_TOKEN from @BotFather) — completely
 separate from the Telethon userbot the forwarder uses, so the two never fight
 over the same session and commands work even when the userbot is logged out.
 
-All commands are read-only: none of them change bot behaviour, so they are
-safe to expose in a group.
+Every command except /stop and /restart is read-only. Those two change bot
+behaviour, so they check the sender against Telegram's own admin list for the
+chat (`getChatAdministrators`) before doing anything — everyone else gets a
+"admins only" reply, same as a wrong command. See ADMIN_ONLY_COMMANDS.
 """
 
 from __future__ import annotations
@@ -48,7 +50,22 @@ COMMAND_SPEC = [
     ("alerts",   "Recent alerts",                      "Alerts"),
     ("gas",      "Recent high-gas early buys",         "Alerts"),
     ("ping",     "Quick alive check",                  "General"),
+    ("stop",     "Stop the bot — turns off all bots/chains/RPCs "
+                 "(group admins only)",                "System"),
+    ("restart",  "Undo /stop — turns back on exactly what it stopped "
+                 "(group admins only)",                "System"),
 ]
+
+# Checked against Telegram's own admin list for the chat, not a hardcoded user
+# id — whoever the group actually makes an admin can use these, and losing
+# admin status in the group revokes it here too, automatically.
+ADMIN_ONLY_COMMANDS = {"stop", "restart"}
+
+# How long a chat's admin list is trusted before asking Telegram again. Long
+# enough that this cannot become a de-facto rate limit on getChatAdministrators
+# if someone spams the command; short enough that a promotion/demotion in the
+# group takes effect within about two minutes rather than needing a restart.
+_ADMIN_CACHE_TTL = 120.0
 
 
 def _fmt_dur(seconds: int) -> str:
@@ -95,6 +112,9 @@ class TelegramCommands:
         self._session: Optional[aiohttp.ClientSession] = None
         self._offset = 0
         self._boot_at = time.time()
+        # chat_id -> ({admin user ids}, fetched_at). Only touched by /stop and
+        # /restart, so it stays empty for a chat that never runs them.
+        self._admin_cache: dict[int, tuple[set, float]] = {}
 
     def allowed(self, chat_id) -> bool:
         """Is this the chat we answer in?
@@ -105,6 +125,33 @@ class TelegramCommands:
         if not self._chat_id:
             return True
         return str(chat_id) == self._chat_id
+
+    async def _is_group_admin(self, chat_id, user_id) -> bool:
+        """True if Telegram itself lists user_id as an admin/creator of chat_id.
+
+        Cached for _ADMIN_CACHE_TTL per chat. On a failed lookup, an existing
+        cache entry is reused rather than treated as "nobody is admin" (breaks
+        the command for real admins) or "everybody is admin" (the one outcome
+        that must never happen for /stop). With no cache and no successful
+        lookup, it fails closed — denied.
+        """
+        if user_id is None:
+            return False
+        now = time.time()
+        cached = self._admin_cache.get(chat_id)
+        if cached is not None and now - cached[1] < _ADMIN_CACHE_TTL:
+            return user_id in cached[0]
+        try:
+            res = await self._api("getChatAdministrators", {"chat_id": chat_id})
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"[CMD] getChatAdministrators failed: {exc}")
+            return user_id in cached[0] if cached is not None else False
+        if not res.get("ok"):
+            log.warning(f"[CMD] getChatAdministrators rejected: {res.get('description')}")
+            return user_id in cached[0] if cached is not None else False
+        ids = {m["user"]["id"] for m in res.get("result", []) if m.get("user")}
+        self._admin_cache[chat_id] = (ids, now)
+        return user_id in ids
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -311,16 +358,16 @@ class TelegramCommands:
             log.debug(f"[CMD] /{cmd} is disabled — ignored")
             return
 
+        user_id = (msg.get("from") or {}).get("id")
         heartbeat.beat("command")
         started = time.perf_counter()
         try:
-            reply = await self._reply_for(cmd)
+            reply = await self._reply_for(cmd, chat_id, user_id)
             ok = await self._send(chat_id, reply) if reply else False
         except Exception as exc:  # noqa: BLE001
             log.error(f"[CMD] /{cmd} failed: {exc}")
             ok = False
-        await self._record(cmd, ok, time.perf_counter() - started,
-                           (msg.get("from") or {}).get("id"))
+        await self._record(cmd, ok, time.perf_counter() - started, user_id)
 
     async def _record(self, cmd: str, ok: bool, seconds: float, user_id) -> None:
         """Real usage stats for the dashboard — no invented numbers."""
@@ -335,7 +382,7 @@ class TelegramCommands:
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[CMD] could not record use of /{cmd}: {exc}")
 
-    async def _reply_for(self, cmd: str) -> str:
+    async def _reply_for(self, cmd: str, chat_id, user_id) -> str:
         if cmd in ("start", "help"):
             return await self._msg_help()
         if cmd == "status":
@@ -354,6 +401,12 @@ class TelegramCommands:
             return await self._msg_gas()
         if cmd == "ping":
             return "🟢 <b>pong</b> — bot is alive"
+        if cmd in ADMIN_ONLY_COMMANDS and not await self._is_group_admin(chat_id, user_id):
+            return "🔒 Only a group admin can use this command."
+        if cmd == "stop":
+            return await self._msg_stop(user_id)
+        if cmd == "restart":
+            return await self._msg_restart(user_id)
         return ""
 
     # ── Replies (all read from MongoDB) ───────────────────────────────────────
@@ -480,3 +533,50 @@ class TelegramCommands:
                 f" · age {g.get('age_seconds', '?')}s · {_ago(g.get('created_at'))} ago"
             )
         return "\n".join(lines)
+
+    # ── Bot control (admin-only, the only two commands that change state) ──────
+    #
+    # /stop turns off every registry toggle except bot_commands, and snapshots
+    # exactly which ones it touched so /restart can undo precisely that — not
+    # "everything", which would also re-enable anything the user had already
+    # switched off on purpose before /stop ran. bot_commands itself is never
+    # touched: turning it off would kill this very handler, and /restart could
+    # then never be heard.
+
+    async def _msg_stop(self, user_id) -> str:
+        from .. import registry
+        svcs = await registry.list_services()
+        to_stop = [s for s in svcs if s.get("enabled") and s["id"] != "bot_commands"]
+        if not to_stop:
+            return "⚪ Already stopped — nothing else was on."
+        await _col("bot_control").update_one(
+            {"_id": "stop_snapshot"},
+            {"$set": {"ids": [s["id"] for s in to_stop],
+                     "stopped_at": time.time(), "stopped_by": user_id}},
+            upsert=True,
+        )
+        for s in to_stop:
+            await registry.set_enabled(s["id"], False)
+        names = ", ".join(esc(s["label"]) for s in to_stop)
+        return (
+            "🔴 <b>Bot stopped</b>\n\n"
+            f"Turned off {len(to_stop)}: {names}\n\n"
+            "Dashboard and this chat stay reachable — /restart brings back "
+            "exactly this, or use Settings."
+        )
+
+    async def _msg_restart(self, user_id) -> str:
+        from .. import registry
+        snap = await _col("bot_control").find_one({"_id": "stop_snapshot"})
+        ids = (snap or {}).get("ids") or []
+        if not ids:
+            return "🟢 Nothing to restart — the bot was not stopped with /stop."
+        by_id = {s["id"]: s for s in await registry.list_services()}
+        restored = []
+        for sid in ids:
+            await registry.set_enabled(sid, True)
+            if sid in by_id:
+                restored.append(by_id[sid]["label"])
+        await _col("bot_control").delete_one({"_id": "stop_snapshot"})
+        names = ", ".join(esc(n) for n in restored)
+        return f"🟢 <b>Bot restarted</b>\n\nTurned back on {len(restored)}: {names}"
