@@ -148,5 +148,32 @@ async def notify_error(service: str, message: str) -> None:
     )
 
 
+# ── RPC endpoint pool ──────────────────────────────────────────────────────────
+#
+# Its own message rather than notify_error, for two reasons: the throttling has
+# to be per chain (EndpointPool owns it, so no cooldown is applied here), and
+# this is the one alert that means a chain has stopped seeing anything. An
+# ERROR-shaped message would sit in the same stream as the 429s that led up to
+# it, which is exactly what happened on 29-07-2026 — three sockets logged
+# individual 429s for hours and nothing said "all of them are down".
+
+async def notify_rpc_exhausted(chain: str, body: str) -> None:
+    """Every endpoint for a chain is refusing. Detection there is down."""
+    await send(
+        "🛑 <b>ALL RPC ENDPOINTS EXHAUSTED</b> — " + html.escape(chain) + "\n"
+        f"<i>{_now()}</i>\n\n"
+        + html.escape(body)
+    )
+
+
+async def notify_rpc_recovered(chain: str, body: str) -> None:
+    """A chain that was fully down has a working endpoint again."""
+    await send(
+        "✅ <b>RPC RECOVERED</b> — " + html.escape(chain) + "\n"
+        f"<i>{_now()}</i>\n\n"
+        + html.escape(body)
+    )
+
+
 def _now() -> str:
     return time.strftime("%d-%m-%Y %H:%M:%S")

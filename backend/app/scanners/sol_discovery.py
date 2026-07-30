@@ -35,6 +35,7 @@ from typing import Callable, Optional
 
 from app import pump_mcap
 from app.scanners import scfg as config
+from app.scanners import wss_pool
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
 
@@ -70,6 +71,22 @@ class SolDiscovery:
         self._seen: BoundedSet = BoundedSet(_SEEN_MAX)
         self._tasks: list[asyncio.Task] = []
         self._running = False
+        self._shared_pool: Optional[wss_pool.EndpointPool] = None
+
+    def _pool(self) -> wss_pool.EndpointPool:
+        """One pool for every launchpad socket.
+
+        They all dial the same provider, so one exhausted quota should be one
+        alert, not one per launchpad. Built lazily rather than in __init__ so it
+        reads the endpoint list at the time discovery actually starts.
+        """
+        if self._shared_pool is None:
+            self._shared_pool = wss_pool.EndpointPool(
+                "SOL-RPC",
+                lambda: (config.SOL_WSS_ENDPOINTS or [config.SOL_RPC_WSS]),
+                chain_label="Solana",
+            )
+        return self._shared_pool
 
     @staticmethod
     def programs() -> list[tuple[str, str]]:
@@ -110,15 +127,23 @@ class SolDiscovery:
 
     async def _watch(self, label: str, program_id: str) -> None:
         import websockets
+
+        # Endpoints come from the same pool type ETH and Robinhood use: rotate on
+        # failure, wrap back to the first, alert when all three refuse. The list
+        # is re-read per attempt, so an endpoint added in Settings is dialled on
+        # the next reconnect — restarting the SOL worker instead would drop the
+        # PumpPortal feed and the market cap watch too.
+        pool = self._pool()
         backoff = 1.0
-        # Endpoints are rotated per reconnect rather than per failure count: if
-        # the current one is refusing or dropping us, the next attempt should
-        # not go back to it first.
-        endpoints = config.SOL_WSS_ENDPOINTS or [config.SOL_RPC_WSS]
         attempt = 0
         while self._running:
-            url = endpoints[attempt % len(endpoints)]
-            attempt += 1
+            url = pool.url_at(attempt)
+            if not url:
+                log.error("[SOL-RPC] no endpoint configured — add one in "
+                          "Settings → RPC Endpoints")
+                await asyncio.sleep(30)
+                continue
+            last_error: Exception | None = None
             try:
                 async with websockets.connect(url, max_size=2 ** 23,
                                               ping_interval=30, ping_timeout=60) as ws:
@@ -129,23 +154,74 @@ class SolDiscovery:
                     }))
                     ack = json.loads(await ws.recv())
                     if "result" not in ack:
-                        log.warning(f"[SOL-RPC] {label} subscription refused: {ack}")
-                    else:
-                        host = url.split("//")[-1].split("/")[0].split("?")[0]
-                        log.info(f"[SOL-RPC] subscribed to {label} "
-                                 f"({program_id[:8]}…) via {host}")
+                        # This used to warn and then fall through into the read
+                        # loop, leaving a connected socket with no subscription
+                        # on it: no mints, no errors, nothing to see. Providers
+                        # rate-limit subscriptions separately from connections,
+                        # so this is how a quota actually shows up here.
+                        raise RuntimeError(
+                            f"logsSubscribe refused: "
+                            f"{(ack.get('error') or ack)!r:.200}")
+                    log.info(f"[SOL-RPC] subscribed to {label} "
+                             f"({program_id[:8]}…) via {wss_pool.host_of(url)}")
                     backoff = 1.0
+                    await self._note_success(pool, url, label)
                     async for raw in ws:
                         await self._handle(label, raw)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                nxt = " — trying the next endpoint" if len(endpoints) > 1 else ""
-                log.warning(f"[SOL-RPC] {label} socket error: {exc}{nxt}")
+                last_error = exc
+
+            if last_error is not None:
+                kind, detail = pool.note_failure(url, last_error)
+                host = wss_pool.host_of(url)
+                if kind in ("limit", "auth"):
+                    # ERROR, not WARNING: warnings never reach Telegram, which is
+                    # why SOL going down was the one outage nobody was told about.
+                    log.error(f"[SOL-RPC] {label} endpoint {host} rejected us "
+                              f"({detail}) — "
+                              f"{'quota/rate limit' if kind == 'limit' else 'bad API key'}")
+                else:
+                    log.warning(f"[SOL-RPC] {label} socket error on {host}: {detail}")
+                await self._maybe_alert(pool, label)
+                # Always move on: a quota rejection will reject us again, and a
+                # dropped socket is no reason to prefer the endpoint that dropped
+                # it. Wrapping is what makes this a loop back to the first.
+                attempt += 1
+                nxt = pool.url_at(attempt)
+                if nxt and nxt != url:
+                    log.warning(f"[SOL-RPC] {label} switching to "
+                                f"{wss_pool.host_of(nxt)} ({kind} on {host})")
+
             if not self._running:
                 return
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60.0)
+
+    @staticmethod
+    async def _note_success(pool, url: str, label: str) -> None:
+        if not pool.note_success(url):
+            return
+        log.warning(f"[SOL-RPC] {label} recovered via {wss_pool.host_of(url)}")
+        try:
+            from .. import notifier
+            await notifier.notify_rpc_recovered("Solana", pool.recovery_text(url))
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"[SOL-RPC] could not send recovery alert: {exc}")
+
+    @staticmethod
+    async def _maybe_alert(pool, label: str) -> None:
+        if not pool.should_alert():
+            return
+        body = pool.alert_text()
+        log.error(f"[SOL-RPC] ALL RPC ENDPOINTS EXHAUSTED ({label}) — "
+                  f"{body.splitlines()[0]}")
+        try:
+            from .. import notifier
+            await notifier.notify_rpc_exhausted("Solana", body)
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"[SOL-RPC] could not send exhaustion alert: {exc}")
 
     async def _handle(self, label: str, raw) -> None:
         try:

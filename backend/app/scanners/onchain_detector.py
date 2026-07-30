@@ -48,6 +48,13 @@ class ChainSpec:
     # Ordered failover list. Empty = just wss_url, which is every existing
     # caller — wss_url stays the primary and is what gets logged.
     wss_endpoints: tuple = ()
+    # Preferred over wss_endpoints: a callable returning the current list, so an
+    # endpoint added in Settings is dialled on the next reconnect. A tuple is a
+    # snapshot taken when the scanner was built and goes stale the moment the
+    # list is edited.
+    wss_source: Optional[Callable[[], list]] = None
+    # Human name for alerts — "Ethereum", not "ETH-XCHAIN".
+    chain_label: str = ""
 
 
 @dataclass
@@ -74,8 +81,11 @@ class OnChainDetector:
     def __init__(self, spec: ChainSpec, on_token: OnTokenCallback) -> None:
         self._spec = spec
         self._on_token = on_token
-        self._provider = WSProvider(list(spec.wss_endpoints) or spec.wss_url,
-                                    name=spec.name)
+        self._provider = WSProvider(
+            spec.wss_source or (list(spec.wss_endpoints) or spec.wss_url),
+            name=spec.name,
+            chain_label=spec.chain_label or spec.name,
+        )
         self._seen: BoundedSet = BoundedSet(_SEEN_MAX)
 
         self._filters: list = []

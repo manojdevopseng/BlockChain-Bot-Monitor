@@ -209,6 +209,13 @@ class Settings(BaseSettings):
     # `logsSubscribe` — Alchemy's Solana endpoint does not ("Method not found",
     # tested), so a second Helius key is the usual choice.
     sol_rpc_wss_fallback: str = ""
+    # Third endpoint per chain. Two is enough to survive one provider going
+    # down; it is not enough when a quota runs out, because the second is
+    # usually being drained by the same traffic and follows within the hour.
+    # With three, rotation has somewhere to go while the first two reset.
+    eth_rpc_wss_fallback2: str = ""
+    rbh_rpc_wss_fallback2: str = ""
+    sol_rpc_wss_fallback2: str = ""
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

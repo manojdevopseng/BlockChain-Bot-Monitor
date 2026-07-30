@@ -67,6 +67,70 @@ EDITABLE: dict[str, dict] = {
                 "match. Applies to newly triggered tokens; ones already being "
                 "watched keep the window they started with.",
     },
+    # ── RPC endpoints ────────────────────────────────────────────────────────
+    # The sockets every on-chain scanner rides. Editable here because the fix
+    # for a rate-limited or dead provider is a new URL, and that fix should not
+    # need an SSH session — the day it is needed is the day the scanners are
+    # already blind. Each carries its provider's API key, so they are masked.
+    #
+    # The fallback slots are the reason this group exists: with one endpoint per
+    # chain, a provider exhausting its quota takes that chain down completely.
+    # Measured on 2026-07-29: Alchemy's quota went and ETH and Robinhood both
+    # stopped inside a minute, and Helius took SOL discovery — and with it the
+    # market cap watch — for eight hours. All three fallbacks were empty.
+    "ETH_RPC_WSS": {
+        "label": "ETH WebSocket #1", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "worker:eth",
+        "help": "Tried first. On a quota rejection rotation goes 1 → 2 → 3 → 1.",
+    },
+    "ETH_RPC_WSS_FALLBACK": {
+        "label": "ETH WebSocket #2", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "worker:eth",
+        "help": "Use a different provider — a second URL on the same account "
+                "shares the same quota and dies with it.",
+    },
+    "ETH_RPC_WSS_FALLBACK2": {
+        "label": "ETH WebSocket #3", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "worker:eth",
+        "help": "Third endpoint. With all three refusing you get one alert and "
+                "rotation keeps going, so it recovers when a quota resets.",
+    },
+    "RBH_RPC_WSS": {
+        "label": "Robinhood WebSocket #1", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "worker:rbh",
+        "help": "Tried first. On a quota rejection rotation goes 1 → 2 → 3 → 1.",
+    },
+    "RBH_RPC_WSS_FALLBACK": {
+        "label": "Robinhood WebSocket #2", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "worker:rbh",
+        "help": "Use a different provider from #1.",
+    },
+    "RBH_RPC_WSS_FALLBACK2": {
+        "label": "Robinhood WebSocket #3", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "worker:rbh",
+        "help": "Third endpoint.",
+    },
+    "SOL_RPC_WSS": {
+        "label": "SOL WebSocket #1", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "live",
+        "help": "Tried first. Carries on-chain launch discovery AND the trade "
+                "stream the market cap watch reads, so losing every SOL endpoint "
+                "also stops anything reaching the Telegram filter. Needs a "
+                "provider that supports logsSubscribe — Alchemy's Solana "
+                "endpoint does not. Applied on the next reconnect, no restart.",
+    },
+    "SOL_RPC_WSS_FALLBACK": {
+        "label": "SOL WebSocket #2", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "live",
+        "help": "Second SOL socket. Must also support logsSubscribe, so a second "
+                "Helius key or QuickNode/Triton — not Alchemy.",
+    },
+    "SOL_RPC_WSS_FALLBACK2": {
+        "label": "SOL WebSocket #3", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints", "applies": "live",
+        "help": "Third SOL socket. Same logsSubscribe requirement.",
+    },
+
     "AI_SCAN_INTERVAL": {
         "label": "AI judging interval (seconds)", "kind": "int", "group": "AI",
         "min": 1, "applies": "live",
@@ -124,6 +188,24 @@ def _coerce(key: str, raw) -> object:
             return False
         raise ValueError(f"{key} must be true or false")
 
+    if kind == "wss":
+        # An empty value clears the slot, which is how a fallback is removed.
+        # A primary may not be emptied — that blinds the chain, and replacing one
+        # is a save, not a clear.
+        if not text:
+            # Any fallback slot may be emptied — matched on "_FALLBACK" anywhere
+            # rather than as a suffix, or _FALLBACK2 would not count as one.
+            if "_FALLBACK" in key:
+                return ""
+            raise ValueError(f"{key} cannot be empty — it is the primary "
+                             f"endpoint; save a replacement URL instead")
+        if not text.startswith(("ws://", "wss://")):
+            raise ValueError(f"{key} must start with wss:// (or ws://) — an "
+                             f"https:// URL is the HTTP endpoint, not the socket")
+        if " " in text:
+            raise ValueError(f"{key} must not contain spaces")
+        return text
+
     if kind in ("number", "int"):
         try:
             value = float(text) if kind == "number" else int(text)
@@ -156,21 +238,47 @@ def _mask(value: str) -> str:
     return f"{value[:4]}{'•' * 6}{value[-4:]}"
 
 
+def _mask_wss(value: str) -> str:
+    """Hide the API key in an endpoint URL but keep the host readable.
+
+    The generic mask would return `wss:••••••bC3d`, which tells you nothing —
+    and the one thing you need to know before adding a fallback is which
+    provider the primary already uses, since a second endpoint on the same
+    account shares the same quota.
+    """
+    if not value:
+        return ""
+    scheme, sep, rest = value.partition("://")
+    if not sep:
+        return _mask(value)
+    host, slash, path = rest.partition("/")
+    if not path:
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}/{_mask(path)}"
+
+
 def read_values() -> dict[str, dict]:
     """Current values for the editable keys (secrets masked)."""
     out: dict[str, dict] = {}
     for key, spec in EDITABLE.items():
         raw = getattr(settings, key.lower(), "")
         text = _as_env_text(raw) if raw not in ("", None) else ""
+        kind = spec.get("kind", "text")
         secret = bool(spec.get("secret"))
+        if not secret:
+            shown = text
+        elif kind == "wss":
+            shown = _mask_wss(text)
+        else:
+            shown = _mask(text)
         out[key] = {
             "label": spec["label"],
-            "kind": spec.get("kind", "text"),
+            "kind": kind,
             "group": spec.get("group", "Other"),
             "help": spec.get("help", ""),
             "applies": spec.get("applies", "live"),
             "secret": secret,
-            "value": _mask(text) if secret else text,
+            "value": shown,
             "set": bool(text),
         }
     return out
@@ -208,6 +316,27 @@ def update(key: str, value) -> object:
     return coerced
 
 
+def _refresh_derived(scfg, key: str) -> None:
+    """Rebuild config values computed from other keys at import time.
+
+    Setting scfg.<KEY> is not enough for the RPC endpoints. `SOL_WSS_ENDPOINTS`
+    and its ETH/RBH twins are lists built once from the primary plus the
+    fallback, and `_FALLBACK` is not itself a scfg attribute — so without this a
+    fallback saved in Settings lands in .env, reports success, and is never
+    dialled. Same for GAS_RPC_WSS, which falls back to the ETH socket.
+    """
+    if not key.startswith(("ETH_RPC_WSS", "RBH_RPC_WSS", "SOL_RPC_WSS")):
+        return
+    chain = key[:3]
+    low = chain.lower()
+    slots = [getattr(settings, f"{low}_rpc_wss", "") or "",
+             getattr(settings, f"{low}_rpc_wss_fallback", "") or "",
+             getattr(settings, f"{low}_rpc_wss_fallback2", "") or ""]
+    setattr(scfg, f"{chain}_WSS_ENDPOINTS", [u for u in slots if u])
+    if chain == "ETH":
+        scfg.GAS_RPC_WSS = settings.gas_rpc_wss or slots[0]
+
+
 def apply_runtime(key: str, value) -> None:
     """Push the new value into the live process so it takes effect immediately.
 
@@ -225,6 +354,7 @@ def apply_runtime(key: str, value) -> None:
         from .scanners import scfg
         if hasattr(scfg, key):
             setattr(scfg, key, coerced)
+        _refresh_derived(scfg, key)
     except Exception as exc:  # noqa: BLE001
         # The value is in .env but the running process did not take it. Saying
         # so matters most for the GMGN fingerprint: the whole point of that

@@ -84,13 +84,22 @@ async def set_credential(key: str, payload: dict = Body(...)):
         restarted = await supervisor.restart_worker(worker)
         note = f"{worker} scanner restarted" if restarted else \
                f"{worker} scanner is not running — will use the new value when it starts"
+    elif envfile.EDITABLE[key].get("kind") == "wss":
+        # The socket already open keeps running; the change is what the next
+        # reconnect dials. Saying "applied live" alone would read as if traffic
+        # had already moved.
+        note = "saved — used on the next reconnect"
 
+    # Never log the value of a secret: the Logs page is visible to every signed
+    # in user, and these URLs carry the provider's API key.
+    shown = envfile.read_values()[key]["value"] if envfile.EDITABLE[key].get("secret") \
+        else coerced
     await db.get_collection("logs").insert_one({
         "level": "INFO", "service": "Settings",
-        "message": f"{key} set to {coerced} from dashboard (.env rewritten, {note})",
+        "message": f"{key} set to {shown} from dashboard (.env rewritten, {note})",
         "ts": time.time(), "dt": datetime.now(timezone.utc),
     })
-    return {"key": key, "value": coerced, "updated": True,
+    return {"key": key, "value": shown, "updated": True,
             "note": note, "items": envfile.read_values()}
 
 

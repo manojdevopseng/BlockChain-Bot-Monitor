@@ -7,6 +7,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/DataTable";
+import { CredentialsManager } from "@/components/CredentialsManager";
 import { cn, fmtNum, fmtEth } from "@/lib/utils";
 
 export default function RpcPage() {
@@ -45,6 +46,10 @@ export default function RpcPage() {
         <CardHeader><CardTitle>Endpoint Status</CardTitle></CardHeader>
         <CardContent><DataTable columns={cols} rows={data?.items ?? []} empty="No RPC endpoints configured in .env" /></CardContent>
       </Card>
+      {/* The URL fields, next to the connection state they actually drive,
+          rather than three cards down the Settings page. One group ("RPC
+          Endpoints") renders as one card, so no multi-column grid here. */}
+      <CredentialsManager only="RPC Endpoints" />
     </div>
   );
 }

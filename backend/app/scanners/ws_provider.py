@@ -1,7 +1,11 @@
 """WebSocket JSON-RPC provider with auto-reconnect.
 
-Ported verbatim from the reference repo (api/ws_provider.py); only the logger
-import changed. One WSProvider = one persistent WS connection to a chain's RPC.
+Ported from the reference repo (api/ws_provider.py). One WSProvider = one
+persistent WS connection to a chain's RPC, over a pool of up to three endpoints.
+
+Endpoint selection lives in `wss_pool.EndpointPool`, shared with SOL discovery:
+rotation on failure, wrapping back to the first, an alert when every endpoint is
+refusing, and a follow-up when one answers again.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from app.scanners.slog import get_logger
+from app.scanners.wss_pool import EndpointPool, host_of
 
 log = get_logger(__name__)
 
@@ -29,15 +34,20 @@ class SubscriptionSpec:
 
 
 class WSProvider:
-    def __init__(self, wss_url: str | list[str], name: str = "") -> None:
-        # One endpoint or several. With more than one, a run of failed connects
-        # rotates to the next — a single provider having a bad hour used to stop
-        # detection outright, with nothing to fall back to.
-        urls = [wss_url] if isinstance(wss_url, str) else list(wss_url)
-        self._urls: list[str] = [u for u in urls if u]
-        self._url_idx = 0
-        self.wss_url = self._urls[0] if self._urls else ""
+    def __init__(self, wss_url: str | list[str] | Callable[[], list[str]],
+                 name: str = "", chain_label: str = "") -> None:
+        # One endpoint, several, or a callable returning the current list. The
+        # callable form is what lets an endpoint added in Settings be dialled on
+        # the next reconnect instead of at the next process restart.
         self.name = name or "ws"
+        if callable(wss_url):
+            source = wss_url
+        else:
+            fixed = [wss_url] if isinstance(wss_url, str) else list(wss_url)
+            fixed = [u for u in fixed if u]
+            source = lambda: fixed  # noqa: E731
+        self._pool = EndpointPool(self.name, source, chain_label or name)
+        self.wss_url = self._pool.current()
         self._ws: Optional[Any] = None
         self._running = False
 
@@ -79,16 +89,6 @@ class WSProvider:
     async def rpc(self, method: str, params: list, timeout: float = 6.0):
         return await self._rpc(method, params, timeout=timeout)
 
-    def _rotate(self) -> bool:
-        """Move to the next endpoint. Returns True if there was one to move to."""
-        if len(self._urls) < 2:
-            return False
-        self._url_idx = (self._url_idx + 1) % len(self._urls)
-        self.wss_url = self._urls[self._url_idx]
-        log.warning(f"[{self.name}] switching to RPC endpoint "
-                    f"#{self._url_idx + 1}/{len(self._urls)}")
-        return True
-
     async def run(self) -> None:
         self._running = True
         backoff = 1.0
@@ -97,11 +97,22 @@ class WSProvider:
 
         while self._running:
             attempt += 1
+            url = self._pool.current()
+            if not url:
+                log.error(f"[{self.name}] no WebSocket endpoint configured — "
+                          f"add one in Settings → RPC Endpoints")
+                await asyncio.sleep(30)
+                continue
+            self.wss_url = url
+            # `last_error` carries the reason out of the try block so the
+            # rotation decision below can act on what actually happened rather
+            # than only on how many times it has happened.
+            last_error: Optional[BaseException] = None
             try:
                 log.info(f"[{self.name}] WebSocket connecting (attempt {attempt}, "
-                         f"endpoint {self._url_idx + 1}/{max(1, len(self._urls))})…")
+                         f"endpoint {self._pool.position()} — {host_of(url)})…")
                 async with websockets.connect(
-                    self.wss_url,
+                    url,
                     ping_interval=30,
                     ping_timeout=60,
                     close_timeout=10,
@@ -112,17 +123,32 @@ class WSProvider:
                     fails = 0
                     self.connected = True
                     self._down_since = None
-                    log.info(f"[{self.name}] WebSocket connected ✓")
+                    log.info(f"[{self.name}] WebSocket connected ✓ ({host_of(url)})")
+                    await self._note_success(url)
 
                     listen_task = asyncio.create_task(self._listen(ws))
                     await asyncio.sleep(0)
-                    await self._replay_persistent_specs()
+                    ok = await self._replay_persistent_specs()
 
                     for hook in self._on_connect:
                         try:
                             await hook()
                         except Exception as exc:
-                            log.debug(f"[{self.name}] on_connect hook error: {exc}")
+                            # Was log.debug, i.e. invisible. A hook that fails
+                            # here leaves the socket connected but not doing
+                            # whatever the hook set up.
+                            log.error(f"[{self.name}] on_connect hook failed: "
+                                      f"{type(exc).__name__}: {exc}")
+
+                    if not ok:
+                        # Connected, but a subscription we need was refused —
+                        # commonly a per-subscription rate limit. Left alone the
+                        # socket sits here forever looking healthy and receiving
+                        # nothing, which is the worst possible failure: silent.
+                        # Drop it so the loop below rotates and retries.
+                        listen_task.cancel()
+                        raise RuntimeError("subscription replay failed — "
+                                           "reconnecting on another endpoint")
 
                     await listen_task
 
@@ -133,11 +159,15 @@ class WSProvider:
                 log.info(f"[{self.name}] WebSocket stopped")
                 raise
             except ConnectionClosed as exc:
-                log.warning(f"[{self.name}] WebSocket closed: {exc}")
+                last_error = exc
+                log.warning(f"[{self.name}] WebSocket closed ({host_of(url)}): {exc}")
             except OSError as exc:
-                log.warning(f"[{self.name}] WebSocket OS error: {exc}")
+                last_error = exc
+                log.warning(f"[{self.name}] WebSocket OS error ({host_of(url)}): {exc}")
             except Exception as exc:
-                log.error(f"[{self.name}] WebSocket unexpected error: {exc}")
+                last_error = exc
+                log.error(f"[{self.name}] WebSocket error ({host_of(url)}): "
+                          f"{type(exc).__name__}: {exc}")
             finally:
                 self._ws = None
                 if self.connected:
@@ -152,17 +182,52 @@ class WSProvider:
             if not self._running:
                 break
 
-            # Two failures in a row on one endpoint is enough to suspect the
-            # endpoint rather than the network, so try the next one and start
-            # its backoff fresh.
             fails += 1
-            if fails >= 2 and self._rotate():
-                fails = 0
-                backoff = 1.0
+            kind = "network"
+            if last_error is not None:
+                kind, detail = self._pool.note_failure(url, last_error)
+                if kind in ("limit", "auth"):
+                    log.error(f"[{self.name}] endpoint {host_of(url)} rejected us "
+                              f"({detail}) — "
+                              f"{'quota/rate limit' if kind == 'limit' else 'bad API key'}")
+                await self._maybe_alert()
+
+            # A quota rejection rotates immediately: the same endpoint answering
+            # 429 will answer 429 again, so a second attempt only delays the
+            # switch. Network errors keep the old two-strike rule, because there
+            # the endpoint is probably fine.
+            if kind in ("limit", "auth") or fails >= 2:
+                if self._pool.rotate(f"{kind} on {host_of(url)}"):
+                    fails = 0
+                    backoff = 1.0
 
             log.info(f"[{self.name}] Reconnecting in {backoff:.1f}s…")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60.0)
+
+    async def _note_success(self, url: str) -> None:
+        """Clear this endpoint's failure mark; announce the end of an outage."""
+        if not self._pool.note_success(url):
+            return
+        log.warning(f"[{self.name}] recovered via {host_of(url)}")
+        try:
+            from .. import notifier
+            await notifier.notify_rpc_recovered(self._pool.label,
+                                                self._pool.recovery_text(url))
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"[{self.name}] could not send recovery alert: {exc}")
+
+    async def _maybe_alert(self) -> None:
+        """Alert when the whole pool is refusing. Throttled by the pool."""
+        if not self._pool.should_alert():
+            return
+        body = self._pool.alert_text()
+        log.error(f"[{self.name}] ALL RPC ENDPOINTS EXHAUSTED — {body.splitlines()[0]}")
+        try:
+            from .. import notifier
+            await notifier.notify_rpc_exhausted(self._pool.label, body)
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"[{self.name}] could not send exhaustion alert: {exc}")
 
     def stop(self) -> None:
         self._running = False
@@ -204,18 +269,31 @@ class WSProvider:
         await self._ws.send(payload)
         return await asyncio.wait_for(fut, timeout=timeout)
 
-    async def _replay_persistent_specs(self) -> None:
+    async def _replay_persistent_specs(self) -> bool:
+        """Re-subscribe everything on a fresh socket.
+
+        Returns False if any subscription was refused. The caller drops the
+        connection on that: a socket with a missing subscription reports
+        `connected` and delivers nothing, so the chain goes blind while every
+        health check says it is fine.
+        """
+        ok = True
         for spec in self._persistent_specs:
             try:
                 spec.sub_id = await self.subscribe(
                     spec.params, spec.callback, label=spec.label
                 )
             except Exception as exc:
-                log.error(f"[{self.name}] Failed to replay subscription [{spec.label}]: {exc}")
+                ok = False
+                log.error(f"[{self.name}] subscription [{spec.label}] refused: "
+                          f"{type(exc).__name__}: {exc}")
+        return ok
 
-    @staticmethod
-    async def _safe_call(cb: Callable, arg: Any) -> None:
+    async def _safe_call(self, cb: Callable, arg: Any) -> None:
         try:
             await cb(arg)
         except Exception as exc:
-            log.error(f"Subscription callback error: {exc}")
+            # Named, and with the type: "Subscription callback error: 'symbol'"
+            # with no chain and no traceback type was not enough to act on.
+            log.error(f"[{self.name}] subscription callback error: "
+                      f"{type(exc).__name__}: {exc}")

@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Bot, Brain, Link2, Radio, Plus, X, Tag, KeyRound, Check, Loader2, Search, Hash,
-  SlidersHorizontal,
-} from "lucide-react";
+import { Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2 } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -15,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { CredentialsManager } from "@/components/CredentialsManager";
 
 type Svc = { id: string; label: string; enabled: boolean; category: string };
 
@@ -300,144 +298,6 @@ function ChatIdFinder() {
   );
 }
 
-const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
-  "GMGN Credentials": {
-    icon: KeyRound,
-    blurb:
-      "GMGN ka fingerprint expire ho jaye to yahin naya paste karo — .env me purana " +
-      "replace hoke save hoga aur turant apply bhi ho jayega (restart nahi chahiye).",
-  },
-  "AI": {
-    icon: Brain,
-    blurb:
-      "Agent ke numbers. Ye .env me likhe jate hain aur turant apply hote hain — " +
-      "restart nahi chahiye, aur server restart hone par bhi bane rehte hain.",
-  },
-  "Detection Tuning": {
-    icon: SlidersHorizontal,
-    blurb:
-      "Detection thresholds. Ye bhi .env me likhe jate hain, to server restart hone " +
-      "par bhi bane rehte hain.",
-  },
-};
-
-function EnvField({ envKey, meta }: { envKey: string; meta: any }) {
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-
-  async function save(value: string | boolean) {
-    setBusy(true);
-    setError("");
-    try {
-      await apiSend(`/api/settings/credentials/${envKey}`, "PUT", { value });
-      setDraft("");
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      mutate("/api/settings/credentials");
-    } catch (e: any) {
-      setError(String(e?.message || e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // A switch writes on click; text/number fields need an explicit Save so a
-  // half-typed number is never applied.
-  if (meta.kind === "bool") {
-    return (
-      <div className="rounded-lg border border-border-soft px-3 py-2.5">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-text">{meta.label}</span>
-          <Switch
-            checked={meta.value === "true"}
-            disabled={busy}
-            onCheckedChange={(v) => save(v)}
-          />
-        </div>
-        {meta.help && <p className="mt-1 text-[11px] text-text-dim">{meta.help}</p>}
-        {error && <p className="mt-1 text-[11px] text-accent-red">{error}</p>}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-xs text-text-muted">{meta.label}</span>
-        <Badge variant={meta.set ? "green" : "gray"}>{meta.set ? "set" : "empty"}</Badge>
-      </div>
-      {meta.set && (
-        <div className="mb-1 truncate font-mono text-[11px] text-text-dim">
-          current: {meta.value || "—"}
-        </div>
-      )}
-      <div className="flex gap-2">
-        <Input
-          value={draft}
-          inputMode={meta.kind === "text" ? undefined : "decimal"}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={meta.kind === "text" ? `New ${meta.label}…` : meta.value || "value"}
-          onKeyDown={(e) => e.key === "Enter" && draft.trim() && save(draft.trim())}
-          className="font-mono text-xs"
-        />
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={busy || !draft.trim()}
-          onClick={() => save(draft.trim())}
-        >
-          {busy ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : "Save"}
-        </Button>
-      </div>
-      {meta.help && <p className="mt-1 text-[11px] text-text-dim">{meta.help}</p>}
-      {error && <p className="mt-1 text-[11px] text-accent-red">{error}</p>}
-    </div>
-  );
-}
-
-// One card per group of .env fields. `only` and `exclude` let a group be placed
-// where it belongs on the page — the AI numbers sit with the AI switches, not
-// in a column of GMGN credentials — without a second copy of this component.
-function CredentialsManager({ only, exclude }: { only?: string; exclude?: string }) {
-  const { data } = useApi<any>("/api/settings/credentials");
-  const items: Record<string, any> = data?.items ?? {};
-
-  const groups: Record<string, [string, any][]> = {};
-  for (const [key, meta] of Object.entries(items)) {
-    const group = meta.group ?? "Other";
-    if (only && group !== only) continue;
-    if (exclude && group === exclude) continue;
-    (groups[group] ||= []).push([key, meta]);
-  }
-
-  return (
-    <>
-      {Object.entries(groups).map(([group, fields]) => {
-        const Icon = GROUP_META[group]?.icon ?? KeyRound;
-        return (
-          <Card key={group}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Icon size={14} /> {group}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {GROUP_META[group]?.blurb && (
-                <p className="mb-3 text-xs text-text-dim">{GROUP_META[group].blurb}</p>
-              )}
-              <div className="space-y-3">
-                {fields.map(([key, meta]) => (
-                  <EnvField key={key} envKey={key} meta={meta} />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })}
-    </>
-  );
-}
-
 export default function SettingsPage() {
   const { data } = useApi<any>("/api/settings/services");
 
@@ -459,9 +319,11 @@ export default function SettingsPage() {
         <div className="space-y-5">
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
           <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
+          {/* The endpoint URLs themselves live on the RPC Monitor page, next to
+              the live connection status they actually affect. */}
           <KeywordManager />
           <ChatIdFinder />
-          <CredentialsManager exclude="AI" />
+          <CredentialsManager exclude={["AI", "RPC Endpoints"]} />
         </div>
       </div>
     </div>

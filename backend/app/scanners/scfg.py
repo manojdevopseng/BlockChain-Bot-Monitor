@@ -53,7 +53,8 @@ SOL_RPC_WSS       = settings.sol_rpc_wss
 # provider having a bad hour left mint discovery blind with nothing to fall
 # back on — the same reason ETH and RBH carry a second endpoint.
 SOL_WSS_ENDPOINTS = [u for u in (settings.sol_rpc_wss,
-                                 settings.sol_rpc_wss_fallback) if u]
+                                 settings.sol_rpc_wss_fallback,
+                                 settings.sol_rpc_wss_fallback2) if u]
 SOL_SCAN_INTERVAL = settings.sol_scan_interval
 SOL_MIN_FEES      = settings.sol_min_fees
 SOL_MIN_MCAP      = settings.sol_min_mcap
@@ -71,7 +72,8 @@ CROSS_CHAIN_CHAT_ID = settings.cross_chain_chat_id
 ETH_RPC_WSS        = settings.eth_rpc_wss
 # Ordered endpoint list the WS provider rotates through.
 ETH_WSS_ENDPOINTS  = [u for u in (settings.eth_rpc_wss,
-                                  settings.eth_rpc_wss_fallback) if u]
+                                  settings.eth_rpc_wss_fallback,
+                                  settings.eth_rpc_wss_fallback2) if u]
 ETH_RPC_HTTP       = settings.eth_rpc_http
 ETH_V2_FACTORY     = settings.eth_v2_factory
 ETH_V3_FACTORY     = settings.eth_v3_factory
@@ -81,7 +83,8 @@ ETH_WETH           = settings.eth_weth
 # ── Robinhood Chain on-chain (SOL→Robinhood) — from .env ────────
 RBH_RPC_WSS        = settings.rbh_rpc_wss
 RBH_WSS_ENDPOINTS  = [u for u in (settings.rbh_rpc_wss,
-                                  settings.rbh_rpc_wss_fallback) if u]
+                                  settings.rbh_rpc_wss_fallback,
+                                  settings.rbh_rpc_wss_fallback2) if u]
 RBH_RPC_HTTP       = settings.rbh_rpc_http
 RBH_V2_FACTORY     = settings.rbh_v2_factory
 RBH_V3_FACTORY     = settings.rbh_v3_factory
