@@ -369,38 +369,45 @@ def _match_q(doc: dict, q: str) -> bool:
 
 @router.get("/detections")
 async def detections(
-    chain: str = Query("eth", pattern="^(eth|rbh|sol)$"),
+    chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$"),
     q: str | None = None,
     multi: bool = False,              # "Multi 2+" filter — count >= 2 groups
     limit: int = Query(100, le=500),
 ):
-    flt: dict = {"chain": chain}
+    # "all" is the merged view: one section, one filter row. Leaving the chain
+    # key out of the query is what makes it merged — every other filter still
+    # applies exactly as it does to a single chain.
+    flt: dict = {} if chain == "all" else {"chain": chain}
     if multi:
         flt["count"] = {"$gte": 2}
-    docs = await db.get_collection("premium_detections").find(flt).to_list(1000)
+    docs = await db.get_collection("premium_detections").find(flt).to_list(2000)
     docs.sort(key=lambda d: d.get("ts", 0), reverse=True)
     if q:
         docs = [d for d in docs if _match_q(d, q)]
     docs = docs[:limit]
     for d in docs:
-        d["gmgn_url"] = _gmgn_url(chain, d.get("address", ""))
+        # Per row, not per request: in the merged view a Robinhood token given
+        # an ETH GMGN link would open the wrong chain's page.
+        d["gmgn_url"] = _gmgn_url(d.get("chain") or chain, d.get("address", ""))
     return {"total": len(docs), "items": clean_list(docs)}
 
 
 @router.get("/detections/stats")
-async def detections_stats(chain: str = Query("eth", pattern="^(eth|rbh|sol)$")):
+async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$")):
     col = db.get_collection("premium_detections")
+    base: dict = {} if chain == "all" else {"chain": chain}
     return {
         "chain": chain,
-        "total": await col.count_documents({"chain": chain}),
-        "multi": await col.count_documents({"chain": chain, "count": {"$gte": 2}}),
+        "total": await col.count_documents(base),
+        "multi": await col.count_documents({**base, "count": {"$gte": 2}}),
     }
 
 
 @router.get("/detections/dates")
-async def detection_dates(chain: str = Query("eth", pattern="^(eth|rbh|sol)$")):
+async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$")):
     """Archived dates (History dropdown) for a chain, newest first."""
-    docs = await db.get_collection("premium_archive").find({"chain": chain}).to_list(400)
+    flt: dict = {} if chain == "all" else {"chain": chain}
+    docs = await db.get_collection("premium_archive").find(flt).to_list(1200)
     days = {d.get("date") for d in docs if d.get("date")}
     # Parse before sorting. DD-MM-YYYY sorted as text puts 31-01 after 01-02,
     # so the dropdown ran out of order across every month boundary.
@@ -409,7 +416,7 @@ async def detection_dates(chain: str = Query("eth", pattern="^(eth|rbh|sol)$")):
 
 @router.get("/detections/history")
 async def detection_history(
-    chain: str = Query("eth", pattern="^(eth|rbh|sol)$"),
+    chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$"),
     date: str = "",
     q: str | None = None,
     multi: bool = False,
@@ -420,12 +427,21 @@ async def detection_history(
     view: the controls stay on screen when a date is picked, so a search that
     quietly did nothing looked like a day with no matches.
     """
-    doc = await db.get_collection("premium_archive").find_one({"chain": chain, "date": date})
-    items = (doc or {}).get("items", [])
+    # One archive doc per chain per day, so "all" merges that day's three docs
+    # and re-sorts — otherwise the ETH rows would all sit above the SOL ones.
+    col = db.get_collection("premium_archive")
+    if chain == "all":
+        docs = await col.find({"date": date}).to_list(10)
+        items = [dict(i, chain=i.get("chain") or d.get("chain"))
+                 for d in docs for i in (d.get("items") or [])]
+        items.sort(key=lambda d: d.get("ts", 0), reverse=True)
+    else:
+        doc = await col.find_one({"chain": chain, "date": date})
+        items = (doc or {}).get("items", [])
     if multi:
         items = [d for d in items if int(d.get("count") or 0) >= 2]
     if q:
         items = [d for d in items if _match_q(d, q)]
     for d in items:
-        d["gmgn_url"] = _gmgn_url(chain, d.get("address", ""))
+        d["gmgn_url"] = _gmgn_url(d.get("chain") or chain, d.get("address", ""))
     return {"date": date, "total": len(items), "items": items}

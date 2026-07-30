@@ -58,3 +58,37 @@ export function HistorySelect({
     </div>
   );
 }
+
+/** A row of mutually-exclusive filter buttons for a section header.
+ *
+ * Both Detections sections merged three (and two) chain-specific panels into
+ * one, and this is how the chain is chosen. Deliberately buttons rather than a
+ * dropdown: there are only three or four options and the current one should be
+ * readable without opening anything.
+ */
+export function FilterTabs<T extends string>({
+  value, onChange, options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: readonly { id: T; label: string }[];
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-soft p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          className={
+            "rounded-md px-2.5 py-1 text-xs transition-colors " +
+            (value === o.id
+              ? "bg-brand text-white"
+              : "text-text-muted hover:bg-bg-hover hover:text-text")
+          }
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}

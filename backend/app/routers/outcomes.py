@@ -125,18 +125,22 @@ detections_csv = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
 
 @detections_csv.get("/detections/export.csv")
-async def export_detections(chain: str = Query("eth", pattern="^(eth|rbh|sol)$")):
-    docs = await db.get_collection("premium_detections").find({"chain": chain}).to_list(5000)
+async def export_detections(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$")):
+    flt: dict = {} if chain == "all" else {"chain": chain}
+    docs = await db.get_collection("premium_detections").find(flt).to_list(5000)
     docs.sort(key=lambda d: d.get("ts", 0), reverse=True)
     rows = [{
         "date": ist_date_str(d.get("ts", 0)),
         "time_utc": time.strftime("%H:%M:%S", time.gmtime(d.get("ts", 0))),
+        # Carried in the merged export for the same reason the table gains a
+        # column: without it the rows are three chains in one file, unlabelled.
+        "chain": d.get("chain", ""),
         "symbol": d.get("symbol"), "name": d.get("name"),
         "address": d.get("address"),
         "groups": ", ".join(d.get("groups") or []),
         "group_count": d.get("count", 1),
         "keyword": d.get("keyword") or "",
     } for d in docs]
-    cols = ["date", "time_utc", "symbol", "name", "address",
+    cols = ["date", "time_utc", "chain", "symbol", "name", "address",
             "groups", "group_count", "keyword"]
     return _csv(rows, cols, f"detections-{chain}-{ist_date_str(time.time())}.csv")

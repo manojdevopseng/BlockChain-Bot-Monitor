@@ -23,6 +23,14 @@ export type Detection = {
   count?: number;
   ts?: number;
   gmgn_url?: string;
+  chain?: string;
+};
+
+// Shown only in the merged "All" view. With one section per chain the column
+// was pure repetition of the section title; merged, it is the only thing that
+// says which chain a row came from.
+const CHAIN_LABEL: Record<string, string> = {
+  eth: "Ethereum", rbh: "Robinhood", sol: "Solana",
 };
 
 // Records written before group_entries existed only carry plain names; show
@@ -33,13 +41,16 @@ function groupEntries(d: Detection): GroupEntry[] {
 }
 
 export function DetectionTable(
-  { items, maxHeight }: { items: Detection[]; maxHeight?: number | false },
+  { items, maxHeight, showChain = false }: {
+    items: Detection[]; maxHeight?: number | false; showChain?: boolean;
+  },
 ) {
   return (
     <TableScroll maxHeight={maxHeight}>
       <table className="w-full min-w-[900px] text-sm">
         <thead>
           <tr className={`${STICKY_HEAD} border-b border-border`}>
+            {showChain && <th className="px-3 py-2.5 font-medium">Chain</th>}
             <th className="px-3 py-2.5 font-medium">Symbol</th>
             <th className="px-3 py-2.5 font-medium">Name</th>
             <th className="px-3 py-2.5 font-medium">Address</th>
@@ -52,10 +63,15 @@ export function DetectionTable(
         </thead>
         <tbody>
           {items.length === 0 ? (
-            <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">No detections yet</td></tr>
+            <tr><td colSpan={showChain ? 9 : 8} className="px-3 py-10 text-center text-text-dim">No detections yet</td></tr>
           ) : (
             items.map((d, i) => (
               <tr key={rowKey(d, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
+                {showChain && (
+                  <td className="px-3 py-3">
+                    <Badge variant="purple">{CHAIN_LABEL[d.chain || ""] || d.chain || "?"}</Badge>
+                  </td>
+                )}
                 {/* Symbol */}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1.5">

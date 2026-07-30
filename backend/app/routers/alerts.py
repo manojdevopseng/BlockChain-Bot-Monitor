@@ -162,34 +162,40 @@ def _match_cc(doc: dict, q: str) -> bool:
 
 @router.get("/crosschain")
 async def crosschain(
-    flow: str = Query("eth", pattern="^(eth|rbh)$"),
+    flow: str = Query("eth", pattern="^(all|eth|rbh)$"),
     q: str | None = None,
     date: str | None = None,        # DD-MM-YYYY (IST) — History filter
     limit: int = Query(100, le=500),
 ):
     """SOL→ETH / SOL→RBH ticker matches fired by the cross-chain scanners."""
-    chain = _FLOW_CHAIN[flow]
-    docs = await db.get_collection("alerts").find(
-        {"type": "Cross-Chain Match", "chain": chain}
-    ).to_list(1000)
+    # "all" merges both flows into one section. SOL is always the source side,
+    # so the only thing that varies is the destination chain — which is exactly
+    # what the flow filter selects.
+    flt: dict = {"type": "Cross-Chain Match"}
+    if flow != "all":
+        flt["chain"] = _FLOW_CHAIN[flow]
+    docs = await db.get_collection("alerts").find(flt).to_list(1000)
     docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
     if date:
         docs = [d for d in docs if ist_date_str(d.get("created_at", 0)) == date]
     if q:
         docs = [d for d in docs if _match_cc(d, q)]
     docs = docs[:limit]
-    slug = _FLOW_SLUG[flow]
     for d in docs:
+        # Per row: in the merged view the destination chain differs row to row,
+        # so a single slug would send half the links to the wrong chain's page.
+        slug = _FLOW_SLUG.get(flow) or d.get("chain") or "eth"
         d["gmgn_url"] = f"https://gmgn.ai/{slug}/token/{d.get('token_address', '')}"
         d["sol_gmgn_url"] = f"https://gmgn.ai/sol/token/{d.get('sol_address', '')}"
     return {"flow": flow, "total": len(docs), "items": clean_list(docs)}
 
 
 @router.get("/crosschain/dates")
-async def crosschain_dates(flow: str = Query("eth", pattern="^(eth|rbh)$")):
+async def crosschain_dates(flow: str = Query("eth", pattern="^(all|eth|rbh)$")):
     """Days (IST, newest first) that have cross-chain matches — History dropdown."""
-    docs = await db.get_collection("alerts").find(
-        {"type": "Cross-Chain Match", "chain": _FLOW_CHAIN[flow]}
-    ).to_list(2000)
+    flt: dict = {"type": "Cross-Chain Match"}
+    if flow != "all":
+        flt["chain"] = _FLOW_CHAIN[flow]
+    docs = await db.get_collection("alerts").find(flt).to_list(2000)
     days = {ist_date_str(d.get("created_at", 0)) for d in docs if d.get("created_at")}
     return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}

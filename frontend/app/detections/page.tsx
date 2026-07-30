@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { DetectionTable } from "@/components/features/DetectionTable";
 import { CrossChainTable } from "@/components/features/CrossChainTable";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
-import { HistorySelect, SearchBox } from "@/components/SectionFilters";
+import { FilterTabs, HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { DownloadCsv } from "@/components/features/Performance";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
@@ -20,7 +20,20 @@ import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
 
 /* ── 1-3: premium caller detection panels (RBH / ETH / SOL) ─────────────── */
 
-function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title: string }) {
+type PremiumChain = "all" | "rbh" | "eth" | "sol";
+
+const PREMIUM_TABS = [
+  { id: "all", label: "All" },
+  { id: "rbh", label: "Robinhood" },
+  { id: "eth", label: "Ethereum" },
+  { id: "sol", label: "Solana" },
+] as const satisfies readonly { id: PremiumChain; label: string }[];
+
+// One section for all three chains, filtered rather than three sections that
+// were identical apart from which chain they asked for. The chain moves into a
+// column so a merged row still says where it came from.
+function PremiumSection() {
+  const [chain, setChain] = useState<PremiumChain>("all");
   const [q, setQ] = useState("");
   const [multi, setMulti] = useState(false);
   const [date, setDate] = useState("");
@@ -42,10 +55,11 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
 
   return (
     <CollapsibleSection
-      id={`premium-${chain}`}
-      title={title}
+      id="premium-detections"
+      title="Addresses Detected From Premium Callers"
       count={data?.total ?? 0}
       controls={<>
+        <FilterTabs value={chain} onChange={setChain} options={PREMIUM_TABS} />
         <SearchBox value={q} onChange={setQ} placeholder="symbol / name / address / group" />
         <Button size="sm" variant={multi ? "primary" : "outline"} onClick={() => setMulti((v) => !v)}
           title="Only tokens called by 2+ groups">
@@ -56,7 +70,7 @@ function PremiumSection({ chain, title }: { chain: "eth" | "rbh" | "sol"; title:
           filename={`detections-${chain}.csv`} />
       </>}
     >
-      <DetectionTable items={data?.items ?? []} />
+      <DetectionTable items={data?.items ?? []} showChain={chain === "all"} />
     </CollapsibleSection>
   );
 }
@@ -168,7 +182,18 @@ function GasSection() {
 
 /* ── 5-6: cross-chain matches (SOL→RBH, SOL→ETH) ────────────────────────── */
 
-function CrossChainSection({ flow, title }: { flow: "eth" | "rbh"; title: string }) {
+type Flow = "all" | "rbh" | "eth";
+
+const FLOW_TABS = [
+  { id: "all", label: "All" },
+  { id: "rbh", label: "SOL to RBH" },
+  { id: "eth", label: "SOL to ETH" },
+] as const satisfies readonly { id: Flow; label: string }[];
+
+// SOL is always the source side of a cross-chain match, so the only thing the
+// filter picks is the destination chain — hence three tabs, not four.
+function CrossChainSection() {
+  const [flow, setFlow] = useState<Flow>("all");
   const [q, setQ] = useState("");
   const [date, setDate] = useState("");
   const { data: datesData } = useApi<any>(`/api/alerts/crosschain/dates?flow=${flow}`);
@@ -179,16 +204,17 @@ function CrossChainSection({ flow, title }: { flow: "eth" | "rbh"; title: string
 
   return (
     <CollapsibleSection
-      id={`xchain-${flow}`}
-      title={title}
+      id="xchain"
+      title="Cross-Chain Matches"
       icon={<ArrowRightLeft size={14} />}
       count={data?.total ?? 0}
       controls={<>
+        <FilterTabs value={flow} onChange={setFlow} options={FLOW_TABS} />
         <SearchBox value={q} onChange={setQ} placeholder="symbol / address / dex" />
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
       </>}
     >
-      <CrossChainTable items={data?.items ?? []} />
+      <CrossChainTable items={data?.items ?? []} showFlow={flow === "all"} />
     </CollapsibleSection>
   );
 }
@@ -202,12 +228,9 @@ export default function DetectionsPage() {
         title="Detections"
         subtitle="Premium-caller addresses, ETH gas fees and cross-chain matches"
       />
-      <PremiumSection chain="rbh" title="Robinhood Address Detected From Premium Caller" />
-      <PremiumSection chain="eth" title="ETH Address Detected From Premium Caller" />
-      <PremiumSection chain="sol" title="SOL Address Detected From Premium Caller" />
+      <PremiumSection />
       <GasSection />
-      <CrossChainSection flow="rbh" title="SOL to RBH — Cross-Chain Matches" />
-      <CrossChainSection flow="eth" title="SOL to ETH — Cross-Chain Matches" />
+      <CrossChainSection />
     </div>
   );
 }

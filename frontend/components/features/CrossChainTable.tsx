@@ -15,6 +15,14 @@ export type CrossChainMatch = {
   created_at?: number;
   gmgn_url?: string;
   sol_gmgn_url?: string;
+  chain?: string;
+};
+
+// Shown only in the merged "All" view. SOL is always the source, so what
+// varies between rows is the destination chain — and merged, nothing else on
+// the row says which one it was.
+const FLOW_LABEL: Record<string, string> = {
+  eth: "SOL → ETH", robinhood: "SOL → RBH", rbh: "SOL → RBH",
 };
 
 // SOL→ETH / SOL→RBH ticker matches: the SOL side and the destination-chain side
@@ -24,13 +32,16 @@ export type CrossChainMatch = {
 // path reads a receipt, so the value was always "—". High-gas buys are their own
 // feature with their own section.
 export function CrossChainTable(
-  { items, maxHeight }: { items: CrossChainMatch[]; maxHeight?: number | false },
+  { items, maxHeight, showFlow = false }: {
+    items: CrossChainMatch[]; maxHeight?: number | false; showFlow?: boolean;
+  },
 ) {
   return (
     <TableScroll maxHeight={maxHeight}>
       <table className="w-full min-w-[880px] text-sm">
         <thead>
           <tr className={`${STICKY_HEAD} border-b border-border`}>
+            {showFlow && <th className="px-3 py-2.5 font-medium">Flow</th>}
             <th className="px-3 py-2.5 font-medium">Symbol</th>
             <th className="px-3 py-2.5 font-medium">SOL Address</th>
             <th className="px-3 py-2.5 font-medium">Matched Address</th>
@@ -43,13 +54,18 @@ export function CrossChainTable(
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={7} className="px-3 py-10 text-center text-text-dim">
+              <td colSpan={showFlow ? 8 : 7} className="px-3 py-10 text-center text-text-dim">
                 No cross-chain matches yet
               </td>
             </tr>
           ) : (
             items.map((r, i) => (
               <tr key={rowKey(r, i)} className="border-b border-border-soft hover:bg-bg-hover/40">
+                {showFlow && (
+                  <td className="px-3 py-3">
+                    <Badge variant="purple">{FLOW_LABEL[r.chain || ""] || r.chain || "?"}</Badge>
+                  </td>
+                )}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1.5">
                     <span className="font-semibold text-text">{r.token_symbol || "?"}</span>
