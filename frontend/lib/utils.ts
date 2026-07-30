@@ -87,7 +87,7 @@ export function rowKey(row: any, i: number): string {
 /** Badge colour for a component/endpoint status string.
  *
  * The backend emits a small fixed vocabulary — connected, running, configured,
- * ok, stopped, disabled, not configured, quiet, unknown — and three pages were
+ * standby, ok, stopped, disabled, not configured, quiet, unknown — and three pages were
  * each mapping it to colours with their own ternary chain. They disagreed:
  * chains/page.tsx sent "configured" to red (its fall-through) while
  * rpc/page.tsx sent it to blue, for the same word from the same API.
@@ -107,6 +107,11 @@ export function statusTone(status: string | undefined | null): StatusTone {
       return "green";
     case "configured":
       return "blue";
+    // A pool endpoint that is set up and healthy but not the one currently in
+    // use. Not a fault, so not red — the default branch would have made every
+    // standby slot look like a failure.
+    case "standby":
+      return "gray";
     case "not configured":
       return "amber";
     case "disabled":

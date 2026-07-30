@@ -33,41 +33,68 @@ def _mask(url: str) -> str:
 
 
 async def _build() -> list[dict]:
-    """Endpoints actually configured in .env — no invented latency or uptime.
+    """Every configured endpoint slot, and what we truly know about each.
 
-    `status` reflects what we truly know: whether the endpoint is configured,
-    whether its toggle is on, and (for WSS) whether that socket actually has a
-    live connection right now — not just whether its reconnect-loop task is
-    still alive. That task retries forever on a rejection, so a chain stuck in
-    an hours-long 429 loop used to read "connected" the whole time.
+    One row per slot, not per chain: the pools carry up to three endpoints and
+    a fallback that exists but is never shown is a fallback nobody trusts. The
+    status vocabulary is deliberately small and honest —
+
+        connected       this WSS is the one the socket is on, and it is up
+        standby         configured, healthy as far as we know, not in use
+        stopped         this chain's socket has no live connection at all
+        configured      an HTTP endpoint: there is no persistent connection to
+                        check, so "set" is the most that can be claimed
+        disabled        the chain's RPC toggle is off
+        not configured  the slot is empty
+
+    Nothing here invents latency or uptime.
     """
     enabled = await registry.enabled_map()
 
-    rows = [
-        ("Ethereum", "eth", "rpc_eth", "eth", scfg.ETH_RPC_HTTP, scfg.ETH_RPC_WSS),
-        ("Robinhood Chain", "rbh", "rpc_rbh", "rbh", scfg.RBH_RPC_HTTP, scfg.RBH_RPC_WSS),
-        ("Solana", "sol", "rpc_sol", "sol", scfg.SOL_RPC_HTTP, scfg.SOL_RPC_WSS),
+    # (card, chain, toggle, worker, kind, [slots])  — worker "" = no live socket
+    groups: list[tuple[str, str, str, str, str, list[str]]] = [
+        ("Ethereum", "eth", "rpc_eth", "eth", "WSS", list(scfg.ETH_WSS_ENDPOINTS)),
+        ("Ethereum", "eth", "rpc_eth", "",    "HTTP", list(scfg.ETH_HTTP_ENDPOINTS)),
+        ("ETH Gas Fees", "eth", "rpc_eth", "", "WSS", [scfg.GAS_RPC_WSS]),
+        ("ETH Gas Fees", "eth", "rpc_eth", "", "HTTP", [scfg.GAS_RPC_HTTP]),
+        ("Robinhood Chain", "rbh", "rpc_rbh", "rbh", "WSS", list(scfg.RBH_WSS_ENDPOINTS)),
+        ("Robinhood Chain", "rbh", "rpc_rbh", "",    "HTTP", list(scfg.RBH_HTTP_ENDPOINTS)),
+        ("BNB Chain", "bnb", "", "", "HTTP", list(scfg.BNB_HTTP_ENDPOINTS)),
+        ("Solana", "sol", "rpc_sol", "sol", "WSS", list(scfg.SOL_WSS_ENDPOINTS)),
+        ("Solana", "sol", "rpc_sol", "",    "HTTP", list(scfg.SOL_HTTP_ENDPOINTS)),
     ]
 
-    out = []
-    for name, chain, toggle, worker, http, wss in rows:
-        on = bool(enabled.get(toggle, True))
-        for kind, url in (("WSS", wss), ("HTTP", http)):
+    out: list[dict] = []
+    for name, chain, toggle, worker, kind, slots in groups:
+        on = bool(enabled.get(toggle, True)) if toggle else True
+        live = supervisor.rpc_connected(worker) if worker else False
+        active = supervisor.rpc_active_url(worker) if worker else ""
+        # An empty group still gets one row, so a chain with nothing set is
+        # visible as "not configured" rather than absent from the table.
+        for i, url in enumerate(slots or [""], start=1):
+            label = f"{name} {kind}" + (f" #{i}" if len(slots) > 1 else "")
             if not url:
                 status = "not configured"
             elif not on:
                 status = "disabled"
-            elif kind == "WSS":
-                status = "connected" if supervisor.rpc_connected(worker) else "stopped"
-            else:
+            elif kind != "WSS":
                 status = "configured"
+            elif not worker:
+                status = "configured"
+            elif live and url == active:
+                status = "connected"
+            elif live:
+                status = "standby"
+            else:
+                status = "stopped"
             out.append({
-                "name": f"{name} {kind}",
+                "name": label,
                 "chain": chain,
                 "kind": kind,
                 "url": _mask(url),
                 "enabled": on,
                 "configured": bool(url),
+                "active": bool(url) and url == active,
                 "status": status,
             })
     return out

@@ -62,6 +62,16 @@ class EthTrendingScanner:
         events non-stop while its own status row said stopped)."""
         return self._detector.connected
 
+    @property
+    def active_endpoint(self) -> str:
+        """The endpoint the socket is on right now.
+
+        A pool of three rotates on rejection, so "which URL is this chain
+        actually using" is not answerable from config alone — RPC Monitor reads
+        it here to mark the live one apart from the standby slots.
+        """
+        return getattr(self._detector.provider, "wss_url", "") or ""
+
     async def run(self) -> None:
         if not config.ETH_RPC_WSS:
             log.error("[ETH-XCHAIN] ETH_RPC_WSS not set — SOL→ETH on-chain detection disabled")

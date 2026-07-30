@@ -93,6 +93,10 @@ class SolDiscovery:
         """
         self._kick.set()
 
+    def active_endpoint(self) -> str:
+        """The endpoint discovery is dialling right now (shared by all watches)."""
+        return self._shared_pool.current() if self._shared_pool else ""
+
     def connected(self) -> bool:
         """True if at least one watched launchpad has a live Helius subscription."""
         return any(self._connected.values())

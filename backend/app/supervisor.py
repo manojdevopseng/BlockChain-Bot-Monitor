@@ -341,6 +341,21 @@ def rpc_connected(name: str) -> bool:
     return _worker_alive(name)
 
 
+def rpc_active_url(name: str) -> str:
+    """Which endpoint this chain's socket is dialling right now.
+
+    A pool of two or three rotates on rejection, so the configured list does
+    not say which one is in use — RPC Monitor needs this to tell the live slot
+    apart from the standby ones. "" when there is nothing running to ask.
+    """
+    if name in ("eth", "rbh"):
+        inst = _instances.get(name)
+        return getattr(inst, "active_endpoint", "") if inst is not None else ""
+    if name == "sol":
+        return _sol.discovery_endpoint() if _sol is not None else ""
+    return ""
+
+
 def status() -> dict[str, str]:
     """service_id -> 'running' | 'stopped' for the workers we own directly."""
     return {

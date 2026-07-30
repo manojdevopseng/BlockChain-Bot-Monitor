@@ -106,6 +106,10 @@ class SolanaScanner:
         """
         return bool(self._discovery and self._discovery.connected())
 
+    def discovery_endpoint(self) -> str:
+        """Which SOL endpoint discovery is currently on, for RPC Monitor."""
+        return self._discovery.active_endpoint() if self._discovery else ""
+
     def kick_discovery(self) -> None:
         """Nudge discovery to retry a new endpoint right away.
 
