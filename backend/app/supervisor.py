@@ -298,6 +298,18 @@ def instance(name: str):
     return _instances.get(name)
 
 
+def kick_sol_discovery() -> None:
+    """Wake SOL's on-chain discovery to retry with a newly saved endpoint now,
+    instead of it sitting out whatever backoff it was already in (up to 60s).
+
+    Not routed through `instance()`/`_instances` — SOL isn't tracked there
+    (only eth/rbh/cmd/fwd are); `_sol` is the SolanaScanner global reconcile()
+    creates. A no-op before it exists or once it's been torn down.
+    """
+    if _sol is not None:
+        _sol.kick_discovery()
+
+
 def uptime_seconds() -> int:
     return int(time.time() - _started_at) if _started_at else 0
 

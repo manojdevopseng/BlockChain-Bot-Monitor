@@ -77,6 +77,21 @@ class SolDiscovery:
         # rejection, so a launchpad stuck in an endless 429 loop looks exactly
         # like a healthy one to anything that only checks "is the task done".
         self._connected: dict[str, bool] = {}
+        # Set to wake every watch loop out of its backoff sleep immediately.
+        # Used when a new endpoint is saved in Settings — without this, a
+        # launchpad mid a 429 backoff (up to 60s) would just sit there until
+        # its own timer expired, "worked but you'd have to wait for it" being
+        # exactly what a Save button should not feel like.
+        self._kick = asyncio.Event()
+
+    def kick(self) -> None:
+        """Wake any watch loop sleeping in backoff to retry right now.
+
+        Does not touch a loop that is currently connected — there is nothing
+        to wake, and the point is to try new endpoints sooner, not to drop a
+        working connection.
+        """
+        self._kick.set()
 
     def connected(self) -> bool:
         """True if at least one watched launchpad has a live Helius subscription."""
@@ -211,8 +226,16 @@ class SolDiscovery:
 
             if not self._running:
                 return
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 60.0)
+            try:
+                # Whichever comes first: the backoff timer, or a kick from a
+                # newly saved endpoint. A kick means "try again now, not
+                # later" — the backoff resets rather than carrying over the
+                # minute-long wait a repeated 429 had built up.
+                await asyncio.wait_for(self._kick.wait(), timeout=backoff)
+                self._kick.clear()
+                backoff = 1.0
+            except asyncio.TimeoutError:
+                backoff = min(backoff * 2, 60.0)
 
     @staticmethod
     async def _note_success(pool, url: str, label: str) -> None:

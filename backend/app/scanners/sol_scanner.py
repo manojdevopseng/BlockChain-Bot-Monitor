@@ -106,6 +106,18 @@ class SolanaScanner:
         """
         return bool(self._discovery and self._discovery.connected())
 
+    def kick_discovery(self) -> None:
+        """Nudge discovery to retry a new endpoint right away.
+
+        Used after a SOL_RPC_WSS endpoint is saved in Settings — an immediate
+        retry, not a wait-out-the-backoff one, without restarting this whole
+        scanner (which would also drop the GMGN feed's in-memory state:
+        `_active`, `_pending`, `_discovered`). A no-op if discovery was never
+        started (SOL_RPC_WSS blank at startup).
+        """
+        if self._discovery is not None:
+            self._discovery.kick()
+
     @property
     def active_watched_tickers(self) -> dict[str, dict]:
         now = time.time()

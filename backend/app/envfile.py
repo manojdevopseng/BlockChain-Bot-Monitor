@@ -370,6 +370,18 @@ def _refresh_derived(scfg, key: str) -> None:
     setattr(scfg, f"{chain}_WSS_ENDPOINTS", [u for u in slots if u])
     if chain == "ETH":
         scfg.GAS_RPC_WSS = settings.gas_rpc_wss or slots[0]
+    if chain == "SOL":
+        # SOL's WSS applies "live" — no worker restart on save, unlike ETH/RBH
+        # (restarting the whole SOL worker would also drop the GMGN feed's
+        # in-memory state). Without this kick, a newly saved fallback would
+        # only take effect once the current backoff happened to expire, up to
+        # 60s later — technically "no restart needed" but not what "paste a
+        # key and it just works" means in practice.
+        try:
+            from . import supervisor
+            supervisor.kick_sol_discovery()
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"could not kick SOL discovery after endpoint change: {exc}")
 
 
 def apply_runtime(key: str, value) -> None:
