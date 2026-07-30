@@ -13,7 +13,7 @@ import { useApi } from "./api";
  * same rule is enforced on every request server-side, so nothing here is load
  * bearing, and a user who edits it in the console gets 403s rather than access.
  */
-export const ADMIN_ONLY_PATHS = ["/forwarder", "/commands", "/settings", "/users"] as const;
+export const ADMIN_ONLY_PATHS = ["/forwarder", "/commands", "/settings", "/users", "/rpc"] as const;
 
 export function useRole() {
   // Cached hard: it changes at login, not while the page is open, and every

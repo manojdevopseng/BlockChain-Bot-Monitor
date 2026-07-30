@@ -17,7 +17,6 @@ import { useState } from "react";
 import { Brain, Check, KeyRound, Loader2, Radio, SlidersHorizontal } from "lucide-react";
 import { mutate } from "swr";
 import { useApi, apiSend } from "@/lib/api";
-import { useRole } from "@/lib/hooks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -54,15 +53,7 @@ const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
   },
 };
 
-function EnvField({
-  envKey,
-  meta,
-  readOnly,
-}: {
-  envKey: string;
-  meta: any;
-  readOnly: boolean;
-}) {
+function EnvField({ envKey, meta }: { envKey: string; meta: any }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -93,7 +84,7 @@ function EnvField({
           <span className="text-sm text-text">{meta.label}</span>
           <Switch
             checked={meta.value === "true"}
-            disabled={busy || readOnly}
+            disabled={busy}
             onCheckedChange={(v) => save(v)}
           />
         </div>
@@ -109,8 +100,7 @@ function EnvField({
   // Only a fallback may be cleared. Emptying a primary would blind that chain
   // outright, and there is no reason to do it from here — replacing it is a
   // Save, not a Clear. Matched with `includes` so _FALLBACK2 counts too.
-  const clearable =
-    meta.kind === "wss" && meta.set && envKey.includes("_FALLBACK") && !readOnly;
+  const clearable = meta.kind === "wss" && meta.set && envKey.includes("_FALLBACK");
 
   return (
     <div>
@@ -126,17 +116,10 @@ function EnvField({
       <div className="flex gap-2">
         <Input
           value={draft}
-          disabled={readOnly}
           inputMode={isText ? undefined : "decimal"}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={
-            readOnly
-              ? "admin only"
-              : meta.kind === "wss"
-                ? "wss://…"
-                : isText
-                  ? `New ${meta.label}…`
-                  : meta.value || "value"
+            meta.kind === "wss" ? "wss://…" : isText ? `New ${meta.label}…` : meta.value || "value"
           }
           onKeyDown={(e) => e.key === "Enter" && draft.trim() && save(draft.trim())}
           className="font-mono text-xs"
@@ -144,7 +127,7 @@ function EnvField({
         <Button
           variant="primary"
           size="sm"
-          disabled={busy || readOnly || !draft.trim()}
+          disabled={busy || !draft.trim()}
           onClick={() => save(draft.trim())}
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : "Save"}
@@ -178,7 +161,6 @@ export function CredentialsManager({
   exclude?: string | string[];
 }) {
   const { data } = useApi<any>(ENDPOINT);
-  const { isAdmin } = useRole();
   const items: Record<string, any> = data?.items ?? {};
   const skip = exclude === undefined ? [] : Array.isArray(exclude) ? exclude : [exclude];
 
@@ -203,17 +185,9 @@ export function CredentialsManager({
               {GROUP_META[group]?.blurb && (
                 <p className="mb-3 text-xs text-text-dim">{GROUP_META[group].blurb}</p>
               )}
-              {/* RPC Monitor is visible to the User role, unlike Settings. The
-                  backend already refuses a non-GET from a non-admin, so this is
-                  about not offering an action that would only come back 403. */}
-              {!isAdmin && (
-                <p className="mb-3 text-xs text-accent-amber">
-                  Read-only — only an admin can change these.
-                </p>
-              )}
               <div className="space-y-3">
                 {fields.map(([key, meta]) => (
-                  <EnvField key={key} envKey={key} meta={meta} readOnly={!isAdmin} />
+                  <EnvField key={key} envKey={key} meta={meta} />
                 ))}
               </div>
             </CardContent>
