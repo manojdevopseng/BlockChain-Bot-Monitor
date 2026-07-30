@@ -12,6 +12,10 @@ from ..util import clean_list, ist_date_str
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
+# How many rows a date/search pass will read before counting. Only reached when
+# a filter has to run in Python; the plain view counts in Mongo instead.
+_MATCH_SCAN_CAP = 20000
+
 # flow id -> the `chain` value the scanners write on a cross-chain alert
 _FLOW_CHAIN = {"eth": "eth", "rbh": "robinhood"}
 _FLOW_SLUG = {"eth": "eth", "rbh": "robinhood"}
@@ -174,20 +178,30 @@ async def crosschain(
     flt: dict = {"type": "Cross-Chain Match"}
     if flow != "all":
         flt["chain"] = _FLOW_CHAIN[flow]
-    docs = await db.get_collection("alerts").find(flt).to_list(1000)
-    docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
-    if date:
-        docs = [d for d in docs if ist_date_str(d.get("created_at", 0)) == date]
-    if q:
-        docs = [d for d in docs if _match_cc(d, q)]
-    docs = docs[:limit]
+    col = db.get_collection("alerts")
+    if not date and not q:
+        # Nothing to filter in Python, so the exact count comes from Mongo —
+        # no scan cap involved.
+        total = await col.count_documents(flt)
+        docs = await col.find(flt).sort("created_at", -1).limit(limit).to_list(limit)
+    else:
+        # date/search are applied here, so the rows have to be read to be
+        # counted. `total` is what matched, not what fits on the page.
+        docs = await col.find(flt).to_list(_MATCH_SCAN_CAP)
+        docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
+        if date:
+            docs = [d for d in docs if ist_date_str(d.get("created_at", 0)) == date]
+        if q:
+            docs = [d for d in docs if _match_cc(d, q)]
+        total = len(docs)
+        docs = docs[:limit]
     for d in docs:
         # Per row: in the merged view the destination chain differs row to row,
         # so a single slug would send half the links to the wrong chain's page.
         slug = _FLOW_SLUG.get(flow) or d.get("chain") or "eth"
         d["gmgn_url"] = f"https://gmgn.ai/{slug}/token/{d.get('token_address', '')}"
         d["sol_gmgn_url"] = f"https://gmgn.ai/sol/token/{d.get('sol_address', '')}"
-    return {"flow": flow, "total": len(docs), "items": clean_list(docs)}
+    return {"flow": flow, "total": total, "items": clean_list(docs)}
 
 
 @router.get("/crosschain/dates")

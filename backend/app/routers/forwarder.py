@@ -14,6 +14,10 @@ from ..util import gmgn_url, clean_list
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
+# How many rows a search pass reads before counting. Only reached when `q` is
+# set; the plain view counts in Mongo instead.
+_MATCH_SCAN_CAP = 20000
+
 # GMGN token-page slug per chain (for the "view on GMGN" link).
 def _gmgn_url(chain: str, address: str) -> str:
     return gmgn_url(chain, address)
@@ -380,16 +384,24 @@ async def detections(
     flt: dict = {} if chain == "all" else {"chain": chain}
     if multi:
         flt["count"] = {"$gte": 2}
-    docs = await db.get_collection("premium_detections").find(flt).to_list(2000)
-    docs.sort(key=lambda d: d.get("ts", 0), reverse=True)
-    if q:
+    col = db.get_collection("premium_detections")
+    if not q:
+        # No Python-side filter, so Mongo gives the exact count — the previous
+        # code counted after slicing to `limit`, which meant the section header
+        # read "100" for anything with more than a page of rows.
+        total = await col.count_documents(flt)
+        docs = await col.find(flt).sort("ts", -1).limit(limit).to_list(limit)
+    else:
+        docs = await col.find(flt).to_list(_MATCH_SCAN_CAP)
+        docs.sort(key=lambda d: d.get("ts", 0), reverse=True)
         docs = [d for d in docs if _match_q(d, q)]
-    docs = docs[:limit]
+        total = len(docs)
+        docs = docs[:limit]
     for d in docs:
         # Per row, not per request: in the merged view a Robinhood token given
         # an ETH GMGN link would open the wrong chain's page.
         d["gmgn_url"] = _gmgn_url(d.get("chain") or chain, d.get("address", ""))
-    return {"total": len(docs), "items": clean_list(docs)}
+    return {"total": total, "items": clean_list(docs)}
 
 
 @router.get("/detections/stats")
