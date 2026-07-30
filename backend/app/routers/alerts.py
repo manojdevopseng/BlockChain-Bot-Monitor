@@ -154,8 +154,7 @@ def _match_cc(doc: dict, q: str) -> bool:
     # matters because a match is looked up by the SOL ticker as often as by the
     # destination-chain one.
     q = q.lower()
-    for key in ("token_symbol", "token_name", "token_address", "sol_symbol",
-                "sol_address", "dex", "message"):
+    for key in ("token_symbol", "token_address", "sol_symbol", "sol_address", "dex", "message"):
         if q in str(doc.get(key, "")).lower():
             return True
     return False

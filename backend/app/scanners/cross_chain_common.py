@@ -57,9 +57,6 @@ def record_alert(sol_data: dict, tok: DetectedToken, spec: ChainSpec,
     try:
         storage.save_alert_record({
             "token_symbol":    tok.symbol,
-            # The detector already reads name() alongside symbol(); it just was
-            # not kept. Rows fired before this show a dash rather than a guess.
-            "token_name":      getattr(tok, "name", "") or "",
             "token_address":   tok.address,
             "chain":           spec.gmgn_slug or spec.name.lower(),
             "wallet_tag":      tok.dex,
