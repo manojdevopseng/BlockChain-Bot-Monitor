@@ -80,39 +80,39 @@ EDITABLE: dict[str, dict] = {
     # market cap watch — for eight hours. All three fallbacks were empty.
     "ETH_RPC_WSS": {
         "label": "ETH WebSocket #1", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "worker:eth",
+        "group": "RPC Endpoints — Ethereum", "applies": "worker:eth",
         "help": "Tried first. On a quota rejection rotation goes 1 → 2 → 3 → 1.",
     },
     "ETH_RPC_WSS_FALLBACK": {
         "label": "ETH WebSocket #2", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "worker:eth",
+        "group": "RPC Endpoints — Ethereum", "applies": "worker:eth",
         "help": "Use a different provider — a second URL on the same account "
                 "shares the same quota and dies with it.",
     },
     "ETH_RPC_WSS_FALLBACK2": {
         "label": "ETH WebSocket #3", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "worker:eth",
+        "group": "RPC Endpoints — Ethereum", "applies": "worker:eth",
         "help": "Third endpoint. With all three refusing you get one alert and "
                 "rotation keeps going, so it recovers when a quota resets.",
     },
     "RBH_RPC_WSS": {
         "label": "Robinhood WebSocket #1", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "worker:rbh",
+        "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Tried first. On a quota rejection rotation goes 1 → 2 → 3 → 1.",
     },
     "RBH_RPC_WSS_FALLBACK": {
         "label": "Robinhood WebSocket #2", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "worker:rbh",
+        "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Use a different provider from #1.",
     },
     "RBH_RPC_WSS_FALLBACK2": {
         "label": "Robinhood WebSocket #3", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "worker:rbh",
+        "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Third endpoint.",
     },
     "SOL_RPC_WSS": {
         "label": "SOL WebSocket #1", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "live",
+        "group": "RPC Endpoints — Solana", "applies": "live",
         "help": "Tried first. Carries on-chain launch discovery AND the trade "
                 "stream the market cap watch reads, so losing every SOL endpoint "
                 "also stops anything reaching the Telegram filter. Needs a "
@@ -121,13 +121,13 @@ EDITABLE: dict[str, dict] = {
     },
     "SOL_RPC_WSS_FALLBACK": {
         "label": "SOL WebSocket #2", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "live",
+        "group": "RPC Endpoints — Solana", "applies": "live",
         "help": "Second SOL socket. Must also support logsSubscribe, so a second "
                 "Helius key or QuickNode/Triton — not Alchemy.",
     },
     "SOL_RPC_WSS_FALLBACK2": {
         "label": "SOL WebSocket #3", "kind": "wss", "secret": True,
-        "group": "RPC Endpoints", "applies": "live",
+        "group": "RPC Endpoints — Solana", "applies": "live",
         "help": "Third SOL socket. Same logsSubscribe requirement.",
     },
 

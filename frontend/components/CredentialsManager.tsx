@@ -38,12 +38,25 @@ const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
       "Agent ke numbers. Ye .env me likhe jate hain aur turant apply hote hain — " +
       "restart nahi chahiye, aur server restart hone par bhi bane rehte hain.",
   },
-  "RPC Endpoints": {
+  "RPC Endpoints — Ethereum": {
     icon: Radio,
     blurb:
-      "Har chain ke 3 WebSocket. Quota khatam ho ya 429 aaye to rotation 1 → 2 → 3 → 1 " +
-      "chalti hai, aur teeno refuse karein to Telegram par alert jata hai. #2 aur #3 " +
-      "dusre provider ke lena — same account ka doosra URL usi quota par marta hai.",
+      "Quota khatam ho ya 429 aaye to rotation 1 → 2 → 3 → 1 chalti hai, teeno refuse " +
+      "karein to Telegram par alert jata hai. #2/#3 dusre provider ke lena — same " +
+      "account ka doosra URL usi quota par marta hai.",
+  },
+  "RPC Endpoints — Robinhood Chain": {
+    icon: Radio,
+    blurb:
+      "Quota khatam ho ya 429 aaye to rotation 1 → 2 → 3 → 1 chalti hai, teeno refuse " +
+      "karein to Telegram par alert jata hai. #2/#3 dusre provider ke lena — same " +
+      "account ka doosra URL usi quota par marta hai.",
+  },
+  "RPC Endpoints — Solana": {
+    icon: Radio,
+    blurb:
+      "logsSubscribe support karne wala provider chahiye — Alchemy ka Solana endpoint " +
+      "nahi karta. Ye socket launch discovery aur market-cap watch dono carry karta hai.",
   },
   "Detection Tuning": {
     icon: SlidersHorizontal,
@@ -150,6 +163,14 @@ function EnvField({ envKey, meta }: { envKey: string; meta: any }) {
   );
 }
 
+// A backend group matches an `only`/`exclude` entry either exactly ("AI") or as
+// a family ("RPC Endpoints" catches "RPC Endpoints — Ethereum" and its Robinhood
+// and Solana siblings) — so the RPC Monitor page doesn't have to name all three
+// chain sub-groups, and a fourth chain added later is picked up automatically.
+function matchesGroup(group: string, entry: string): boolean {
+  return group === entry || group.startsWith(`${entry} — `);
+}
+
 // One card per group of .env fields. `only` and `exclude` let a group be placed
 // where it belongs — the AI numbers sit with the AI switches, the endpoints with
 // the RPC status table — without a second copy of this component.
@@ -157,18 +178,19 @@ export function CredentialsManager({
   only,
   exclude,
 }: {
-  only?: string;
+  only?: string | string[];
   exclude?: string | string[];
 }) {
   const { data } = useApi<any>(ENDPOINT);
   const items: Record<string, any> = data?.items ?? {};
+  const want = only === undefined ? [] : Array.isArray(only) ? only : [only];
   const skip = exclude === undefined ? [] : Array.isArray(exclude) ? exclude : [exclude];
 
   const groups: Record<string, [string, any][]> = {};
   for (const [key, meta] of Object.entries(items)) {
     const group = meta.group ?? "Other";
-    if (only && group !== only) continue;
-    if (skip.includes(group)) continue;
+    if (want.length && !want.some((w) => matchesGroup(group, w))) continue;
+    if (skip.some((s) => matchesGroup(group, s))) continue;
     (groups[group] ||= []).push([key, meta]);
   }
 

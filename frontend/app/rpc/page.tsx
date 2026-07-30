@@ -46,10 +46,11 @@ export default function RpcPage() {
         <CardHeader><CardTitle>Endpoint Status</CardTitle></CardHeader>
         <CardContent><DataTable columns={cols} rows={data?.items ?? []} empty="No RPC endpoints configured in .env" /></CardContent>
       </Card>
-      {/* The URL fields, next to the connection state they actually drive,
-          rather than three cards down the Settings page. One group ("RPC
-          Endpoints") renders as one card, so no multi-column grid here. */}
-      <CredentialsManager only="RPC Endpoints" />
+      {/* One card per chain — ETH/RBH/SOL were mixed into a single 9-field list
+          before, which made it hard to tell which #2/#3 belonged to which. */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <CredentialsManager only="RPC Endpoints" />
+      </div>
     </div>
   );
 }
