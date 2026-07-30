@@ -47,19 +47,50 @@ def decode_symbol(hex_result: str) -> str:
         return ""
 
 
+# A contract answering "execution reverted" is a working endpoint giving a
+# valid answer: the method simply is not on that contract. Only infrastructure
+# problems — rate limits, auth, a dead host — are reasons to rotate.
+#
+# geth reports an execution error as JSON-RPC code 3. Treating it as an endpoint
+# failure meant every plain token address (token0() does not exist on one, so it
+# reverts) rotated the whole pool, reported "failed on every endpoint" and was
+# then dropped — which is exactly what stopped a real Robinhood token being
+# recorded on 2026-07-30.
+REVERTED = object()
+
+_EXECUTION_CODES = {3, -32015}
+_EXECUTION_WORDS = ("execution reverted", "revert", "invalid opcode",
+                    "out of gas", "always failing transaction")
+
+
+def _is_execution_error(err: dict) -> bool:
+    """A contract-level answer rather than an endpoint problem."""
+    if not isinstance(err, dict):
+        return False
+    if err.get("code") in _EXECUTION_CODES:
+        return True
+    return any(w in str(err.get("message", "")).lower() for w in _EXECUTION_WORDS)
+
+
 class OnChainMixin:
     """RPC calls over an EndpointPool, with rotation and exhaustion alerting."""
 
     async def _pooled_rpc(self, pool: EndpointPool, tag: str, method: str, params: list):
         """JSON-RPC call rotating across `pool`'s endpoints on a rejection.
 
-        Returns the call's `result` on success. Returns None only once every
-        endpoint has failed — the caller must treat that as "could not check"
-        and NOT as a genuine RPC answer (an actual "no contract here" reply is
-        the string "0x", never None). Before this distinction existed, a
-        rate-limited/rejected call and a real negative result looked
-        identical, so a live monthly-quota outage on Alchemy silently dropped
-        every real token address seen in premium groups with no trace at all.
+        Three outcomes, and the caller must tell them apart:
+
+            <result>  the call succeeded
+            REVERTED  the endpoint answered, and the contract rejected the
+                      call — a valid answer meaning "this method is not on
+                      this contract", not a reason to rotate
+            None      every endpoint failed; nothing was learned
+
+        Before None was distinguished from a real answer, a rate-limited
+        Alchemy key silently dropped every address seen in premium groups.
+        Before REVERTED was distinguished from a failure, the opposite bug:
+        an ordinary token reverting token0() rotated the whole pool and was
+        dropped as if the infrastructure were down.
 
         Shared by ETH, Robinhood and SOL's premium-caller HTTP checks — same
         rotation, same "alert once when the whole pool is down" behaviour via
@@ -89,6 +120,10 @@ class OnChainMixin:
                 pool.rotate(f"{kind} on {host}")
                 continue
             err = (body or {}).get("error")
+            if err and _is_execution_error(err):
+                # The endpoint worked. Do not rotate, do not mark it bad.
+                pool.note_success(url)
+                return REVERTED
             if status != 200 or err:
                 fail = status if status != 200 else RuntimeError(str(err))
                 kind, detail = pool.note_failure(url, fail)
@@ -122,10 +157,18 @@ class OnChainMixin:
         return await self._pooled_rpc(pool, tag, method, params)
 
     async def _resolve_token(self, pool: EndpointPool, tag: str, addr: str, bases: set):
+        """Work out which side of a pair is the token. (token, pair) on a pair;
+        (addr, None) when the address is the token itself; (None, None) only
+        when nothing could be learned."""
         t0, t1 = await asyncio.gather(
-            self._eth_call(pool, tag, addr, "0x0dfe1681"),
-            self._eth_call(pool, tag, addr, "0xd21220a7"),
+            self._eth_call(pool, tag, addr, "0x0dfe1681"),   # token0()
+            self._eth_call(pool, tag, addr, "0xd21220a7"),   # token1()
         )
+        # Reverting token0()/token1() is how a plain token answers — it has no
+        # such methods. That makes the address itself the token, which is the
+        # normal case for something posted in a premium group.
+        if t0 is REVERTED or t1 is REVERTED:
+            return addr, None
         if t0 is None or t1 is None:
             return None, None   # every endpoint failed — don't guess
         a0, a1 = addr_from_word(t0), addr_from_word(t1)

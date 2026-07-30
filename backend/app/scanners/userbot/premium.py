@@ -21,7 +21,7 @@ from app.scanners import scfg as config
 from app.scanners.wss_pool import EndpointPool
 
 from .common import log
-from .onchain import decode_symbol
+from .onchain import REVERTED, decode_symbol
 from .store import col
 
 
@@ -72,8 +72,8 @@ class PremiumCaptureMixin:
                 code = await self._eth_call(pool, f"PREMIUM-{label}", addr, None, "eth_getCode")
                 if code is None:
                     return  # every endpoint failed — already logged/alerted, nothing to conclude
-                if code == "0x":
-                    return  # confirmed: not a contract at this address
+                if code is REVERTED or code == "0x":
+                    return  # confirmed: no contract at this address on this chain
                 token_addr, pair_addr = await self._resolve_token(pool, f"PREMIUM-{label}", addr, bases)
                 if token_addr is None:
                     return  # resolve calls failed on every endpoint
@@ -99,14 +99,19 @@ class PremiumCaptureMixin:
                     )
                     log.info(f"[PREMIUM-{label}] {existing.get('symbol') or token_addr[:10]} shill count → {len(entries)} (from {group})")
                     return
+                # A token that implements neither name() nor symbol() is
+                # unusual but legal, and reverting them is not a reason to
+                # throw the detection away — the address is what matters.
                 name_hex, sym_hex = await asyncio.gather(
                     self._eth_call(pool, f"PREMIUM-{label}", token_addr, "0x06fdde03"),
                     self._eth_call(pool, f"PREMIUM-{label}", token_addr, "0x95d89b41"),
                 )
+                name_hex = "" if name_hex in (None, REVERTED) else name_hex
+                sym_hex = "" if sym_hex in (None, REVERTED) else sym_hex
                 record = {
                     "chain": chain,
-                    "symbol": decode_symbol(sym_hex or ""),
-                    "name": decode_symbol(name_hex or ""),
+                    "symbol": decode_symbol(sym_hex),
+                    "name": decode_symbol(name_hex),
                     "address": token_addr,
                     "pair": pair_addr,
                     "group_entries": [{"chat_id": chat_id, "name": group, "username": username, "message_id": msg_id}],
