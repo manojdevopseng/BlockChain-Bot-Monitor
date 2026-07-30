@@ -195,7 +195,7 @@ async def run_once(session: aiohttp.ClientSession) -> int:
         {"judged": {"$ne": True}, "kind": {"$in": list(_LINKED_KINDS)}}
     ).sort("found_at", 1).limit(200).to_list(200)
 
-    from . import registry
+    from .. import registry
     preview = await registry.is_enabled("ai_gate_preview")
 
     judged = 0

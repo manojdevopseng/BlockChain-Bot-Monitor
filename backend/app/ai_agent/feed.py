@@ -116,7 +116,7 @@ async def _price_watch(session: aiohttp.ClientSession) -> None:
 async def _handle_launch(session: aiohttp.ClientSession,
                          gate: asyncio.Semaphore, msg: dict) -> None:
     """One launch: read its metadata, resolve the X account, publish the row."""
-    from .ws_hub import hub
+    from ..ws_hub import hub
 
     async with gate:
         try:
@@ -265,7 +265,7 @@ async def _note_for_og(msg: dict, ref) -> None:
 
 async def _promote_og(name_key: str, first: dict) -> None:
     """Flag the first launch of a burst, storing it if nothing stored it before."""
-    from .ws_hub import hub
+    from ..ws_hub import hub
     try:
         mint = (first.get("mint") or "").strip()
         if not mint:
