@@ -155,9 +155,9 @@ async def stats():
 async def toggle_source(key: str, payload: dict = Body(...)):
     """Switch a source off where the forwarder actually looks.
 
-    A premium group flips `premium_groups.enabled` — the field `_load_premium_ids`
-    reads. A signal channel flips its registry service, the same switch as
-    Settings → Bots, so the two can never disagree.
+    A premium group flips `premium_groups.enabled` — the field the userbot's
+    `store.load_premium_ids` reads. A signal channel flips its registry service,
+    the same switch as Settings → Bots, so the two can never disagree.
     """
     if "enabled" not in payload:
         raise HTTPException(400, "body must include 'enabled'")

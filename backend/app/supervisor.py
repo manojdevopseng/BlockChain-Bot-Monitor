@@ -250,7 +250,7 @@ async def _start_worker(name: str) -> None:
         _tasks["cmd"] = asyncio.create_task(inst.run(), name="tg-commands")
         return
     if name == "fwd":
-        from .scanners.forwarder import TelegramForwarder
+        from .scanners.userbot import TelegramForwarder
         inst = TelegramForwarder()
         inst.set_enabled_map(await registry.enabled_map())
         await inst.start()   # connects Telethon + registers handlers
