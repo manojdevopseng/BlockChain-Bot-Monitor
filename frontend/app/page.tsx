@@ -6,7 +6,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/DataTable";
-import { Donut } from "@/components/charts/Charts";
+import { Donut } from "@/components/features/Charts";
 import { cn, fmtEth, fmtUsd, timeAgo } from "@/lib/utils";
 
 const ICONS: Record<string, any> = { total_alerts: Bell, total_tokens: Coins, eth_gas: Fuel, watchlist: Eye };

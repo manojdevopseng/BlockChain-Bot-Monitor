@@ -5,8 +5,8 @@ import { useApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LineSeries, Donut } from "@/components/charts/Charts";
-import { OutcomeSummary, GroupLeaderboard } from "@/components/Performance";
+import { LineSeries, Donut } from "@/components/features/Charts";
+import { OutcomeSummary, GroupLeaderboard } from "@/components/features/Performance";
 import { fmtNum } from "@/lib/utils";
 
 const CHAIN_COLORS: Record<string, string> = {

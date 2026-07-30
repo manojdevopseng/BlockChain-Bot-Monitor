@@ -7,8 +7,8 @@ import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/DataTable";
-import { CredentialsManager } from "@/components/CredentialsManager";
-import { cn, fmtNum, fmtEth } from "@/lib/utils";
+import { CredentialsManager } from "@/components/features/CredentialsManager";
+import { cn, fmtNum, fmtEth, statusTone } from "@/lib/utils";
 
 export default function RpcPage() {
   const { data: stats } = useApi<any>("/api/rpc/stats");
@@ -23,12 +23,7 @@ export default function RpcPage() {
     { key: "url", header: "Endpoint", render: (r) => <span className="font-mono text-[11px] text-text-muted">{r.url}</span> },
     { key: "kind", header: "Type", render: (r) => <Badge variant="blue">{r.kind}</Badge> },
     { key: "status", header: "Status", render: (r) => (
-      <Badge variant={
-        r.status === "connected" ? "green"
-        : r.status === "configured" ? "blue"
-        : r.status === "disabled" ? "gray"
-        : r.status === "not configured" ? "amber" : "red"
-      }>{r.status}</Badge>
+      <Badge variant={statusTone(r.status)}>{r.status}</Badge>
     )},
   ];
 

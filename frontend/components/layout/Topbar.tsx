@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, Menu, Moon, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { NotificationBell } from "@/components/NotificationBell";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { useTheme } from "@/lib/theme";
 import { setToken } from "@/lib/api";
 

@@ -5,14 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/DataTable";
-import { cn, fmtNum } from "@/lib/utils";
-
-function statusVariant(s: string) {
-  if (s === "connected") return "green";
-  if (s === "disabled") return "gray";
-  if (s === "not configured") return "amber";
-  return "red";
-}
+import { cn, fmtNum, statusTone } from "@/lib/utils";
 
 export default function ChainsPage() {
   const { data } = useApi<any>("/api/chains");
@@ -25,7 +18,7 @@ export default function ChainsPage() {
     )},
     { key: "symbol", header: "Symbol", render: (r) => <Badge variant="purple">{r.symbol}</Badge> },
     { key: "status", header: "Status", render: (r) => (
-      <Badge variant={statusVariant(r.status) as any}>{r.status}</Badge>
+      <Badge variant={statusTone(r.status)}>{r.status}</Badge>
     )},
     { key: "ws_configured", header: "WebSocket", render: (r) => (
       <Badge variant={r.ws_configured ? "green" : "gray"}>{r.ws_configured ? "configured" : "not set"}</Badge>
@@ -45,7 +38,7 @@ export default function ChainsPage() {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-text">{c.name}</span>
-                <Badge variant={statusVariant(c.status) as any}>{c.status}</Badge>
+                <Badge variant={statusTone(c.status)}>{c.status}</Badge>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
                 <div>

@@ -7,7 +7,7 @@ import { StatCard } from "@/components/StatCard";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
-import { fmtUptime } from "@/lib/utils";
+import { fmtUptime, statusTone } from "@/lib/utils";
 
 export default function SystemPage() {
   const { data } = useApi<any>("/api/system/overview");
@@ -69,10 +69,12 @@ export default function SystemPage() {
                         ? `${a.age_seconds}s ago`
                         : `${Math.round(a.age_seconds / 60)}m ago`}
                     </span>
+                    {/* "quiet" is the one status statusTone() cannot decide:
+                        a silent heartbeat tick is a fault, a silent event feed
+                        is just an idle minute. */}
                     <Badge variant={
-                      a.status === "ok" ? "green"
-                        : a.status === "quiet" ? (a.kind === "tick" ? "red" : "gray")
-                        : "gray"
+                      a.status === "quiet" ? (a.kind === "tick" ? "red" : "gray")
+                        : statusTone(a.status)
                     }>
                       {a.status}
                     </Badge>
@@ -96,11 +98,7 @@ export default function SystemPage() {
                     <div className="text-[10px] text-accent-red">{s.reason}</div>
                   )}
                 </div>
-                <Badge variant={
-                  s.status === "running" ? "green"
-                    : s.status === "stopped" ? "red"
-                    : "gray"
-                }>
+                <Badge variant={statusTone(s.status)}>
                   {s.status}
                 </Badge>
               </div>

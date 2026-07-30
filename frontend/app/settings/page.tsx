@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { CredentialsManager } from "@/components/CredentialsManager";
+import { CredentialsManager } from "@/components/features/CredentialsManager";
 
 type Svc = { id: string; label: string; enabled: boolean; category: string };
 

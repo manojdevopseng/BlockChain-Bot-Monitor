@@ -83,3 +83,36 @@ export function rowKey(row: any, i: number): string {
   if (id != null) return at != null ? `${id}:${at}` : String(id);
   return at != null ? `${at}:${i}` : String(i);
 }
+
+/** Badge colour for a component/endpoint status string.
+ *
+ * The backend emits a small fixed vocabulary — connected, running, configured,
+ * ok, stopped, disabled, not configured, quiet, unknown — and three pages were
+ * each mapping it to colours with their own ternary chain. They disagreed:
+ * chains/page.tsx sent "configured" to red (its fall-through) while
+ * rpc/page.tsx sent it to blue, for the same word from the same API.
+ *
+ * `quiet` is deliberately not handled here — on the System page it means one
+ * thing for a heartbeat tick (red: something that should be beating is not)
+ * and another for an event feed (grey: nothing happened, which is normal), so
+ * the caller has to decide.
+ */
+export type StatusTone = "green" | "blue" | "amber" | "gray" | "red";
+
+export function statusTone(status: string | undefined | null): StatusTone {
+  switch ((status ?? "").toLowerCase()) {
+    case "connected":
+    case "running":
+    case "ok":
+      return "green";
+    case "configured":
+      return "blue";
+    case "not configured":
+      return "amber";
+    case "disabled":
+    case "unknown":
+      return "gray";
+    default:
+      return "red";
+  }
+}

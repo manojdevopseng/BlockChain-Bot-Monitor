@@ -9,7 +9,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { HistorySelect, SearchBox } from "@/components/SectionFilters";
-import { DownloadCsv } from "@/components/Performance";
+import { DownloadCsv } from "@/components/features/Performance";
 import { DataTable, type Column } from "@/components/DataTable";
 import { fmtClock } from "@/lib/utils";
 
