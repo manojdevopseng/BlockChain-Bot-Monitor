@@ -107,7 +107,8 @@ def bare_chat_id(chat_id: Any) -> int:
 # we say "rbh" internally, GMGN says "robinhood" — and anything already in
 # GMGN's spelling passes through.
 _GMGN_SLUG = {"eth": "eth", "ethereum": "eth", "rbh": "robinhood",
-              "robinhood": "robinhood", "sol": "sol", "solana": "sol"}
+              "robinhood": "robinhood", "sol": "sol", "solana": "sol",
+              "bnb": "bsc", "bsc": "bsc"}
 
 
 def gmgn_url(chain: str | None, address: str | None) -> str:

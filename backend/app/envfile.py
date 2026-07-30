@@ -165,6 +165,26 @@ EDITABLE: dict[str, dict] = {
         "group": "RPC Endpoints — Robinhood Chain", "applies": "live",
         "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
     },
+    # BNB Chain has no discovery scanner — only the premium-caller check — so
+    # it is an HTTP pair and nothing else. Same 2-way rotation as the others:
+    # #1 refuses, #2 is tried; #2 refuses, back to #1.
+    "BNB_RPC_HTTP": {
+        "label": "BNB HTTP #1 — premium-caller detection",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — BNB Chain", "applies": "live",
+        "help": "Used by Settings → Bots → Premium BNB to confirm an address "
+                "seen in a premium group is a real contract on BSC before "
+                "recording it. Blank = BNB detection is off entirely. Applied "
+                "on the next check, no restart.",
+    },
+    "BNB_RPC_HTTP_FALLBACK": {
+        "label": "BNB HTTP #2 — premium-caller detection",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — BNB Chain", "applies": "live",
+        "help": "Used when #1 keeps failing, then back to #1 if #2 fails too. "
+                "Use a different provider — a second URL on the same account "
+                "shares its quota and dies with it.",
+    },
     # SOL runs two unrelated jobs on two unrelated endpoints, unlike ETH/RBH
     # where one WSS URL covers everything — spelled out in every label below so
     # it stops looking like one RPC that is "just not configured properly".
@@ -433,7 +453,7 @@ def _refresh_derived(scfg, key: str) -> None:
     success, and is never dialled. Same for GAS_RPC_WSS, which falls back to
     the ETH socket.
     """
-    if key.startswith(("ETH_RPC_HTTP", "RBH_RPC_HTTP", "SOL_RPC_HTTP")):
+    if key.startswith(("ETH_RPC_HTTP", "RBH_RPC_HTTP", "SOL_RPC_HTTP", "BNB_RPC_HTTP")):
         chain = key[:3]
         low = chain.lower()
         setattr(scfg, f"{chain}_HTTP_ENDPOINTS",

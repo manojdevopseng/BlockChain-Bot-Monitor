@@ -49,6 +49,7 @@ GATE_PREMIUM     = "premium_callers_signal"  # premium groups → premium ETH ca
 GATE_PREMIUM_ETH = "premium_eth_detection"   # premium groups → ETH detections panel
 GATE_PREMIUM_RBH = "premium_rbh_detection"   # premium groups → RBH detections panel
 GATE_PREMIUM_SOL = "premium_sol_detection"   # premium groups → SOL detections panel
+GATE_PREMIUM_BNB = "premium_bnb_detection"   # premium groups → BNB detections panel
 
 # ── Tunables ──────────────────────────────────────────────────────────────────
 # How often the live premium-group set is re-read from Mongo.

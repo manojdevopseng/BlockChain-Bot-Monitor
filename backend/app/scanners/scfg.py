@@ -100,6 +100,12 @@ RBH_RPC_HTTP       = settings.rbh_rpc_http
 # premium-caller detection.
 RBH_HTTP_ENDPOINTS = [u for u in (settings.rbh_rpc_http,
                                   settings.rbh_rpc_http_fallback) if u]
+# ── BNB Chain (BSC) — premium-caller detection only, no discovery scanner ──
+BNB_RPC_HTTP       = settings.bnb_rpc_http
+BNB_HTTP_ENDPOINTS = [u for u in (settings.bnb_rpc_http,
+                                  settings.bnb_rpc_http_fallback) if u]
+BNB_WBNB           = settings.bnb_wbnb
+
 RBH_V2_FACTORY     = settings.rbh_v2_factory
 RBH_V3_FACTORY     = settings.rbh_v3_factory
 RBH_V4_POOLMANAGER = settings.rbh_v4_poolmanager

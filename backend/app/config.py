@@ -223,6 +223,15 @@ class Settings(BaseSettings):
     # genuinely different key to help at all.
     eth_rpc_http_fallback: str = ""
     rbh_rpc_http_fallback: str = ""
+    # BNB Chain (BSC) — premium-caller detection only. There is no BNB
+    # discovery scanner, so unlike ETH/RBH there is no WSS pair here: an
+    # address seen in a premium group is checked against BSC the same way it
+    # is checked against Ethereum, and that is all.
+    bnb_rpc_http: str = ""
+    bnb_rpc_http_fallback: str = ""
+    # WBNB, the base token a BSC pair is priced against — the equivalent of
+    # ETH_WETH. Used to work out which side of a pair is the actual token.
+    bnb_wbnb: str = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

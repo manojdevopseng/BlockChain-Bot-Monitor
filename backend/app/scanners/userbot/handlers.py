@@ -24,7 +24,8 @@ from app.util import bare_chat_id
 
 from .common import (DEST_DEXS, DEST_OTTO, DEST_PREMIUM_ALL, DEST_PREMIUM_ETH_CALLER,
                      DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_OTTO,
-                     GATE_PREMIUM, GATE_PREMIUM_ETH, GATE_PREMIUM_RBH, GATE_PREMIUM_SOL,
+                     GATE_PREMIUM, GATE_PREMIUM_BNB, GATE_PREMIUM_ETH, GATE_PREMIUM_RBH,
+                     GATE_PREMIUM_SOL,
                      HASH_RE, SOL_RE, SOURCE_BUYBOT, SOURCE_CALL, SOURCE_DEXS,
                      SOURCE_OTTO, log)
 from .sending import safe_send
@@ -108,6 +109,7 @@ class HandlersMixin:
         #   GATE_PREMIUM_SOL  — SOL detections panel (getAccountInfo check)
         #   GATE_PREMIUM_ETH  — ETH detections panel (eth_getCode check)
         #   GATE_PREMIUM_RBH  — RBH detections panel (eth_getCode check)
+        #   GATE_PREMIUM_BNB  — BNB detections panel (eth_getCode check)
         # None of the three panel ones require GATE_PREMIUM any more: a premium
         # address is an on-chain question ("is this a real contract on X"),
         # independent of whether the caller-signal forward is switched on.
@@ -116,7 +118,8 @@ class HandlersMixin:
         sol_on = self._on(GATE_PREMIUM_SOL)
         eth_on = self._on(GATE_PREMIUM_ETH)
         rbh_on = self._on(GATE_PREMIUM_RBH)
-        if not any((premium_on, sol_on, eth_on, rbh_on)):
+        bnb_on = self._on(GATE_PREMIUM_BNB)
+        if not any((premium_on, sol_on, eth_on, rbh_on, bnb_on)):
             return
         bare = bare_chat_id(event.chat_id)
         if bare not in self._premium_ids:
@@ -180,14 +183,14 @@ class HandlersMixin:
         eth_address = eth_match.group(0).lower() if eth_match else None
 
         # ── ETH/RBH panel detection — independent of GATE_PREMIUM ────────────
-        if eth_address and (eth_on or rbh_on):
+        if eth_address and (eth_on or rbh_on or bnb_on):
             cap_key = f"{bare}:{eth_address}"
             if cap_key not in self._detection_seen:
                 self._detection_seen.add(cap_key)
                 asyncio.create_task(self._record_eth_detection(
                     eth_address, bare, source_name, raw,
                     username=source_uname, msg_id=event.id,
-                    check_eth=eth_on, check_rbh=rbh_on,
+                    check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
                 ))
 
         # ── Premium caller signal (forward + cross-group counting) ───────────

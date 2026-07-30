@@ -369,7 +369,7 @@ def _match_q(doc: dict, q: str) -> bool:
 
 @router.get("/detections")
 async def detections(
-    chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$"),
+    chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$"),
     q: str | None = None,
     multi: bool = False,              # "Multi 2+" filter — count >= 2 groups
     limit: int = Query(100, le=500),
@@ -393,7 +393,7 @@ async def detections(
 
 
 @router.get("/detections/stats")
-async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$")):
+async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$")):
     col = db.get_collection("premium_detections")
     base: dict = {} if chain == "all" else {"chain": chain}
     return {
@@ -404,7 +404,7 @@ async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)
 
 
 @router.get("/detections/dates")
-async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$")):
+async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$")):
     """Archived dates (History dropdown) for a chain, newest first."""
     flt: dict = {} if chain == "all" else {"chain": chain}
     docs = await db.get_collection("premium_archive").find(flt).to_list(1200)
@@ -416,7 +416,7 @@ async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$
 
 @router.get("/detections/history")
 async def detection_history(
-    chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$"),
+    chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$"),
     date: str = "",
     q: str | None = None,
     multi: bool = False,

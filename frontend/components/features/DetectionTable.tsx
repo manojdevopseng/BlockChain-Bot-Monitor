@@ -30,7 +30,7 @@ export type Detection = {
 // was pure repetition of the section title; merged, it is the only thing that
 // says which chain a row came from.
 const CHAIN_LABEL: Record<string, string> = {
-  eth: "Ethereum", rbh: "Robinhood", sol: "Solana",
+  eth: "Ethereum", rbh: "Robinhood", bnb: "BNB", sol: "Solana",
 };
 
 // Records written before group_entries existed only carry plain names; show

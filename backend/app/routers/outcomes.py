@@ -125,7 +125,7 @@ detections_csv = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
 
 @detections_csv.get("/detections/export.csv")
-async def export_detections(chain: str = Query("eth", pattern="^(all|eth|rbh|sol)$")):
+async def export_detections(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$")):
     flt: dict = {} if chain == "all" else {"chain": chain}
     docs = await db.get_collection("premium_detections").find(flt).to_list(5000)
     docs.sort(key=lambda d: d.get("ts", 0), reverse=True)

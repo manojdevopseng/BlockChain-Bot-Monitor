@@ -52,6 +52,13 @@ const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
       "karein to Telegram par alert jata hai. #2/#3 dusre provider ke lena — same " +
       "account ka doosra URL usi quota par marta hai.",
   },
+  "RPC Endpoints — BNB Chain": {
+    icon: Radio,
+    blurb:
+      "BNB Chain sirf premium-caller detection ke liye hai — koi discovery scanner " +
+      "nahi hai, isliye WSS bhi nahi, sirf HTTP jodi. #1 fail to #2, #2 fail to " +
+      "wapas #1. Dono khaali chhodo to BNB detection band rehti hai.",
+  },
   "RPC Endpoints — Solana": {
     icon: Radio,
     blurb:

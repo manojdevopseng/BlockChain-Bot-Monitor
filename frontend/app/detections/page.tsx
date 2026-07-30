@@ -20,12 +20,13 @@ import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
 
 /* ── 1-3: premium caller detection panels (RBH / ETH / SOL) ─────────────── */
 
-type PremiumChain = "all" | "rbh" | "eth" | "sol";
+type PremiumChain = "all" | "rbh" | "eth" | "bnb" | "sol";
 
 const PREMIUM_TABS = [
   { id: "all", label: "All" },
   { id: "rbh", label: "Robinhood" },
   { id: "eth", label: "Ethereum" },
+  { id: "bnb", label: "BNB" },
   { id: "sol", label: "Solana" },
 ] as const satisfies readonly { id: PremiumChain; label: string }[];
 

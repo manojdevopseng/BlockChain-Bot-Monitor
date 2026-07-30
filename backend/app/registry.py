@@ -79,6 +79,8 @@ DEFAULT_SERVICES: list[dict] = [
      "chain": "rbh", "enabled": True},
     {"id": "premium_sol_detection",   "category": BOT, "label": "Premium SOL",
      "chain": "sol", "enabled": True},
+    {"id": "premium_bnb_detection",   "category": BOT, "label": "Premium BNB",
+     "chain": "bnb", "enabled": True},
 
     # ── Bots: cross-chain and gas ──
     {"id": "sol_to_eth",            "category": BOT, "label": "SOL to ETH",

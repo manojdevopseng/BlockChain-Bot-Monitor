@@ -31,13 +31,18 @@ class PremiumCaptureMixin:
 
     async def _record_eth_detection(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None,
-                                   check_eth: bool = True, check_rbh: bool = True) -> None:
-        """Confirm an ETH-format address seen in a premium group and, per
-        chain it turns out to be a real contract on, record it in the SOL-panel
-        style dashboard sections ("ETH/RBH Address Detected From Premium
-        Caller"). `check_eth`/`check_rbh` are the Settings → Bots → Premium
-        ETH / Premium RBH toggles — either can be switched off without
-        touching the other or the separate premium-caller-forward feature."""
+                                   check_eth: bool = True, check_rbh: bool = True,
+                                   check_bnb: bool = True) -> None:
+        """Confirm an 0x-format address seen in a premium group and, per chain
+        it turns out to be a real contract on, record it in the Detections
+        panel under that chain's filter.
+
+        The same address is checked against every enabled chain, because an
+        0x address does not say which chain it belongs to — the same string can
+        be a live contract on Ethereum, BSC and Robinhood at once, and each is
+        a separate finding. `check_*` are the Settings → Bots → Premium ETH /
+        RBH / BNB toggles; any can be switched off without touching the others
+        or the separate premium-caller-forward feature."""
         if not self._http:
             return
         keyword = await self._match_keywords(text)
@@ -50,6 +55,15 @@ class PremiumCaptureMixin:
             native0,
         }
         rbh_bases = {config.RBH_WETH.lower(), "0x5fc5360d0400a0fd4f2af552add042d716f1d168", native0}
+        # WBNB plus the stables a BSC pair is usually quoted in (BSC-USD, BUSD,
+        # USDC), so _resolve_token picks the token side rather than the base.
+        bnb_bases = {
+            (config.BNB_WBNB or "").lower(),
+            "0x55d398326f99059ff775485246999027b3197955",   # BSC-USD (USDT)
+            "0xe9e7cea3dedca5984780bafc599bd69add087d56",   # BUSD
+            "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",   # USDC
+            native0,
+        }
 
         async def check_chain(label: str, chain: str, pool: EndpointPool, bases: set) -> None:
             try:
@@ -108,7 +122,8 @@ class PremiumCaptureMixin:
                 # Forwarder page can rank groups by how their calls did.
                 await outcomes.track(
                     source=outcomes.SRC_PREMIUM,
-                    chain={"ETH": "eth", "RBH": "robinhood", "SOL": "sol"}.get(label, "eth"),
+                    chain={"ETH": "eth", "RBH": "robinhood", "BNB": "bnb",
+                           "SOL": "sol"}.get(label, "eth"),
                     address=token_addr, symbol=record.get("symbol") or "",
                     groups=[group], keyword=keyword,
                 )
@@ -130,6 +145,8 @@ class PremiumCaptureMixin:
             tasks.append(check_chain("ETH", "eth", self._eth_http_pool, eth_bases))
         if check_rbh:
             tasks.append(check_chain("RBH", "rbh", self._rbh_http_pool, rbh_bases))
+        if check_bnb:
+            tasks.append(check_chain("BNB", "bnb", self._bnb_http_pool, bnb_bases))
         if tasks:
             await asyncio.gather(*tasks)
 
