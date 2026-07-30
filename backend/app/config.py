@@ -224,6 +224,13 @@ class Settings(BaseSettings):
     # a real on-chain account before recording it. A different job from the WSS
     # pair, so it gets its own 2-way failover rather than sharing one.
     sol_rpc_http_fallback: str = ""
+    # Same idea for the ETH/RBH side of premium capture: eth_getCode + token
+    # metadata lookups over ETH_RPC_HTTP/RBH_RPC_HTTP. Found live on 2026-07-30
+    # that the account behind these had hit its *monthly* cap — not the kind of
+    # thing rotation-on-a-per-second-429 fixes on its own, so these need a
+    # genuinely different key to help at all.
+    eth_rpc_http_fallback: str = ""
+    rbh_rpc_http_fallback: str = ""
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

@@ -81,6 +81,10 @@ ETH_WSS_ENDPOINTS  = [u for u in (settings.eth_rpc_wss,
                                   settings.eth_rpc_wss_fallback,
                                   settings.eth_rpc_wss_fallback2) if u]
 ETH_RPC_HTTP       = settings.eth_rpc_http
+# Unrelated to on-chain discovery: this is the premium-caller capture's
+# eth_getCode + token-metadata lookup pool (forwarder.py). Its own 2-way pair.
+ETH_HTTP_ENDPOINTS = [u for u in (settings.eth_rpc_http,
+                                  settings.eth_rpc_http_fallback) if u]
 ETH_V2_FACTORY     = settings.eth_v2_factory
 ETH_V3_FACTORY     = settings.eth_v3_factory
 ETH_V4_POOLMANAGER = settings.eth_v4_poolmanager
@@ -92,6 +96,10 @@ RBH_WSS_ENDPOINTS  = [u for u in (settings.rbh_rpc_wss,
                                   settings.rbh_rpc_wss_fallback,
                                   settings.rbh_rpc_wss_fallback2) if u]
 RBH_RPC_HTTP       = settings.rbh_rpc_http
+# Same idea as ETH_HTTP_ENDPOINTS above, for Robinhood's side of the same
+# premium-caller capture.
+RBH_HTTP_ENDPOINTS = [u for u in (settings.rbh_rpc_http,
+                                  settings.rbh_rpc_http_fallback) if u]
 RBH_V2_FACTORY     = settings.rbh_v2_factory
 RBH_V3_FACTORY     = settings.rbh_v3_factory
 RBH_V4_POOLMANAGER = settings.rbh_v4_poolmanager

@@ -68,6 +68,8 @@ GATE_DEXS    = "dexsignalcall"           # dexssignal
 GATE_OTTO    = "eth_otto_group"          # OttoEthDeployments
 GATE_PREMIUM = "premium_callers_signal"  # premium groups → premium ETH caller
 GATE_PREMIUM_SOL = "premium_sol_capture" # premium groups → SOL panel capture
+GATE_PREMIUM_ETH = "premium_eth_capture" # premium groups → ETH panel capture
+GATE_PREMIUM_RBH = "premium_rbh_capture" # premium groups → RBH panel capture
 
 # Premium groups, trigger keywords and Otto hash rules are NOT hardcoded here.
 # They are seeded once from app/data/seed_data.json into MongoDB and loaded at
@@ -196,6 +198,16 @@ class TelegramForwarder:
         # different provider doing a different job (see scfg.SOL_HTTP_ENDPOINTS).
         self._sol_http_pool = EndpointPool(
             "SOL-HTTP", lambda: list(config.SOL_HTTP_ENDPOINTS), chain_label="SOL premium check")
+        # Same idea, ETH/RBH side: eth_getCode + token-metadata reads for the
+        # premium-caller capture. Distinct chain_label from the on-chain
+        # discovery WSS pools ("Ethereum"/"Robinhood Chain") so an exhaustion
+        # alert for this doesn't read as if discovery itself were down.
+        self._eth_http_pool = EndpointPool(
+            "ETH-PREMIUM-HTTP", lambda: list(config.ETH_HTTP_ENDPOINTS),
+            chain_label="Ethereum premium check")
+        self._rbh_http_pool = EndpointPool(
+            "RBH-PREMIUM-HTTP", lambda: list(config.RBH_HTTP_ENDPOINTS),
+            chain_label="Robinhood premium check")
 
         # Loaded from Mongo in start() (seeded from seed_data.json, user-editable).
         self._premium_ids: set = set()
@@ -393,25 +405,86 @@ class TelegramForwarder:
         words = [d.get("word", "") for d in docs]
         return match_any(words, text or "")
 
-    # ── On-chain helpers (verbatim) ────────────────────────────────────────────
+    # ── On-chain helpers ─────────────────────────────────────────────────────────
 
-    async def _rpc_call(self, rpc_url: str, addr: str, data: Optional[str], method: str = "eth_call"):
-        params = [{"to": addr, "data": data}, "latest"] if method == "eth_call" else [addr, "latest"]
-        async with self._http.post(
-            rpc_url,
-            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-            timeout=aiohttp.ClientTimeout(total=6),
-        ) as resp:
-            return (await resp.json(content_type=None)).get("result")
+    async def _pooled_rpc(self, pool: EndpointPool, tag: str, method: str, params: list):
+        """JSON-RPC call rotating across `pool`'s endpoints on a rejection.
 
-    async def _resolve_token(self, rpc_url: str, addr: str, bases: set):
+        Returns the call's `result` on success. Returns None only once every
+        endpoint has failed — the caller must treat that as "could not check"
+        and NOT as a genuine RPC answer (an actual "no contract here" reply is
+        the string "0x", never None). Before this distinction existed, a
+        rate-limited/rejected call and a real negative result looked
+        identical, so a live monthly-quota outage on Alchemy silently dropped
+        every real token address seen in premium groups with no trace at all.
+
+        Shared by ETH, Robinhood and SOL's premium-caller HTTP checks — same
+        rotation, same "alert once when the whole pool is down" behaviour via
+        _maybe_alert_rpc (which reaches ALERT_CHAT_ID), instead of each having
+        its own slightly different copy.
+        """
+        attempts = max(1, len(pool.urls()))
+        last = "no endpoint configured"
+        for _ in range(attempts):
+            url = pool.current()
+            if not url:
+                break
+            host = host_of(url)
+            try:
+                async with self._http.post(
+                    url,
+                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                    timeout=aiohttp.ClientTimeout(total=6),
+                ) as resp:
+                    status = resp.status
+                    body = await resp.json(content_type=None)
+            except Exception as exc:
+                kind, detail = pool.note_failure(url, exc)
+                log.warning(f"[{tag}] {method} on {host} failed: {type(exc).__name__}: {exc}")
+                last = f"{host}: {detail}"
+                await self._maybe_alert_rpc(pool, tag)
+                pool.rotate(f"{kind} on {host}")
+                continue
+            err = (body or {}).get("error")
+            if status != 200 or err:
+                fail = status if status != 200 else RuntimeError(str(err))
+                kind, detail = pool.note_failure(url, fail)
+                log.warning(f"[{tag}] {method} on {host} -> {detail}")
+                last = f"{host}: {detail}"
+                await self._maybe_alert_rpc(pool, tag)
+                pool.rotate(f"{kind} on {host}")
+                continue
+            pool.note_success(url)
+            return body.get("result")
+        log.warning(f"[{tag}] {method} failed on every endpoint — {last}")
+        return None
+
+    async def _maybe_alert_rpc(self, pool: EndpointPool, tag: str) -> None:
+        """Alert ALERT_CHAT_ID when the whole pool is refusing. Throttled by
+        the pool itself, same as the WSS providers — one message, not one per
+        rejected call."""
+        if not pool.should_alert():
+            return
+        body = pool.alert_text()
+        log.warning(f"[{tag}] ALL RPC ENDPOINTS EXHAUSTED — {body.splitlines()[0]}")
         try:
-            t0, t1 = await asyncio.gather(
-                self._rpc_call(rpc_url, addr, "0x0dfe1681"),
-                self._rpc_call(rpc_url, addr, "0xd21220a7"),
-            )
-        except Exception:
-            return addr, None
+            from .. import notifier
+            await notifier.notify_rpc_exhausted(pool.label, body)
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"[{tag}] could not send exhaustion alert: {exc}")
+
+    async def _eth_call(self, pool: EndpointPool, tag: str, addr: str,
+                        data: Optional[str], method: str = "eth_call"):
+        params = [{"to": addr, "data": data}, "latest"] if method == "eth_call" else [addr, "latest"]
+        return await self._pooled_rpc(pool, tag, method, params)
+
+    async def _resolve_token(self, pool: EndpointPool, tag: str, addr: str, bases: set):
+        t0, t1 = await asyncio.gather(
+            self._eth_call(pool, tag, addr, "0x0dfe1681"),
+            self._eth_call(pool, tag, addr, "0xd21220a7"),
+        )
+        if t0 is None or t1 is None:
+            return None, None   # every endpoint failed — don't guess
         a0, a1 = _addr_from_word(t0), _addr_from_word(t1)
         if not a0 or not a1:
             return addr, None
@@ -422,7 +495,14 @@ class TelegramForwarder:
         return (a1 if a0 in bases else a0), addr
 
     async def _capture_premium_eth(self, addr: str, chat_id: int, group: str, text: str,
-                                   username: Optional[str] = None, msg_id: Optional[int] = None) -> None:
+                                   username: Optional[str] = None, msg_id: Optional[int] = None,
+                                   check_eth: bool = True, check_rbh: bool = True) -> None:
+        """Confirm an ETH-format address seen in a premium group and, per
+        chain it turns out to be a real contract on, record it in the SOL-panel
+        style dashboard sections ("ETH/RBH Address Detected From Premium
+        Caller"). `check_eth`/`check_rbh` are the Settings → Bots → Premium
+        ETH / Premium RBH toggles — either can be switched off without
+        touching the other or the separate premium-caller-forward feature."""
         if not self._http:
             return
         keyword = await self._match_keywords(text)
@@ -436,14 +516,18 @@ class TelegramForwarder:
         }
         rbh_bases = {config.RBH_WETH.lower(), "0x5fc5360d0400a0fd4f2af552add042d716f1d168", native0}
 
-        async def check_chain(label: str, chain: str, rpc_url: str, bases: set) -> None:
+        async def check_chain(label: str, chain: str, pool: EndpointPool, bases: set) -> None:
             try:
-                if not rpc_url:
+                if not pool.urls():
                     return
-                code = await self._rpc_call(rpc_url, addr, None, "eth_getCode")
-                if not code or code == "0x":
-                    return
-                token_addr, pair_addr = await self._resolve_token(rpc_url, addr, bases)
+                code = await self._eth_call(pool, f"PREMIUM-{label}", addr, None, "eth_getCode")
+                if code is None:
+                    return  # every endpoint failed — already logged/alerted, nothing to conclude
+                if code == "0x":
+                    return  # confirmed: not a contract at this address
+                token_addr, pair_addr = await self._resolve_token(pool, f"PREMIUM-{label}", addr, bases)
+                if token_addr is None:
+                    return  # resolve calls failed on every endpoint
                 token_l = token_addr.lower()
                 existing = await _col("premium_detections").find_one(
                     {"chain": chain, "address": {"$regex": f"^{re.escape(token_l)}$", "$options": "i"}}
@@ -467,8 +551,8 @@ class TelegramForwarder:
                     log.info(f"[PREMIUM-{label}] {existing.get('symbol') or token_addr[:10]} shill count → {len(entries)} (from {group})")
                     return
                 name_hex, sym_hex = await asyncio.gather(
-                    self._rpc_call(rpc_url, token_addr, "0x06fdde03"),
-                    self._rpc_call(rpc_url, token_addr, "0x95d89b41"),
+                    self._eth_call(pool, f"PREMIUM-{label}", token_addr, "0x06fdde03"),
+                    self._eth_call(pool, f"PREMIUM-{label}", token_addr, "0x95d89b41"),
                 )
                 record = {
                     "chain": chain,
@@ -498,58 +582,32 @@ class TelegramForwarder:
                 log.info(f"[PREMIUM-{label}] Captured {record['symbol'] or token_addr[:10]} from {group} | "
                          + (f"{keyword} Matched" if keyword else "Not Matched"))
             except Exception as exc:
-                log.debug(f"[PREMIUM-{label}] capture failed for {addr[:10]}: {exc}")
+                # Was log.debug — invisible even on the Logs page (below its
+                # INFO floor). An RPC rejection is already handled (rotated,
+                # eventually alerted) inside _eth_call/_pooled_rpc; this catch
+                # is for anything else that goes wrong in between, and it
+                # should not vanish without a trace either.
+                log.warning(f"[PREMIUM-{label}] capture failed for {addr[:10]}: "
+                           f"{type(exc).__name__}: {exc}")
 
-        await asyncio.gather(
-            check_chain("ETH", "eth", config.ETH_RPC_HTTP, eth_bases),
-            check_chain("RBH", "rbh", config.RBH_RPC_HTTP, rbh_bases),
-        )
+        tasks = []
+        if check_eth:
+            tasks.append(check_chain("ETH", "eth", self._eth_http_pool, eth_bases))
+        if check_rbh:
+            tasks.append(check_chain("RBH", "rbh", self._rbh_http_pool, rbh_bases))
+        if tasks:
+            await asyncio.gather(*tasks)
 
     # ── SOL premium capture (dashboard panel — new) ───────────────────────────
 
     async def _sol_rpc(self, method: str, params: list):
         """JSON-RPC call over the SOL premium-check pool (Alchemy #1/#2).
 
-        Unrelated to SOL_RPC_WSS: this is a plain HTTP getAccountInfo check, so
-        a bad response is a status code on the reply, not a raised exception —
-        classified the same way as a rejected WebSocket handshake, just from an
-        int instead of an exception. A rejection rotates immediately and is
-        retried on the other endpoint; with only two, there is no spare attempt
-        to waste retrying the one that just failed. Returns None, logged rather
-        than silent, only once both have failed.
+        Thin wrapper over the shared _pooled_rpc — same rotation, same
+        "alert ALERT_CHAT_ID once the whole pool is down" behaviour as the
+        ETH/RBH premium checks, instead of its own near-identical copy.
         """
-        pool = self._sol_http_pool
-        attempts = max(1, len(pool.urls()))
-        last = "no endpoint configured"
-        for _ in range(attempts):
-            url = pool.current()
-            if not url:
-                break
-            host = host_of(url)
-            try:
-                async with self._http.post(
-                    url,
-                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-                    timeout=aiohttp.ClientTimeout(total=6),
-                ) as resp:
-                    if resp.status != 200:
-                        kind, detail = pool.note_failure(url, resp.status)
-                        last = f"{host}: {detail}"
-                        log.warning(f"[SOL-HTTP] {method} on {host} -> {detail}")
-                        pool.rotate(f"{kind} on {host}")
-                        continue
-                    body = await resp.json(content_type=None)
-            except Exception as exc:
-                kind, detail = pool.note_failure(url, exc)
-                last = f"{host}: {detail}"
-                log.warning(f"[SOL-HTTP] {method} on {host} failed: "
-                           f"{type(exc).__name__}: {exc}")
-                pool.rotate(f"{kind} on {host}")
-                continue
-            pool.note_success(url)
-            return body.get("result")
-        log.error(f"[SOL-HTTP] {method} failed on every endpoint — {last}")
-        return None
+        return await self._pooled_rpc(self._sol_http_pool, "SOL-HTTP", method, params)
 
     async def _sol_token_info(self, address: str) -> dict:
         """Best-effort symbol/name via GMGN web quotation API (no key needed)."""
@@ -693,14 +751,22 @@ class TelegramForwarder:
                 )
 
     async def _premium_handler(self, event) -> None:
-        # Two independent switches share this handler: GATE_PREMIUM covers the
-        # premium-all forward and the ETH side (caller signal + cross-group
-        # counting); GATE_PREMIUM_SOL covers only the SOL panel capture below.
-        # Neither implies the other any more — turning one off must not also
-        # silently stop the other.
+        # Four independent switches share this handler:
+        #   GATE_PREMIUM      — the premium-all forward + the caller-signal
+        #                       feature (cross-group counting, forward to
+        #                       DEST_PREMIUM_ETH_CALLER)
+        #   GATE_PREMIUM_SOL  — SOL panel capture (getAccountInfo check)
+        #   GATE_PREMIUM_ETH  — ETH panel capture (eth_getCode check)
+        #   GATE_PREMIUM_RBH  — RBH panel capture (eth_getCode check)
+        # None of the panel-capture ones require GATE_PREMIUM any more: a
+        # premium address is an on-chain question ("is this a real contract on
+        # X"), independent of whether the caller-signal forward is switched
+        # on. Turning one off must not silently stop another.
         premium_on = self._on(GATE_PREMIUM)
         sol_on = self._on(GATE_PREMIUM_SOL)
-        if not premium_on and not sol_on:
+        eth_on = self._on(GATE_PREMIUM_ETH)
+        rbh_on = self._on(GATE_PREMIUM_RBH)
+        if not any((premium_on, sol_on, eth_on, rbh_on)):
             return
         bare = bare_chat_id(event.chat_id)
         if bare not in self._premium_ids:
@@ -760,20 +826,25 @@ class TelegramForwarder:
                         username=source_uname, msg_id=event.id,
                     ))
 
-        if not premium_on:
-            return
         eth_match = _ETH_RE.search(message)
-        if not eth_match:
-            return
-        eth_address = eth_match.group(0).lower()
+        eth_address = eth_match.group(0).lower() if eth_match else None
 
-        cap_key = f"{bare}:{eth_address}"
-        if cap_key not in self._capture_seen:
-            self._capture_seen.add(cap_key)
-            asyncio.create_task(self._capture_premium_eth(
-                eth_address, bare, source_name, raw,
-                username=source_uname, msg_id=event.id,
-            ))
+        # ── ETH/RBH panel capture — independent of GATE_PREMIUM ──────────────
+        if eth_address and (eth_on or rbh_on):
+            cap_key = f"{bare}:{eth_address}"
+            if cap_key not in self._capture_seen:
+                self._capture_seen.add(cap_key)
+                asyncio.create_task(self._capture_premium_eth(
+                    eth_address, bare, source_name, raw,
+                    username=source_uname, msg_id=event.id,
+                    check_eth=eth_on, check_rbh=rbh_on,
+                ))
+
+        # ── Premium caller signal (forward + cross-group counting) ───────────
+        # Everything below is the separate feature GATE_PREMIUM actually
+        # names — turning off Premium ETH/RBH above does not touch this.
+        if not premium_on or not eth_address:
+            return
 
         group_key = (event.chat_id, eth_address)
         if group_key in self._group_eth_tracker:

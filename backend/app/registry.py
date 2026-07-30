@@ -36,11 +36,16 @@ DEFAULT_SERVICES: list[dict] = [
      "chain": "eth", "key": "gas_fees",        "enabled": True},
     {"id": "premium_callers_signal","category": BOT, "label": "Premium Callers Signal",
      "chain": "eth", "key": "premium_callers",  "enabled": True},
-    # A Solana address seen in a premium group, captured to the SOL panel after
-    # an on-chain getAccountInfo check. Split out from Premium Callers Signal
-    # (which forwards + does the ETH side) so either can be switched off
-    # without taking the other down with it.
-    {"id": "premium_sol_capture",   "category": BOT, "label": "Premium SOL Capture",
+    # A CA address seen in a premium group, verified on-chain and captured to
+    # its dashboard panel — three independent switches, one per chain, split
+    # out from Premium Callers Signal (which is the forward + cross-group
+    # counting feature) so any of the four can be switched off without taking
+    # the others down with it.
+    {"id": "premium_eth_capture",   "category": BOT, "label": "Premium ETH",
+     "chain": "eth", "key": "premium_eth",      "enabled": True},
+    {"id": "premium_rbh_capture",   "category": BOT, "label": "Premium RBH",
+     "chain": "rbh", "key": "premium_rbh",      "enabled": True},
+    {"id": "premium_sol_capture",   "category": BOT, "label": "Premium SOL",
      "chain": "sol", "key": "premium_sol",      "enabled": True},
     {"id": "dexsignalcall",         "category": BOT, "label": "DexSignalCall",
      "chain": "eth", "key": "dexssignal",       "enabled": True},

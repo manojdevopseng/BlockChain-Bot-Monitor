@@ -95,6 +95,42 @@ EDITABLE: dict[str, dict] = {
         "help": "Third endpoint. With all three refusing you get one alert and "
                 "rotation keeps going, so it recovers when a quota resets.",
     },
+    # A different job again: eth_getCode + token-metadata reads for the
+    # premium-caller capture (Premium ETH toggle in Settings → Bots), nothing
+    # to do with on-chain discovery above. Found live on 2026-07-30 that this
+    # key had hit Alchemy's *monthly* cap — a rotation-proof failure mode a
+    # per-second-429 fallback doesn't help with; only a genuinely different
+    # key/plan does.
+    "ETH_RPC_HTTP": {
+        "label": "ETH HTTP #1 — premium-caller capture (Alchemy)",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Ethereum", "applies": "live",
+        "help": "Used by Settings → Bots → Premium ETH to confirm an address "
+                "seen in a premium group is a real contract before recording "
+                "it. Applied on the next check, no restart.",
+    },
+    "ETH_RPC_HTTP_FALLBACK": {
+        "label": "ETH HTTP #2 — premium-caller capture (Alchemy)",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Ethereum", "applies": "live",
+        "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
+    },
+    "GAS_RPC_WSS": {
+        "label": "ETH Gas Fees WebSocket (own key)",
+        "kind": "wss", "secret": True,
+        "group": "RPC Endpoints — Ethereum", "applies": "worker:eth",
+        "help": "A third unrelated job: watches every detected pair for a "
+                "high-gas early buy. On its own key so a busy gas-monitoring "
+                "load can't eat the compute units new-pair detection needs. "
+                "Blank = share ETH WebSocket #1 above, exactly as before.",
+    },
+    "GAS_RPC_HTTP": {
+        "label": "ETH Gas Fees HTTP (own key)",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Ethereum", "applies": "live",
+        "help": "Reads the gas paid on each buy's transaction receipt. Blank = "
+                "share ETH HTTP #1 above.",
+    },
     "RBH_RPC_WSS": {
         "label": "Robinhood WebSocket #1", "kind": "wss", "secret": True,
         "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
@@ -109,6 +145,22 @@ EDITABLE: dict[str, dict] = {
         "label": "Robinhood WebSocket #3", "kind": "wss", "secret": True,
         "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Third endpoint.",
+    },
+    # Same split as ETH above: premium-caller capture (Premium RBH toggle),
+    # unrelated to the on-chain discovery WebSockets.
+    "RBH_RPC_HTTP": {
+        "label": "RBH HTTP #1 — premium-caller capture (Alchemy)",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Robinhood Chain", "applies": "live",
+        "help": "Used by Settings → Bots → Premium RBH to confirm an address "
+                "seen in a premium group is a real contract before recording "
+                "it. Applied on the next check, no restart.",
+    },
+    "RBH_RPC_HTTP_FALLBACK": {
+        "label": "RBH HTTP #2 — premium-caller capture (Alchemy)",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Robinhood Chain", "applies": "live",
+        "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
     },
     # SOL runs two unrelated jobs on two unrelated endpoints, unlike ETH/RBH
     # where one WSS URL covers everything — spelled out in every label below so
@@ -356,10 +408,13 @@ def _refresh_derived(scfg, key: str) -> None:
     success, and is never dialled. Same for GAS_RPC_WSS, which falls back to
     the ETH socket.
     """
-    if key.startswith("SOL_RPC_HTTP"):
-        scfg.SOL_HTTP_ENDPOINTS = [u for u in (settings.sol_rpc_http or "",
-                                               settings.sol_rpc_http_fallback or "")
-                                   if u]
+    if key.startswith(("ETH_RPC_HTTP", "RBH_RPC_HTTP", "SOL_RPC_HTTP")):
+        chain = key[:3]
+        low = chain.lower()
+        setattr(scfg, f"{chain}_HTTP_ENDPOINTS",
+               [u for u in (getattr(settings, f"{low}_rpc_http", "") or "",
+                           getattr(settings, f"{low}_rpc_http_fallback", "") or "")
+                if u])
         return
     if not key.startswith(("ETH_RPC_WSS", "RBH_RPC_WSS", "SOL_RPC_WSS")):
         return
