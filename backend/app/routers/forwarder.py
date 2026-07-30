@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db, fwd_counters, registry
 from ..scanners import scfg, userbot
-from ..util import gmgn_url, clean_list
+from ..util import gmgn_url, clean_list, ist_date_str
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
@@ -417,10 +417,19 @@ async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|
 
 @router.get("/detections/dates")
 async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$")):
-    """Archived dates (History dropdown) for a chain, newest first."""
+    """Days the History dropdown offers, newest first.
+
+    Both sources, not just the archive. A day only reaches premium_archive when
+    it ends, so an archive-only list could never contain today — while every
+    other section derives its dates from live rows and offers today as soon as
+    it has one. That is the difference the dropdowns were showing.
+    """
     flt: dict = {} if chain == "all" else {"chain": chain}
     docs = await db.get_collection("premium_archive").find(flt).to_list(1200)
     days = {d.get("date") for d in docs if d.get("date")}
+    live = await db.get_collection("premium_detections").find(flt).to_list(_MATCH_SCAN_CAP)
+    days |= {ist_date_str(d["ts"]) for d in live if d.get("ts")}
+    days.discard(None)
     # Parse before sorting. DD-MM-YYYY sorted as text puts 31-01 after 01-02,
     # so the dropdown ran out of order across every month boundary.
     return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}
@@ -441,15 +450,30 @@ async def detection_history(
     """
     # One archive doc per chain per day, so "all" merges that day's three docs
     # and re-sorts — otherwise the ETH rows would all sit above the SOL ones.
-    col = db.get_collection("premium_archive")
+    # One archive doc per chain per day, so "all" merges that day's docs and
+    # re-sorts — otherwise the ETH rows would all sit above the SOL ones.
+    arch = db.get_collection("premium_archive")
     if chain == "all":
-        docs = await col.find({"date": date}).to_list(10)
-        items = [dict(i, chain=i.get("chain") or d.get("chain"))
-                 for d in docs for i in (d.get("items") or [])]
-        items.sort(key=lambda d: d.get("ts", 0), reverse=True)
+        docs = await arch.find({"date": date}).to_list(20)
     else:
-        doc = await col.find_one({"chain": chain, "date": date})
-        items = (doc or {}).get("items", [])
+        docs = await arch.find({"chain": chain, "date": date}).to_list(5)
+    items = [dict(i, chain=i.get("chain") or d.get("chain"))
+             for d in docs for i in (d.get("items") or [])]
+
+    # Rows for a day that has not been archived yet — today, always — are still
+    # in the live collection. Without this, picking today returned nothing.
+    live_flt: dict = {} if chain == "all" else {"chain": chain}
+    live = await db.get_collection("premium_detections").find(live_flt).to_list(_MATCH_SCAN_CAP)
+    seen = {(i.get("chain"), str(i.get("address", "")).lower()) for i in items}
+    for d in live:
+        if not d.get("ts") or ist_date_str(d["ts"]) != date:
+            continue
+        key = (d.get("chain"), str(d.get("address", "")).lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({k: v for k, v in d.items() if k != "_id"})
+    items.sort(key=lambda d: d.get("ts", 0), reverse=True)
     if multi:
         items = [d for d in items if int(d.get("count") or 0) >= 2]
     if q:

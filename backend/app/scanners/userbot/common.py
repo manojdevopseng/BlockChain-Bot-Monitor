@@ -51,6 +51,12 @@ GATE_PREMIUM_RBH = "premium_rbh_detection"   # premium groups → RBH detections
 GATE_PREMIUM_SOL = "premium_sol_detection"   # premium groups → SOL detections panel
 GATE_PREMIUM_BNB = "premium_bnb_detection"   # premium groups → BNB detections panel
 
+# Every chain the premium panels hold. The daily rollover iterates this, and it
+# used to be a hardcoded ("eth", "rbh") — so when SOL and BNB detection were
+# added their rows were never archived and never cleared, and grew without
+# bound in premium_detections while never appearing in History.
+DETECTION_CHAINS = ("eth", "rbh", "bnb", "sol")
+
 # ── Tunables ──────────────────────────────────────────────────────────────────
 # How often the live premium-group set is re-read from Mongo.
 PREMIUM_RELOAD_SECONDS = 20

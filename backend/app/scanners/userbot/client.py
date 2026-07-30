@@ -27,7 +27,7 @@ from app.scanners.bounded_set import BoundedSet
 from app.scanners.wss_pool import EndpointPool
 from app.util import ist_day
 
-from .common import DEDUP_MAX, PREMIUM_RELOAD_SECONDS, log
+from .common import DEDUP_MAX, DETECTION_CHAINS, PREMIUM_RELOAD_SECONDS, log
 from .handlers import HandlersMixin
 from .onchain import OnChainMixin
 from .premium import PremiumCaptureMixin
@@ -210,7 +210,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         return len(self._premium_ids)
 
     async def _daily_rollover_watcher(self) -> None:
-        """At IST midnight, archive both detection panels into premium_archive
+        """At IST midnight, archive every detection panel into premium_archive
         and clear premium_detections for the new day."""
         while True:
             try:
@@ -218,7 +218,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
                 today = ist_day(time.time())
                 if today == self._last_rollover_day:
                     continue
-                for chain in ("eth", "rbh"):
+                for chain in DETECTION_CHAINS:
                     items = await load_detections(chain)
                     if items:
                         await col("premium_archive").insert_one({
