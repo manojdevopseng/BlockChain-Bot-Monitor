@@ -14,7 +14,8 @@ import { FilterTabs, HistorySelect, SearchBox } from "@/components/SectionFilter
 import { DownloadCsv } from "@/components/features/Performance";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
-import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
+import { fmtDateTime, fmtEth, shortAddr, rowKey } from "@/lib/utils";
+import { Age, TickProvider } from "@/components/Age";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
 
@@ -120,17 +121,18 @@ function GasSection() {
               <tr className={`${STICKY_HEAD} border-b border-border`}>
                 <th className="px-3 py-2.5 font-medium">Symbol</th>
                 <th className="px-3 py-2.5 font-medium">Name</th>
+                <th className="px-3 py-2.5 font-medium">Age</th>
                 <th className="px-3 py-2.5 font-medium">CA</th>
                 <th className="px-3 py-2.5 font-medium">DEX</th>
                 <th className="px-3 py-2.5 font-medium">Gas Fee</th>
-                <th className="px-3 py-2.5 font-medium">Age</th>
+                <th className="px-3 py-2.5 font-medium">Token Age</th>
                 <th className="px-3 py-2.5 font-medium">Tx</th>
                 <th className="px-3 py-2.5 font-medium">When</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
                   {query ? "No high-gas buy matches this search"
                     : date ? `No high-gas buys on ${date}`
                     : "No high-gas buys caught yet"}
@@ -144,6 +146,9 @@ function GasSection() {
                     </div>
                   </td>
                   <td className="px-3 py-3"><span className="text-text-muted">{r.name || "—"}</span></td>
+                  <td className="px-3 py-3">
+                    <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
+                  </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-xs text-accent-blue">{shortAddr(r.address)}</span>
@@ -171,7 +176,11 @@ function GasSection() {
                       </span>
                     ) : "—"}
                   </td>
-                  <td className="px-3 py-3"><span className="text-text-muted">{r.created_at ? timeAgo(r.created_at) : "—"}</span></td>
+                  <td className="px-3 py-3">
+                    <span className="font-mono text-xs text-text-muted">
+                      {r.created_at ? fmtDateTime(r.created_at) : "—"}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -224,6 +233,7 @@ function CrossChainSection() {
 
 export default function DetectionsPage() {
   return (
+    <TickProvider>
     <div className="space-y-5">
       <PageHeader
         title="Detections"
@@ -233,5 +243,6 @@ export default function DetectionsPage() {
       <CrossChainSection />
       <GasSection />
     </div>
+    </TickProvider>
   );
 }

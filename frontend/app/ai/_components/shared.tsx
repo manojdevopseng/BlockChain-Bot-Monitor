@@ -7,12 +7,13 @@
  * made the actual page layout hard to find among them.
  */
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { useState } from "react";
 import { Twitter } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
 import { shortAddr } from "@/lib/utils";
+export { Age, TickProvider } from "@/components/Age";
 
 
 // Verdicts, in the order they matter:
@@ -62,38 +63,6 @@ export function useFeedEnabled(): boolean | undefined {
 export function FeedState({ enabled }: { enabled: boolean | undefined }) {
   if (enabled !== false) return null;
   return <Badge variant="amber">feed off — Settings → Bots → X Links Feed</Badge>;
-}
-
-// Ages were rendered once per fetch, so a row sat on "1m ago" for a whole minute
-// and the section looked frozen between refreshes. A tick fixes that, but
-// ticking the section itself re-renders every row every second — fine for forty
-// rows, not for hundreds. So the clock lives in a context and only the age cells
-// subscribe to it: one timer, and a second's work is a few dozen text nodes.
-const TickContext = createContext(0);
-
-export function TickProvider({ children }: { children: React.ReactNode }) {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setN((v) => v + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return <TickContext.Provider value={n}>{children}</TickContext.Provider>;
-}
-
-export function Age({ ts }: { ts?: number }) {
-  useContext(TickContext);
-  return <>{ts ? ageLabel(ts) : "—"}</>;
-}
-
-// Seconds only while they mean something. A launch is worth watching by the
-// second in its first minute; after that the seconds are just noise ticking in
-// the corner of the eye, so the age rounds to minutes and then to hours.
-function ageLabel(ts: number): string {
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  const h = Math.floor(s / 3600);
-  return `${h}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
 // Highlighting the Settings keywords where they appear. Whole-word and

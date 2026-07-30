@@ -4,7 +4,8 @@ import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
-import { fmtDateTime, shortAddr, timeAgo, rowKey } from "@/lib/utils";
+import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
+import { Age } from "@/components/Age";
 
 export type GroupEntry = {
   chat_id?: number;
@@ -53,11 +54,11 @@ export function DetectionTable(
             {showChain && <th className="px-3 py-2.5 font-medium">Chain</th>}
             <th className="px-3 py-2.5 font-medium">Symbol</th>
             <th className="px-3 py-2.5 font-medium">Name</th>
+            <th className="px-3 py-2.5 font-medium">Age</th>
             <th className="px-3 py-2.5 font-medium">Address</th>
             <th className="px-3 py-2.5 font-medium">Groups</th>
             <th className="px-3 py-2.5 font-medium">Keyword</th>
             <th className="px-3 py-2.5 font-medium">Count</th>
-            <th className="px-3 py-2.5 font-medium">Timestamp</th>
             <th className="px-3 py-2.5 font-medium">When</th>
           </tr>
         </thead>
@@ -141,13 +142,9 @@ export function DetectionTable(
                 <td className="px-3 py-3">
                   <span className="font-bold text-accent-amber">{d.count ?? 1}</span>
                 </td>
-                {/* Timestamp */}
+                {/* When — the absolute time; Age above is the live one */}
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">{d.ts ? fmtDateTime(d.ts) : "—"}</span>
-                </td>
-                {/* When */}
-                <td className="px-3 py-3">
-                  <span className="text-text-muted">{d.ts ? timeAgo(d.ts) : "—"}</span>
                 </td>
               </tr>
             ))
