@@ -143,25 +143,17 @@ class Settings(BaseSettings):
     ai_dry_run: bool = True
     # Verdict must reach this to notify.
     ai_min_confidence: int = 7
-    # A narrative of "other" is the catch-all, so it has to clear a higher bar
-    # or it becomes a free pass for everything.
-    ai_other_min_confidence: int = 8
     # Which kinds of verified account count. Paid blue is `individual`; drop it
     # from this list if blue-tick spam gets through.
     ai_verified_types: str = "government,business,individual"
-    # Profile branch: skip accounts with at least this many followers. The idea
-    # was that a token riding the White House's name says nothing about the
-    # token — but it also threw away every genuinely big account, so it is off.
-    # 0 = no follower limit anywhere; set a number to bring the rule back.
-    ai_big_account_followers: int = 0
-    # A tweet older than this is stale news; the token is not about it.
-    ai_tweet_max_age_hours: int = 24
-    # One X link is reused across many tokens, so it is analysed at most this
-    # many times a day. Straight from the reference bot, where a single viral
-    # link otherwise cost an AI call per copycat token.
-    ai_max_link_reads: int = 2
     # Where notifications go. Blank = ROBINHOOD_CHAT_ID.
     ai_chat_id: str = ""
+    # NOTE: AI_OTHER_MIN_CONFIDENCE, AI_BIG_ACCOUNT_FOLLOWERS,
+    # AI_TWEET_MAX_AGE_HOURS and AI_MAX_LINK_READS used to live here. The gate
+    # rewrite in 26cc827 removed the code that read them but left the fields,
+    # so they sat here and in .env.example looking adjustable while changing
+    # them did nothing at all. Removed rather than re-wired: the gates they
+    # belonged to no longer exist.
 
     # ── What a launch has to be worth ───────────────────────
     # The Telegram rule, and only that — the model's gate is separate and does

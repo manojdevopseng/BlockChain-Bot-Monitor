@@ -227,7 +227,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
                             "dt": datetime.now(timezone.utc),
                         })
                     await col("premium_detections").delete_many({"chain": chain})
-                log.info(f"[DAILY-ROLLOVER] New IST day — panels archived + cleared")
+                log.info("[DAILY-ROLLOVER] New IST day — panels archived + cleared")
                 self._last_rollover_day = today
             except asyncio.CancelledError:
                 return

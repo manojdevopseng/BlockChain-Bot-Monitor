@@ -82,7 +82,8 @@ async def start() -> None:
 
 
 async def stop() -> None:
-    global _watchdog, _outcomes, _digest
+    # No `global` declaration: the loop clears these through globals()[attr],
+    # so declaring them global here did nothing at all.
     for attr in ("_watchdog", "_outcomes", "_digest", "_ai_agent", "_x_feed"):
         task = globals().get(attr)
         if task is not None and not task.done():

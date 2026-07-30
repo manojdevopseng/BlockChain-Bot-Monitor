@@ -18,7 +18,7 @@ a wallet the user already controls.
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from . import db
 from .scanners.slog import get_logger
