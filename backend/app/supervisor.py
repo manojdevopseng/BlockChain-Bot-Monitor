@@ -182,8 +182,9 @@ async def reconcile() -> None:
     await _set_standalone("_x_feed", bool(enabled.get("x_feed", True)),
                           ai_agent.x_feed_watch, "x-feed")
 
-    # Push the live toggle map into a running forwarder so per-source gates
-    # (BBCAnalyser2 / DexSignalCall / ETH otto / Premium Callers) update live.
+    # Push the live toggle map into a running userbot so its per-source gates
+    # (CallAnalyser2 / BuyBotTracker / DexSignalCall / ETH Otto) and premium
+    # features update live, without restarting the Telethon session.
     fwd = _instances.get("fwd")
     if fwd is not None:
         fwd.set_enabled_map(enabled)
@@ -350,21 +351,25 @@ def status() -> dict[str, str]:
 
 
 # Every registry service maps to the worker that actually does its work. A
-# toggle being on says nothing about whether that worker is alive — the
-# forwarder's four sub-features are all dead if the userbot never logged in,
-# and the gas monitor rides the ETH socket.
+# toggle being on says nothing about whether that worker is alive — every
+# userbot feature is dead if the Telethon session never logged in, and the gas
+# monitor rides the ETH socket.
 _DEPENDS_ON = {
-    "sol_to_eth":             "eth",
-    "sol_to_rbh":             "rbh",
-    "eth_gas_fees":           "eth",
-    "forwarder":              "fwd",
+    # Userbot source channels (ids match the channel names in .env).
+    "callanalyser2":          "fwd",
+    "buybottracker":          "fwd",
+    "dexsignalcall":          "fwd",
+    "eth_otto_group":         "fwd",
+    # Userbot premium features.
     "premium_callers_signal": "fwd",
     "premium_eth_capture":    "fwd",
     "premium_rbh_capture":    "fwd",
     "premium_sol_capture":    "fwd",
-    "dexsignalcall":          "fwd",
-    "bbcanalyser2":           "fwd",
-    "eth_otto_group":         "fwd",
+    "forwarder":              "fwd",
+    # Cross-chain flows and gas, on their chain's socket.
+    "sol_to_eth":             "eth",
+    "sol_to_rbh":             "rbh",
+    "eth_gas_fees":           "eth",
     "chain_eth":              "eth",
     "chain_rbh":              "rbh",
     "chain_sol":              "sol",

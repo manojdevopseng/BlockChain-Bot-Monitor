@@ -9,7 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db, fwd_counters, registry
-from ..scanners import scfg
+from ..scanners import scfg, userbot
 from ..util import gmgn_url, clean_list
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
@@ -20,14 +20,16 @@ def _gmgn_url(chain: str, address: str) -> str:
 
 
 # The four signal channels the userbot listens to, and the registry switch that
-# gates each one. Names come from .env — nothing hardcoded.
+# gates each one. Names come from .env — nothing hardcoded. The gate ids come
+# from the userbot's own GATE_* constants rather than being retyped here, so
+# this page and the handler that actually reads the switch cannot drift apart.
 def _signal_channels() -> list[tuple[str, str, str]]:
     """(channel name, registry service id, what it feeds)"""
     return [
-        (scfg.SOURCE_CALL,   "bbcanalyser2",           "first-call signals → DEST_SIGNALS"),
-        (scfg.SOURCE_BUYBOT, "forwarder",              "new-group signals → DEST_SIGNALS"),
-        (scfg.SOURCE_DEXS,   "dexsignalcall",          "DEX signals → DEST_DEXS"),
-        (scfg.SOURCE_OTTO,   "eth_otto_group",         "Otto deployments → DEST_OTTO"),
+        (scfg.SOURCE_CALL,   userbot.GATE_CALL,   "first-call signals → DEST_SIGNALS"),
+        (scfg.SOURCE_BUYBOT, userbot.GATE_BUYBOT, "new-group signals → DEST_SIGNALS"),
+        (scfg.SOURCE_DEXS,   userbot.GATE_DEXS,   "DEX signals → DEST_DEXS"),
+        (scfg.SOURCE_OTTO,   userbot.GATE_OTTO,   "Otto deployments → DEST_OTTO"),
     ]
 
 

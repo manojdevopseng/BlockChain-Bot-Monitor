@@ -4,7 +4,7 @@ Each handler is effectively its own bot, gated by its own registry toggle so
 the Settings switches turn them on and off live:
 
     _call_handler    CallAnalyser2      → Signals      (GATE_CALL)
-    _buybot_handler  BuyBotTracker      → Signals      (master Forwarder gate)
+    _buybot_handler  BuyBotTracker      → Signals      (GATE_BUYBOT)
     _dexs_handler    DexsSignal         → Dexs group   (GATE_DEXS)
     _premium_handler premium groups     → four features (see its own docstring)
     _otto_handler    OttoEthDeployments → Otto group   (GATE_OTTO)
@@ -23,9 +23,10 @@ from app import fwd_counters, heartbeat
 from app.util import bare_chat_id
 
 from .common import (DEST_DEXS, DEST_OTTO, DEST_PREMIUM_ALL, DEST_PREMIUM_ETH_CALLER,
-                     DEST_SIGNALS, ETH_RE, GATE_CALL, GATE_DEXS, GATE_OTTO, GATE_PREMIUM,
-                     GATE_PREMIUM_ETH, GATE_PREMIUM_RBH, GATE_PREMIUM_SOL, HASH_RE,
-                     SOL_RE, SOURCE_BUYBOT, SOURCE_CALL, SOURCE_DEXS, SOURCE_OTTO, log)
+                     DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_OTTO,
+                     GATE_PREMIUM, GATE_PREMIUM_ETH, GATE_PREMIUM_RBH, GATE_PREMIUM_SOL,
+                     HASH_RE, SOL_RE, SOURCE_BUYBOT, SOURCE_CALL, SOURCE_DEXS,
+                     SOURCE_OTTO, log)
 from .sending import safe_send
 
 
@@ -57,7 +58,10 @@ class HandlersMixin:
 
     async def _buybot_handler(self, event) -> None:
         fwd_counters.bump(fwd_counters.SOURCE, SOURCE_BUYBOT)
-        if not self._on("forwarder"):
+        # Its own gate now. It used to check "forwarder" — the master userbot
+        # switch — which meant BuyBotTracker was the one source channel with no
+        # switch of its own: you could only stop it by stopping everything.
+        if not self._on(GATE_BUYBOT):
             return
         unique_id = f"{event.chat_id}_{event.id}"
         if unique_id in self._processed:

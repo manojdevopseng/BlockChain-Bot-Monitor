@@ -38,9 +38,13 @@ SOURCE_CALL   = config.SOURCE_CALL
 SOURCE_BUYBOT = config.SOURCE_BUYBOT
 
 # ── Registry service id gating each handler ────────────────────────────────────
-GATE_CALL        = "bbcanalyser2"          # CallAnalyser2
-GATE_DEXS        = "dexsignalcall"         # dexssignal
-GATE_OTTO        = "eth_otto_group"        # OttoEthDeployments
+# One id per source channel, named after the channel itself (SOURCE_* in .env),
+# so a switch in Settings, a row on the Forwarder page and a log line all use
+# the same word for the same thing.
+GATE_CALL        = "callanalyser2"         # SOURCE_CALL
+GATE_BUYBOT      = "buybottracker"         # SOURCE_BUYBOT
+GATE_DEXS        = "dexsignalcall"         # SOURCE_DEXS
+GATE_OTTO        = "eth_otto_group"        # SOURCE_OTTO
 GATE_PREMIUM     = "premium_callers_signal"  # premium groups → premium ETH caller
 GATE_PREMIUM_ETH = "premium_eth_capture"   # premium groups → ETH panel capture
 GATE_PREMIUM_RBH = "premium_rbh_capture"   # premium groups → RBH panel capture

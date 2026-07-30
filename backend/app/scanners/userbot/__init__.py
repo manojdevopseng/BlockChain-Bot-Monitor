@@ -17,12 +17,12 @@ Also renamed out of `scanners/forwarder.py` because `routers/forwarder.py`
 exists too, and having both meant opening the wrong file regularly.
 """
 
-from .common import (GATE_CALL, GATE_DEXS, GATE_OTTO, GATE_PREMIUM, GATE_PREMIUM_ETH,
-                     GATE_PREMIUM_RBH, GATE_PREMIUM_SOL)
+from .common import (GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_OTTO, GATE_PREMIUM,
+                     GATE_PREMIUM_ETH, GATE_PREMIUM_RBH, GATE_PREMIUM_SOL)
 from .client import TelegramForwarder
 
 __all__ = [
     "TelegramForwarder",
-    "GATE_CALL", "GATE_DEXS", "GATE_OTTO", "GATE_PREMIUM",
+    "GATE_BUYBOT", "GATE_CALL", "GATE_DEXS", "GATE_OTTO", "GATE_PREMIUM",
     "GATE_PREMIUM_ETH", "GATE_PREMIUM_RBH", "GATE_PREMIUM_SOL",
 ]
