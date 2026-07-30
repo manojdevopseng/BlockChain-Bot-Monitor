@@ -55,8 +55,11 @@ const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
   "RPC Endpoints — Solana": {
     icon: Radio,
     blurb:
-      "logsSubscribe support karne wala provider chahiye — Alchemy ka Solana endpoint " +
-      "nahi karta. Ye socket launch discovery aur market-cap watch dono carry karta hai.",
+      "SOL ke 2 alag kaam, 2 alag pair: WebSocket (Helius) launch discovery + " +
+      "market-cap watch dono carry karta hai — logsSubscribe support karne wala " +
+      "provider chahiye, Alchemy nahi karta. HTTP (Alchemy) sirf premium-group " +
+      "me mile SOL address ko verify karta hai, discovery se koi lena-dena nahi. " +
+      "Dono pair me 2-way failover hai — pehla fail to dusra, dusra fail to pehla.",
   },
   "Detection Tuning": {
     icon: SlidersHorizontal,

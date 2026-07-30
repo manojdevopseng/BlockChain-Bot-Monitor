@@ -209,13 +209,21 @@ class Settings(BaseSettings):
     # `logsSubscribe` — Alchemy's Solana endpoint does not ("Method not found",
     # tested), so a second Helius key is the usual choice.
     sol_rpc_wss_fallback: str = ""
-    # Third endpoint per chain. Two is enough to survive one provider going
-    # down; it is not enough when a quota runs out, because the second is
-    # usually being drained by the same traffic and follows within the hour.
-    # With three, rotation has somewhere to go while the first two reset.
+    # Third endpoint. Two is enough to survive one provider going down; it is
+    # not enough when a quota runs out, because the second is usually being
+    # drained by the same traffic and follows within the hour. With three,
+    # rotation has somewhere to go while the first two reset. ETH and Robinhood
+    # only — SOL's WSS stays a 2-way pair (see sol_rpc_wss_fallback above): it
+    # is a different provider family (needs logsSubscribe) with a much smaller
+    # pool of candidates, so a third slot was more clutter than safety margin.
     eth_rpc_wss_fallback2: str = ""
     rbh_rpc_wss_fallback2: str = ""
-    sol_rpc_wss_fallback2: str = ""
+    # Second endpoint for the SOL HTTP RPC. Unlike SOL_RPC_WSS, this one is not
+    # discovery or the market-cap watch — it is a single getAccountInfo check
+    # the forwarder makes to confirm a Solana address seen in a premium group is
+    # a real on-chain account before recording it. A different job from the WSS
+    # pair, so it gets its own 2-way failover rather than sharing one.
+    sol_rpc_http_fallback: str = ""
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

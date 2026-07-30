@@ -51,10 +51,16 @@ SOL_RPC_HTTP      = settings.sol_rpc_http
 SOL_RPC_WSS       = settings.sol_rpc_wss
 # Ordered endpoints discovery rotates through when one keeps failing. A single
 # provider having a bad hour left mint discovery blind with nothing to fall
-# back on — the same reason ETH and RBH carry a second endpoint.
+# back on — the same reason ETH and RBH carry a second endpoint. Two, not
+# three: a third logsSubscribe-capable provider is a much shorter list than a
+# third plain JSON-RPC one.
 SOL_WSS_ENDPOINTS = [u for u in (settings.sol_rpc_wss,
-                                 settings.sol_rpc_wss_fallback,
-                                 settings.sol_rpc_wss_fallback2) if u]
+                                 settings.sol_rpc_wss_fallback) if u]
+# The HTTP RPC is a different job entirely — the forwarder's own
+# getAccountInfo check on a premium-group SOL address, nothing to do with
+# discovery or the market-cap watch. Its own 2-way pair.
+SOL_HTTP_ENDPOINTS = [u for u in (settings.sol_rpc_http,
+                                  settings.sol_rpc_http_fallback) if u]
 SOL_SCAN_INTERVAL = settings.sol_scan_interval
 SOL_MIN_FEES      = settings.sol_min_fees
 SOL_MIN_MCAP      = settings.sol_min_mcap

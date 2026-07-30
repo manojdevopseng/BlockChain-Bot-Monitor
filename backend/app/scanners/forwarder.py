@@ -30,6 +30,7 @@ from telethon.errors import FloodWaitError
 from app.scanners import scfg as config
 from app.scanners.bounded_set import BoundedSet
 from app.scanners.slog import get_logger
+from app.scanners.wss_pool import EndpointPool, host_of
 from app import heartbeat
 from app.keywords import match_any
 from app import fwd_counters, outcomes
@@ -189,6 +190,11 @@ class TelegramForwarder:
         self._group_eth_tracker: BoundedSet = BoundedSet(_DEDUP_MAX)
         self._eth_global_counter: dict = {}
         self._http: Optional[aiohttp.ClientSession] = None
+        # 2-way failover for the SOL premium-group getAccountInfo check — its
+        # own pool, not the discovery/market-cap one, because SOL_RPC_HTTP is a
+        # different provider doing a different job (see scfg.SOL_HTTP_ENDPOINTS).
+        self._sol_http_pool = EndpointPool(
+            "SOL-HTTP", lambda: list(config.SOL_HTTP_ENDPOINTS), chain_label="SOL premium check")
 
         # Loaded from Mongo in start() (seeded from seed_data.json, user-editable).
         self._premium_ids: set = set()
@@ -501,12 +507,48 @@ class TelegramForwarder:
     # ── SOL premium capture (dashboard panel — new) ───────────────────────────
 
     async def _sol_rpc(self, method: str, params: list):
-        async with self._http.post(
-            config.SOL_RPC_HTTP,
-            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-            timeout=aiohttp.ClientTimeout(total=6),
-        ) as resp:
-            return (await resp.json(content_type=None)).get("result")
+        """JSON-RPC call over the SOL premium-check pool (Alchemy #1/#2).
+
+        Unrelated to SOL_RPC_WSS: this is a plain HTTP getAccountInfo check, so
+        a bad response is a status code on the reply, not a raised exception —
+        classified the same way as a rejected WebSocket handshake, just from an
+        int instead of an exception. A rejection rotates immediately and is
+        retried on the other endpoint; with only two, there is no spare attempt
+        to waste retrying the one that just failed. Returns None, logged rather
+        than silent, only once both have failed.
+        """
+        pool = self._sol_http_pool
+        attempts = max(1, len(pool.urls()))
+        last = "no endpoint configured"
+        for _ in range(attempts):
+            url = pool.current()
+            if not url:
+                break
+            host = host_of(url)
+            try:
+                async with self._http.post(
+                    url,
+                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                    timeout=aiohttp.ClientTimeout(total=6),
+                ) as resp:
+                    if resp.status != 200:
+                        kind, detail = pool.note_failure(url, resp.status)
+                        last = f"{host}: {detail}"
+                        log.warning(f"[SOL-HTTP] {method} on {host} -> {detail}")
+                        pool.rotate(f"{kind} on {host}")
+                        continue
+                    body = await resp.json(content_type=None)
+            except Exception as exc:
+                kind, detail = pool.note_failure(url, exc)
+                last = f"{host}: {detail}"
+                log.warning(f"[SOL-HTTP] {method} on {host} failed: "
+                           f"{type(exc).__name__}: {exc}")
+                pool.rotate(f"{kind} on {host}")
+                continue
+            pool.note_success(url)
+            return body.get("result")
+        log.error(f"[SOL-HTTP] {method} failed on every endpoint — {last}")
+        return None
 
     async def _sol_token_info(self, address: str) -> dict:
         """Best-effort symbol/name via GMGN web quotation API (no key needed)."""
@@ -523,15 +565,15 @@ class TelegramForwarder:
     async def _capture_premium_sol(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None) -> None:
         """Capture a Solana address seen in a premium group into the SOL panel.
-        Dormant unless SOL_RPC_HTTP is set (mirrors the ETH/RBH behaviour); the
-        RPC getAccountInfo check filters out random base58 noise."""
-        if not self._http or not config.SOL_RPC_HTTP:
+        Dormant unless a SOL HTTP endpoint is set (mirrors the ETH/RBH
+        behaviour); the RPC getAccountInfo check filters out random base58
+        noise. _sol_rpc already rotates and logs on failure, so a None here
+        means "not a real account" and "every endpoint failed" alike — either
+        way there is nothing safe to capture."""
+        if not self._http or not config.SOL_HTTP_ENDPOINTS:
             return
-        try:
-            info = await self._sol_rpc("getAccountInfo", [addr, {"encoding": "base64"}])
-            if not info or info.get("value") is None:
-                return  # not a real on-chain account — skip
-        except Exception:
+        info = await self._sol_rpc("getAccountInfo", [addr, {"encoding": "base64"}])
+        if not info or info.get("value") is None:
             return
 
         keyword = await self._match_keywords(text)

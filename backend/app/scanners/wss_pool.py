@@ -92,6 +92,17 @@ def classify(exc: BaseException) -> tuple[str, str]:
     return "network", f"{type(exc).__name__}: {exc}"[:120]
 
 
+def classify_status(status: int) -> tuple[str, str]:
+    """(kind, detail) from a plain HTTP status code — for a JSON-RPC-over-HTTP
+    caller that gets a response rather than a raised exception (the SOL premium
+    check's getAccountInfo call, unlike the WebSocket connects above)."""
+    if status in _LIMIT_STATUS:
+        return "limit", f"HTTP {status}"
+    if status in _AUTH_STATUS:
+        return "auth", f"HTTP {status}"
+    return "network", f"HTTP {status}"
+
+
 def host_of(url: str) -> str:
     """Just the host, for logs and alerts — the rest of the URL is the API key."""
     return url.split("//")[-1].split("/")[0].split("?")[0] or "?"
@@ -159,9 +170,18 @@ class EndpointPool:
             self._alerted_at = 0.0
         return recovered
 
-    def note_failure(self, url: str, exc: BaseException) -> tuple[str, str]:
-        """Record a failed connect and return its (kind, detail)."""
-        kind, detail = classify(exc)
+    def note_failure(self, url: str, exc_or_status: BaseException | int) -> tuple[str, str]:
+        """Record a failed attempt and return its (kind, detail).
+
+        Takes either the exception a WebSocket connect raised or a plain HTTP
+        status code an ordinary request came back with — the SOL premium check
+        goes through aiohttp and gets a status on the response, not a raised
+        InvalidStatus, so there is nothing to classify() from an exception.
+        """
+        if isinstance(exc_or_status, int):
+            kind, detail = classify_status(exc_or_status)
+        else:
+            kind, detail = classify(exc_or_status)
         self._bad[url] = (kind, detail, time.time())
         return kind, detail
 

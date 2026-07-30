@@ -110,25 +110,42 @@ EDITABLE: dict[str, dict] = {
         "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Third endpoint.",
     },
+    # SOL runs two unrelated jobs on two unrelated endpoints, unlike ETH/RBH
+    # where one WSS URL covers everything — spelled out in every label below so
+    # it stops looking like one RPC that is "just not configured properly".
     "SOL_RPC_WSS": {
-        "label": "SOL WebSocket #1", "kind": "wss", "secret": True,
+        "label": "SOL WebSocket #1 — discovery + market cap (Helius)",
+        "kind": "wss", "secret": True,
         "group": "RPC Endpoints — Solana", "applies": "live",
         "help": "Tried first. Carries on-chain launch discovery AND the trade "
-                "stream the market cap watch reads, so losing every SOL endpoint "
+                "stream the market cap watch reads, so losing both endpoints "
                 "also stops anything reaching the Telegram filter. Needs a "
                 "provider that supports logsSubscribe — Alchemy's Solana "
                 "endpoint does not. Applied on the next reconnect, no restart.",
     },
     "SOL_RPC_WSS_FALLBACK": {
-        "label": "SOL WebSocket #2", "kind": "wss", "secret": True,
+        "label": "SOL WebSocket #2 — discovery + market cap (Helius)",
+        "kind": "wss", "secret": True,
         "group": "RPC Endpoints — Solana", "applies": "live",
-        "help": "Second SOL socket. Must also support logsSubscribe, so a second "
-                "Helius key or QuickNode/Triton — not Alchemy.",
+        "help": "Used when #1 keeps failing, then back to #1 if #2 fails too. "
+                "Must also support logsSubscribe, so a second Helius key or "
+                "QuickNode/Triton — not Alchemy.",
     },
-    "SOL_RPC_WSS_FALLBACK2": {
-        "label": "SOL WebSocket #3", "kind": "wss", "secret": True,
+    "SOL_RPC_HTTP": {
+        "label": "SOL HTTP #1 — premium-group check (Alchemy)",
+        "kind": "http", "secret": True,
         "group": "RPC Endpoints — Solana", "applies": "live",
-        "help": "Third SOL socket. Same logsSubscribe requirement.",
+        "help": "Unrelated to the two above: this is a single getAccountInfo "
+                "call the forwarder makes to confirm a Solana address seen in a "
+                "premium Telegram group is a real on-chain account before "
+                "recording it. Off entirely if blank — that capture feature "
+                "just doesn't run. Applied on the next check, no restart.",
+    },
+    "SOL_RPC_HTTP_FALLBACK": {
+        "label": "SOL HTTP #2 — premium-group check (Alchemy)",
+        "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Solana", "applies": "live",
+        "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
     },
 
     "AI_SCAN_INTERVAL": {
@@ -188,10 +205,10 @@ def _coerce(key: str, raw) -> object:
             return False
         raise ValueError(f"{key} must be true or false")
 
-    if kind == "wss":
+    if kind in ("wss", "http"):
         # An empty value clears the slot, which is how a fallback is removed.
-        # A primary may not be emptied — that blinds the chain, and replacing one
-        # is a save, not a clear.
+        # A primary may not be emptied — that blinds whatever it feeds, and
+        # replacing one is a save, not a clear.
         if not text:
             # Any fallback slot may be emptied — matched on "_FALLBACK" anywhere
             # rather than as a suffix, or _FALLBACK2 would not count as one.
@@ -199,9 +216,12 @@ def _coerce(key: str, raw) -> object:
                 return ""
             raise ValueError(f"{key} cannot be empty — it is the primary "
                              f"endpoint; save a replacement URL instead")
-        if not text.startswith(("ws://", "wss://")):
+        if kind == "wss" and not text.startswith(("ws://", "wss://")):
             raise ValueError(f"{key} must start with wss:// (or ws://) — an "
                              f"https:// URL is the HTTP endpoint, not the socket")
+        if kind == "http" and not text.startswith(("http://", "https://")):
+            raise ValueError(f"{key} must start with http:// or https:// — a "
+                             f"wss:// URL is the WebSocket endpoint, not this one")
         if " " in text:
             raise ValueError(f"{key} must not contain spaces")
         return text
@@ -238,13 +258,13 @@ def _mask(value: str) -> str:
     return f"{value[:4]}{'•' * 6}{value[-4:]}"
 
 
-def _mask_wss(value: str) -> str:
+def _mask_url(value: str) -> str:
     """Hide the API key in an endpoint URL but keep the host readable.
 
-    The generic mask would return `wss:••••••bC3d`, which tells you nothing —
-    and the one thing you need to know before adding a fallback is which
-    provider the primary already uses, since a second endpoint on the same
-    account shares the same quota.
+    Used for both "wss" and "http" kind fields — the generic mask would return
+    `wss:••••••bC3d`, which tells you nothing, and the one thing you need to
+    know before adding a fallback is which provider the primary already uses,
+    since a second endpoint on the same account shares the same quota.
     """
     if not value:
         return ""
@@ -267,8 +287,8 @@ def read_values() -> dict[str, dict]:
         secret = bool(spec.get("secret"))
         if not secret:
             shown = text
-        elif kind == "wss":
-            shown = _mask_wss(text)
+        elif kind in ("wss", "http"):
+            shown = _mask_url(text)
         else:
             shown = _mask(text)
         out[key] = {
@@ -316,22 +336,37 @@ def update(key: str, value) -> object:
     return coerced
 
 
+# How many WSS slots each chain's pool has. ETH and Robinhood share one job per
+# socket and get a third for it; SOL's WSS pair is a different provider family
+# (needs logsSubscribe) with a much shorter list of candidates, so it stays at 2.
+_WSS_SLOT_SUFFIXES = {
+    "ETH": ("", "_fallback", "_fallback2"),
+    "RBH": ("", "_fallback", "_fallback2"),
+    "SOL": ("", "_fallback"),
+}
+
+
 def _refresh_derived(scfg, key: str) -> None:
     """Rebuild config values computed from other keys at import time.
 
     Setting scfg.<KEY> is not enough for the RPC endpoints. `SOL_WSS_ENDPOINTS`
-    and its ETH/RBH twins are lists built once from the primary plus the
-    fallback, and `_FALLBACK` is not itself a scfg attribute — so without this a
-    fallback saved in Settings lands in .env, reports success, and is never
-    dialled. Same for GAS_RPC_WSS, which falls back to the ETH socket.
+    and its ETH/RBH twins (and SOL_HTTP_ENDPOINTS) are lists built once from a
+    primary plus fallback(s), and `_FALLBACK` is not itself a scfg attribute —
+    so without this a fallback saved in Settings lands in .env, reports
+    success, and is never dialled. Same for GAS_RPC_WSS, which falls back to
+    the ETH socket.
     """
+    if key.startswith("SOL_RPC_HTTP"):
+        scfg.SOL_HTTP_ENDPOINTS = [u for u in (settings.sol_rpc_http or "",
+                                               settings.sol_rpc_http_fallback or "")
+                                   if u]
+        return
     if not key.startswith(("ETH_RPC_WSS", "RBH_RPC_WSS", "SOL_RPC_WSS")):
         return
     chain = key[:3]
     low = chain.lower()
-    slots = [getattr(settings, f"{low}_rpc_wss", "") or "",
-             getattr(settings, f"{low}_rpc_wss_fallback", "") or "",
-             getattr(settings, f"{low}_rpc_wss_fallback2", "") or ""]
+    slots = [getattr(settings, f"{low}_rpc_wss{suffix}", "") or ""
+             for suffix in _WSS_SLOT_SUFFIXES[chain]]
     setattr(scfg, f"{chain}_WSS_ENDPOINTS", [u for u in slots if u])
     if chain == "ETH":
         scfg.GAS_RPC_WSS = settings.gas_rpc_wss or slots[0]
