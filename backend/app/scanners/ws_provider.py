@@ -166,8 +166,15 @@ class WSProvider:
                 log.warning(f"[{self.name}] WebSocket OS error ({host_of(url)}): {exc}")
             except Exception as exc:
                 last_error = exc
-                log.error(f"[{self.name}] WebSocket error ({host_of(url)}): "
-                          f"{type(exc).__name__}: {exc}")
+                # WARNING, not ERROR: this and the two branches above were
+                # inconsistent (this one alone reached Telegram) for exactly
+                # the same kind of event — a single connect attempt failing,
+                # which rotation below already handles. It used to double up
+                # with the "endpoint rejected us" log a few lines down, so a
+                # single 429 that rotated and recovered in ~1s sent two
+                # separate Telegram messages for one non-event.
+                log.warning(f"[{self.name}] WebSocket error ({host_of(url)}): "
+                           f"{type(exc).__name__}: {exc}")
             finally:
                 self._ws = None
                 if self.connected:
@@ -187,9 +194,15 @@ class WSProvider:
             if last_error is not None:
                 kind, detail = self._pool.note_failure(url, last_error)
                 if kind in ("limit", "auth"):
-                    log.error(f"[{self.name}] endpoint {host_of(url)} rejected us "
-                              f"({detail}) — "
-                              f"{'quota/rate limit' if kind == 'limit' else 'bad API key'}")
+                    # WARNING, not ERROR: this endpoint is down, but as long as
+                    # rotation finds a working one the chain never actually
+                    # stops — that is what _maybe_alert()/notify_rpc_exhausted
+                    # below is for, and it is the one that should page anyone.
+                    # A single 429 that self-heals in ~1s used to alert on its
+                    # own here, every time, forever.
+                    log.warning(f"[{self.name}] endpoint {host_of(url)} rejected us "
+                               f"({detail}) — "
+                               f"{'quota/rate limit' if kind == 'limit' else 'bad API key'}")
                 await self._maybe_alert()
 
             # A quota rejection rotates immediately: the same endpoint answering
@@ -222,7 +235,11 @@ class WSProvider:
         if not self._pool.should_alert():
             return
         body = self._pool.alert_text()
-        log.error(f"[{self.name}] ALL RPC ENDPOINTS EXHAUSTED — {body.splitlines()[0]}")
+        # WARNING here, not ERROR: notify_rpc_exhausted() below is the actual
+        # alert, with the full per-endpoint breakdown and a fix suggestion. An
+        # ERROR-level line here would ALSO reach Telegram via the generic
+        # log-bridge, sending the same outage as two separate messages.
+        log.warning(f"[{self.name}] ALL RPC ENDPOINTS EXHAUSTED — {body.splitlines()[0]}")
         try:
             from .. import notifier
             await notifier.notify_rpc_exhausted(self._pool.label, body)

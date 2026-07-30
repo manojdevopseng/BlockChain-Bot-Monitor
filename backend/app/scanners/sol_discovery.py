@@ -207,11 +207,16 @@ class SolDiscovery:
                 kind, detail = pool.note_failure(url, last_error)
                 host = wss_pool.host_of(url)
                 if kind in ("limit", "auth"):
-                    # ERROR, not WARNING: warnings never reach Telegram, which is
-                    # why SOL going down was the one outage nobody was told about.
-                    log.error(f"[SOL-RPC] {label} endpoint {host} rejected us "
-                              f"({detail}) — "
-                              f"{'quota/rate limit' if kind == 'limit' else 'bad API key'}")
+                    # WARNING, not ERROR: as long as another endpoint in the
+                    # pool picks it up, discovery never actually stops — that
+                    # is what _maybe_alert()/notify_rpc_exhausted below is for.
+                    # This used to be ERROR so it would reach Telegram (back
+                    # when there was no dedicated exhaustion alert at all), but
+                    # now a single rejection that rotates and recovers in ~1s
+                    # sent its own alert on top of the real one, every time.
+                    log.warning(f"[SOL-RPC] {label} endpoint {host} rejected us "
+                               f"({detail}) — "
+                               f"{'quota/rate limit' if kind == 'limit' else 'bad API key'}")
                 else:
                     log.warning(f"[SOL-RPC] {label} socket error on {host}: {detail}")
                 await self._maybe_alert(pool, label)
@@ -253,8 +258,10 @@ class SolDiscovery:
         if not pool.should_alert():
             return
         body = pool.alert_text()
-        log.error(f"[SOL-RPC] ALL RPC ENDPOINTS EXHAUSTED ({label}) — "
-                  f"{body.splitlines()[0]}")
+        # WARNING, not ERROR: notify_rpc_exhausted() below is the real alert;
+        # an ERROR here would double it up via the generic log-bridge.
+        log.warning(f"[SOL-RPC] ALL RPC ENDPOINTS EXHAUSTED ({label}) — "
+                   f"{body.splitlines()[0]}")
         try:
             from .. import notifier
             await notifier.notify_rpc_exhausted("Solana", body)
