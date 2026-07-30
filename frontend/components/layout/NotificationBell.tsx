@@ -80,8 +80,14 @@ export function NotificationBell() {
         )}
       </button>
 
+      {/* On phones the panel is pinned to the viewport, not to the bell.
+          Anchoring it to the button with `right-0` capped its width but not its
+          position: the bell sits ~320px in, so a 22rem panel began off the left
+          edge and the first characters of every row were cut off. From sm: up
+          there is room, so it goes back to hanging off the button. */}
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-bg-card shadow-2xl animate-fade-in">
+        <div className="fixed inset-x-2 top-14 z-50 overflow-hidden rounded-xl border border-border bg-bg-card shadow-2xl animate-fade-in
+                        sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[22rem]">
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
             <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               Notifications

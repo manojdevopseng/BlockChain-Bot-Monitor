@@ -100,9 +100,13 @@ export function DetectionTable(
                     )}
                   </div>
                 </td>
-                {/* Groups — each chip opens that group's actual message */}
+                {/* Groups — each chip opens that group's actual message.
+                    Bounded: the chips wrap, but nothing capped how wide the
+                    cell could get, so a token called by several groups with
+                    long names stretched this column and pushed everything
+                    after it off to the right. */}
                 <td className="px-3 py-3">
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex max-w-[260px] flex-wrap gap-1">
                     {groupEntries(d).map((e, j, arr) => {
                       // Entries are newest-first, so the last one is the group
                       // that called it first.
@@ -114,8 +118,9 @@ export function DetectionTable(
                       if (!url) {
                         return (
                           <Badge key={j} variant="gray"
-                            title={first ? "First caller" : "Private group — no message link"}>
-                            {label}
+                            title={first ? `First caller — ${e.name || "?"}`
+                                         : `${e.name || "?"} — private group, no message link`}>
+                            <span className="block max-w-[130px] truncate">{label}</span>
                           </Badge>
                         );
                       }
@@ -123,7 +128,7 @@ export function DetectionTable(
                         <a key={j} href={url} target="_blank" rel="noopener noreferrer"
                           title={first ? "First caller — open this call on Telegram"
                                        : "Open this call on Telegram"}
-                          className="inline-flex items-center gap-1 rounded-md border border-border bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted transition-colors hover:border-brand/40 hover:text-brand-soft">
+                          className="inline-flex max-w-[130px] items-center gap-1 truncate rounded-md border border-border bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted transition-colors hover:border-brand/40 hover:text-brand-soft">
                           {label}
                         </a>
                       );
