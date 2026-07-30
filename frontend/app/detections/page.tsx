@@ -227,11 +227,11 @@ export default function DetectionsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Detections"
-        subtitle="Premium-caller addresses, ETH gas fees and cross-chain matches"
+        subtitle="Premium-caller addresses, cross-chain matches and ETH gas fees"
       />
       <PremiumSection />
-      <GasSection />
       <CrossChainSection />
+      <GasSection />
     </div>
   );
 }
