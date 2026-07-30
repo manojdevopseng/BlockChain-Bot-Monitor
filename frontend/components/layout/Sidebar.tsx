@@ -11,11 +11,11 @@ const NAV = [
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/tokens", label: "Tokens", icon: Coins },
   { href: "/detections", label: "Detections", icon: Crosshair },
-  { href: "/chains", label: "Chains", icon: Link2 },
+  { href: "/ai", label: "AI Narrative", icon: Brain },
   { href: "/forwarder", label: "Forwarder", icon: Send },
   { href: "/commands", label: "Commands", icon: Terminal },
-  { href: "/ai", label: "AI Narrative", icon: Brain },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/chains", label: "Chains", icon: Link2 },
   { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
   // Hidden rather than disabled for a read-only account: the other locked
