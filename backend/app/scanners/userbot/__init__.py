@@ -1,5 +1,5 @@
 """The Telethon userbot — premium-group mirroring, signal forwarding and
-premium-caller address capture.
+premium-caller address detection.
 
 Was one 946-line `scanners/forwarder.py` holding a single class that did
 Telethon plumbing, per-chat rate limiting, three chains' worth of on-chain
@@ -9,7 +9,7 @@ verification and five independent Telegram handlers. Split by concern:
     store.py     Mongo reads for premium groups / keywords / Otto rules
     sending.py   per-chat pacing + FloodWait handling
     onchain.py   RPC reads over rotating endpoint pools
-    premium.py   the ETH / RBH / SOL panel capture
+    premium.py   the ETH / RBH / SOL detections panels
     handlers.py  the five Telegram event handlers
     client.py    TelegramForwarder itself: lifecycle, watchers, shared state
 

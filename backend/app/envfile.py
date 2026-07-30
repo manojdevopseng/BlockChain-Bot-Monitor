@@ -4,9 +4,10 @@ Only the keys listed in `EDITABLE` may be changed, and the file is rewritten
 atomically (temp file + os.replace) preserving every other line, comment and
 ordering. A missing key is appended rather than silently dropped.
 
-Used by the Settings page so values that need tuning — the GMGN web fingerprint
-that expires, the gas-fee threshold, the SOL watch window, the Robinhood V3
-source — can be changed without SSH-ing into the EC2 box.
+Used by the Settings and RPC Monitor pages so values that need tuning — the
+GMGN web fingerprint that expires, a rate-limited RPC endpoint, the gas-fee
+threshold, which sources the Robinhood detector listens to — can be changed
+without SSH-ing into the EC2 box.
 
 Every field declares its type. That matters: .env values are strings, but the
 scanners compare them as numbers (`fee_eth >= config.MIN_FEE_ETH`), so writing
@@ -96,13 +97,13 @@ EDITABLE: dict[str, dict] = {
                 "rotation keeps going, so it recovers when a quota resets.",
     },
     # A different job again: eth_getCode + token-metadata reads for the
-    # premium-caller capture (Premium ETH toggle in Settings → Bots), nothing
+    # premium-caller detection (Premium ETH toggle in Settings → Bots), nothing
     # to do with on-chain discovery above. Found live on 2026-07-30 that this
     # key had hit Alchemy's *monthly* cap — a rotation-proof failure mode a
     # per-second-429 fallback doesn't help with; only a genuinely different
     # key/plan does.
     "ETH_RPC_HTTP": {
-        "label": "ETH HTTP #1 — premium-caller capture (Alchemy)",
+        "label": "ETH HTTP #1 — premium-caller detection (Alchemy)",
         "kind": "http", "secret": True,
         "group": "RPC Endpoints — Ethereum", "applies": "live",
         "help": "Used by Settings → Bots → Premium ETH to confirm an address "
@@ -110,26 +111,28 @@ EDITABLE: dict[str, dict] = {
                 "it. Applied on the next check, no restart.",
     },
     "ETH_RPC_HTTP_FALLBACK": {
-        "label": "ETH HTTP #2 — premium-caller capture (Alchemy)",
+        "label": "ETH HTTP #2 — premium-caller detection (Alchemy)",
         "kind": "http", "secret": True,
         "group": "RPC Endpoints — Ethereum", "applies": "live",
         "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
     },
+    # Its own card, not part of the Ethereum one: ETH Gas Fees is a separate
+    # feature with its own switch in Settings → Bots, and it runs on its own
+    # provider key precisely so its load stays away from new-pair detection.
+    # Sharing a card with the discovery endpoints implied they were one thing.
     "GAS_RPC_WSS": {
-        "label": "ETH Gas Fees WebSocket (own key)",
-        "kind": "wss", "secret": True,
-        "group": "RPC Endpoints — Ethereum", "applies": "worker:eth",
-        "help": "A third unrelated job: watches every detected pair for a "
-                "high-gas early buy. On its own key so a busy gas-monitoring "
-                "load can't eat the compute units new-pair detection needs. "
-                "Blank = share ETH WebSocket #1 above, exactly as before.",
+        "label": "Gas Fees WebSocket", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints — ETH Gas Fees", "applies": "worker:eth",
+        "help": "Watches every detected pair for a high-gas early buy. It holds "
+                "one subscription per watched pair, so on a shared key it can "
+                "eat the compute units new-pair detection needs. Blank = share "
+                "ETH WebSocket #1.",
     },
     "GAS_RPC_HTTP": {
-        "label": "ETH Gas Fees HTTP (own key)",
-        "kind": "http", "secret": True,
-        "group": "RPC Endpoints — Ethereum", "applies": "live",
+        "label": "Gas Fees HTTP", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — ETH Gas Fees", "applies": "live",
         "help": "Reads the gas paid on each buy's transaction receipt. Blank = "
-                "share ETH HTTP #1 above.",
+                "share ETH HTTP #1.",
     },
     "RBH_RPC_WSS": {
         "label": "Robinhood WebSocket #1", "kind": "wss", "secret": True,
@@ -146,10 +149,10 @@ EDITABLE: dict[str, dict] = {
         "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Third endpoint.",
     },
-    # Same split as ETH above: premium-caller capture (Premium RBH toggle),
+    # Same split as ETH above: premium-caller detection (Premium RBH toggle),
     # unrelated to the on-chain discovery WebSockets.
     "RBH_RPC_HTTP": {
-        "label": "RBH HTTP #1 — premium-caller capture (Alchemy)",
+        "label": "RBH HTTP #1 — premium-caller detection (Alchemy)",
         "kind": "http", "secret": True,
         "group": "RPC Endpoints — Robinhood Chain", "applies": "live",
         "help": "Used by Settings → Bots → Premium RBH to confirm an address "
@@ -157,7 +160,7 @@ EDITABLE: dict[str, dict] = {
                 "it. Applied on the next check, no restart.",
     },
     "RBH_RPC_HTTP_FALLBACK": {
-        "label": "RBH HTTP #2 — premium-caller capture (Alchemy)",
+        "label": "RBH HTTP #2 — premium-caller detection (Alchemy)",
         "kind": "http", "secret": True,
         "group": "RPC Endpoints — Robinhood Chain", "applies": "live",
         "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
@@ -190,7 +193,7 @@ EDITABLE: dict[str, dict] = {
         "help": "Unrelated to the two above: this is a single getAccountInfo "
                 "call the forwarder makes to confirm a Solana address seen in a "
                 "premium Telegram group is a real on-chain account before "
-                "recording it. Off entirely if blank — that capture feature "
+                "recording it. Off entirely if blank — that detection feature "
                 "just doesn't run. Applied on the next check, no restart.",
     },
     "SOL_RPC_HTTP_FALLBACK": {
@@ -230,12 +233,34 @@ EDITABLE: dict[str, dict] = {
         "help": "On, decisions are recorded and the Telegram flag is set but no "
                 "message is sent. Turn it off when the filters look right.",
     },
+    # Which sources the Robinhood detector subscribes to. Each is its own WS
+    # subscription, so a token launched through a source that is off is never
+    # seen at all and a matching SOL ticker cannot fire. All four are here
+    # because they are one decision made four ways — only V3 used to be
+    # editable, filed under "Detection Tuning" next to unrelated fee and window
+    # numbers, so the other three could only be changed by editing .env.
+    # The SOL to RBH switch in Settings → Bots is the master over all of them.
+    "RBH_NOXA_ENABLED": {
+        "label": "noxa.fun launches", "kind": "bool",
+        "group": "Robinhood Detection Sources", "applies": "worker:rbh",
+        "help": "The launchpad most Robinhood tokens come from (TokenCreated "
+                "event). Usually the one that matters.",
+    },
+    "RBH_V2_ENABLED": {
+        "label": "Uniswap V2 pairs", "kind": "bool",
+        "group": "Robinhood Detection Sources", "applies": "worker:rbh",
+        "help": "Tokens deployed straight to Uniswap V2 rather than through a "
+                "launchpad.",
+    },
     "RBH_V3_ENABLED": {
-        "label": "Robinhood — watch Uniswap V3", "kind": "bool", "group": "Detection Tuning",
-        "applies": "worker:rbh",
-        "help": "Robinhood Chain carries both noxa.fun launches and Uniswap "
-                "deployments. With this off, a token launched on V3 is never "
-                "seen, so a matching SOL ticker cannot fire.",
+        "label": "Uniswap V3 pools", "kind": "bool",
+        "group": "Robinhood Detection Sources", "applies": "worker:rbh",
+        "help": "Same, on V3.",
+    },
+    "RBH_V4_ENABLED": {
+        "label": "Uniswap V4 pools", "kind": "bool",
+        "group": "Robinhood Detection Sources", "applies": "worker:rbh",
+        "help": "Same, on V4.",
     },
 }
 

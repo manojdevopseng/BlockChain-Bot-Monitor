@@ -5,7 +5,7 @@ reconnecting, the background watchers, and the state the handlers read
 (premium group set, keyword lists, Otto rules, dedup guards, RPC pools).
 
 The work each watched feed does is in `handlers.py`; the on-chain reads are in
-`onchain.py`; the premium panel capture is in `premium.py`. They are mixed in
+`onchain.py`; the premium panel detections are in `premium.py`. They are mixed in
 rather than split off as collaborators because they all operate on this
 object's state — mixins keep `self.…` meaning exactly what it did when this
 was one 946-line file.
@@ -79,7 +79,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         self._rollover_task: Optional[asyncio.Task] = None
         self._last_rollover_day = ist_day(time.time())
 
-        self._capture_seen: BoundedSet = BoundedSet(20000)
+        self._detection_seen: BoundedSet = BoundedSet(20000)
 
         # Outbound pacing so one account mirroring many groups never trips
         # Telegram's per-chat flood limits.
@@ -119,13 +119,13 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         self._premium_ids = await load_premium_ids()
         self._method_ids, self._function_texts, self._rugger_hashes = await load_otto_rules()
         self._call_keywords, self._buybot_keywords = await load_filter_keywords()
-        # Warm capture dedup from existing detections so restart doesn't re-count.
+        # Warm the dedup guard from existing detections so a restart doesn't re-count.
         for chain in ("eth", "rbh"):
             for d in await load_detections(chain):
                 for gid in d.get("group_ids", [d.get("chat_id")]):
-                    self._capture_seen.add(f"{gid}:{d.get('address')}")
+                    self._detection_seen.add(f"{gid}:{d.get('address')}")
                     if d.get("pair"):
-                        self._capture_seen.add(f"{gid}:{d.get('pair')}")
+                        self._detection_seen.add(f"{gid}:{d.get('pair')}")
         self._register_handlers()
         self._watcher_task = asyncio.create_task(self._premium_watcher(), name="premium-watcher")
         self._rollover_task = asyncio.create_task(self._daily_rollover_watcher(), name="premium-rollover")

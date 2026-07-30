@@ -105,13 +105,13 @@ class HandlersMixin:
         #   GATE_PREMIUM      — the premium-all forward + the caller-signal
         #                       feature (cross-group counting, forward to
         #                       DEST_PREMIUM_ETH_CALLER)
-        #   GATE_PREMIUM_SOL  — SOL panel capture (getAccountInfo check)
-        #   GATE_PREMIUM_ETH  — ETH panel capture (eth_getCode check)
-        #   GATE_PREMIUM_RBH  — RBH panel capture (eth_getCode check)
-        # None of the panel-capture ones require GATE_PREMIUM any more: a
-        # premium address is an on-chain question ("is this a real contract on
-        # X"), independent of whether the caller-signal forward is switched
-        # on. Turning one off must not silently stop another.
+        #   GATE_PREMIUM_SOL  — SOL detections panel (getAccountInfo check)
+        #   GATE_PREMIUM_ETH  — ETH detections panel (eth_getCode check)
+        #   GATE_PREMIUM_RBH  — RBH detections panel (eth_getCode check)
+        # None of the three panel ones require GATE_PREMIUM any more: a premium
+        # address is an on-chain question ("is this a real contract on X"),
+        # independent of whether the caller-signal forward is switched on.
+        # Turning one off must not silently stop another.
         premium_on = self._on(GATE_PREMIUM)
         sol_on = self._on(GATE_PREMIUM_SOL)
         eth_on = self._on(GATE_PREMIUM_ETH)
@@ -159,19 +159,19 @@ class HandlersMixin:
         raw = event.raw_text or ""
         message = raw.lower()
 
-        # Resolve the source once — needed by both SOL and ETH capture.
+        # Resolve the source once — needed by both the SOL and ETH branches.
         chat = await event.get_chat()
         source_name = getattr(chat, "title", "Unknown")
         source_uname = getattr(chat, "username", None)
         bare = bare_chat_id(event.chat_id)
 
-        # ── SOL address capture (dashboard-only panel; independent of ETH) ──
+        # ── SOL address detection (dashboard-only panel; independent of ETH) ──
         if sol_on:
             for sol_addr in set(SOL_RE.findall(raw)):
                 sol_key = f"{bare}:{sol_addr}"
-                if sol_key not in self._capture_seen:
-                    self._capture_seen.add(sol_key)
-                    asyncio.create_task(self._capture_premium_sol(
+                if sol_key not in self._detection_seen:
+                    self._detection_seen.add(sol_key)
+                    asyncio.create_task(self._record_sol_detection(
                         sol_addr, bare, source_name, raw,
                         username=source_uname, msg_id=event.id,
                     ))
@@ -179,12 +179,12 @@ class HandlersMixin:
         eth_match = ETH_RE.search(message)
         eth_address = eth_match.group(0).lower() if eth_match else None
 
-        # ── ETH/RBH panel capture — independent of GATE_PREMIUM ──────────────
+        # ── ETH/RBH panel detection — independent of GATE_PREMIUM ────────────
         if eth_address and (eth_on or rbh_on):
             cap_key = f"{bare}:{eth_address}"
-            if cap_key not in self._capture_seen:
-                self._capture_seen.add(cap_key)
-                asyncio.create_task(self._capture_premium_eth(
+            if cap_key not in self._detection_seen:
+                self._detection_seen.add(cap_key)
+                asyncio.create_task(self._record_eth_detection(
                     eth_address, bare, source_name, raw,
                     username=source_uname, msg_id=event.id,
                     check_eth=eth_on, check_rbh=rbh_on,

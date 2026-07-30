@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { Brain, Check, KeyRound, Loader2, Radio, SlidersHorizontal } from "lucide-react";
+import { Brain, Check, Fuel, KeyRound, Link2, Loader2, Radio, SlidersHorizontal } from "lucide-react";
 import { mutate } from "swr";
 import { useApi, apiSend } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +60,20 @@ const GROUP_META: Record<string, { icon: typeof KeyRound; blurb: string }> = {
       "provider chahiye, Alchemy nahi karta. HTTP (Alchemy) sirf premium-group " +
       "me mile SOL address ko verify karta hai, discovery se koi lena-dena nahi. " +
       "Dono pair me 2-way failover hai — pehla fail to dusra, dusra fail to pehla.",
+  },
+  "RPC Endpoints — ETH Gas Fees": {
+    icon: Fuel,
+    blurb:
+      "ETH Gas Fees ka apna key — ye feature har watched pair par ek subscription " +
+      "rakhta hai aur har buy ka receipt padhta hai, to shared key par ye new-pair " +
+      "detection ke compute units kha jata hai. Khaali chhodo to ETH #1 share karega.",
+  },
+  "Robinhood Detection Sources": {
+    icon: Link2,
+    blurb:
+      "Robinhood detector kin sources ko sunta hai. Har ek apni alag WS subscription " +
+      "hai — jo source off hai usse launch hua token kabhi dikhega hi nahi, matching " +
+      "SOL ticker bhi fire nahi hogi. Settings → Bots ka “SOL to RBH” in sab ka master hai.",
   },
   "Detection Tuning": {
     icon: SlidersHorizontal,

@@ -3,7 +3,7 @@
 Four categories, each a section of the Settings page:
 
   Bots   — the individual features: signal forwarding per source channel,
-           premium-caller capture per chain, cross-chain flows, gas fees,
+           premium-caller detection per chain, cross-chain flows, gas fees,
            outcome tracking, Telegram commands
   AI     — the X-links feed and the narrative agent that judges it
   Chains — a whole chain on or off
@@ -43,6 +43,14 @@ RPC = "rpc"
 # fresh row would have started forwarding to Telegram again).
 RENAMED_IDS: dict[str, str] = {
     "bbcanalyser2": "callanalyser2",
+    # The panel these feed is called "detections" everywhere the user can see
+    # it — the Mongo collection, /api/forwarder/detections, the WS event, the
+    # nav item — so the switches now say detection too. `premium_sol_capture`
+    # was off, which is exactly why this needs a migration entry and not just
+    # a rename.
+    "premium_eth_capture": "premium_eth_detection",
+    "premium_rbh_capture": "premium_rbh_detection",
+    "premium_sol_capture": "premium_sol_detection",
 }
 
 # ── Default services (seed) ────────────────────────────────────────────────────
@@ -61,15 +69,15 @@ DEFAULT_SERVICES: list[dict] = [
 
     # ── Bots: premium groups ──
     # Forwarding + the cross-group ETH caller count. Distinct from the three
-    # per-chain capture switches below, which only verify an address on chain
-    # and record it in a dashboard panel.
+    # per-chain detection switches below, which only verify an address on chain
+    # and record it in the matching Detections panel.
     {"id": "premium_callers_signal","category": BOT, "label": "Premium Callers Signal",
      "chain": "eth", "enabled": True},
-    {"id": "premium_eth_capture",   "category": BOT, "label": "Premium ETH",
+    {"id": "premium_eth_detection",   "category": BOT, "label": "Premium ETH",
      "chain": "eth", "enabled": True},
-    {"id": "premium_rbh_capture",   "category": BOT, "label": "Premium RBH",
+    {"id": "premium_rbh_detection",   "category": BOT, "label": "Premium RBH",
      "chain": "rbh", "enabled": True},
-    {"id": "premium_sol_capture",   "category": BOT, "label": "Premium SOL",
+    {"id": "premium_sol_detection",   "category": BOT, "label": "Premium SOL",
      "chain": "sol", "enabled": True},
 
     # ── Bots: cross-chain and gas ──

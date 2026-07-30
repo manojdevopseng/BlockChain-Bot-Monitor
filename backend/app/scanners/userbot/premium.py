@@ -1,4 +1,4 @@
-"""Premium-caller address capture — the ETH / RBH / SOL dashboard panels.
+"""Premium-caller address detection — the ETH / RBH / SOL dashboard panels.
 
 An address seen in a premium Telegram group is verified on chain first (is it a
 real contract / a real account?) and only then recorded, so the panels do not
@@ -26,10 +26,10 @@ from .store import col
 
 
 class PremiumCaptureMixin:
-    """`_capture_premium_eth` / `_capture_premium_sol`, called from the premium
+    """`_record_eth_detection` / `_record_sol_detection`, called from the premium
     handler once an address has been spotted in a watched group."""
 
-    async def _capture_premium_eth(self, addr: str, chat_id: int, group: str, text: str,
+    async def _record_eth_detection(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None,
                                    check_eth: bool = True, check_rbh: bool = True) -> None:
         """Confirm an ETH-format address seen in a premium group and, per
@@ -122,7 +122,7 @@ class PremiumCaptureMixin:
                 # eventually alerted) inside _eth_call/_pooled_rpc; this catch
                 # is for anything else that goes wrong in between, and it
                 # should not vanish without a trace either.
-                log.warning(f"[PREMIUM-{label}] capture failed for {addr[:10]}: "
+                log.warning(f"[PREMIUM-{label}] detection failed for {addr[:10]}: "
                            f"{type(exc).__name__}: {exc}")
 
         tasks = []
@@ -133,14 +133,14 @@ class PremiumCaptureMixin:
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def _capture_premium_sol(self, addr: str, chat_id: int, group: str, text: str,
+    async def _record_sol_detection(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None) -> None:
         """Capture a Solana address seen in a premium group into the SOL panel.
         Dormant unless a SOL HTTP endpoint is set (mirrors the ETH/RBH
         behaviour); the RPC getAccountInfo check filters out random base58
         noise. _sol_rpc already rotates and logs on failure, so a None here
         means "not a real account" and "every endpoint failed" alike — either
-        way there is nothing safe to capture."""
+        way there is nothing safe to record."""
         if not self._http or not config.SOL_HTTP_ENDPOINTS:
             return
         info = await self._sol_rpc("getAccountInfo", [addr, {"encoding": "base64"}])

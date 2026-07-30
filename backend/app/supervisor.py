@@ -363,9 +363,9 @@ _DEPENDS_ON = {
     "eth_otto_group":         "fwd",
     # Userbot premium features.
     "premium_callers_signal": "fwd",
-    "premium_eth_capture":    "fwd",
-    "premium_rbh_capture":    "fwd",
-    "premium_sol_capture":    "fwd",
+    "premium_eth_detection":    "fwd",
+    "premium_rbh_detection":    "fwd",
+    "premium_sol_detection":    "fwd",
     "forwarder":              "fwd",
     # Cross-chain flows and gas, on their chain's socket.
     "sol_to_eth":             "eth",

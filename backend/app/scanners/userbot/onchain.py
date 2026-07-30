@@ -163,7 +163,7 @@ class OnChainMixin:
 
         Deliberately not on the paid pool: this is cosmetic (it decorates the
         forwarded message) and must never be the thing that burns a quota the
-        capture checks need.
+        detection checks need.
         """
         if not self._http:
             return ""

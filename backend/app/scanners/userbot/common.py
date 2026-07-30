@@ -46,9 +46,9 @@ GATE_BUYBOT      = "buybottracker"         # SOURCE_BUYBOT
 GATE_DEXS        = "dexsignalcall"         # SOURCE_DEXS
 GATE_OTTO        = "eth_otto_group"        # SOURCE_OTTO
 GATE_PREMIUM     = "premium_callers_signal"  # premium groups → premium ETH caller
-GATE_PREMIUM_ETH = "premium_eth_capture"   # premium groups → ETH panel capture
-GATE_PREMIUM_RBH = "premium_rbh_capture"   # premium groups → RBH panel capture
-GATE_PREMIUM_SOL = "premium_sol_capture"   # premium groups → SOL panel capture
+GATE_PREMIUM_ETH = "premium_eth_detection"   # premium groups → ETH detections panel
+GATE_PREMIUM_RBH = "premium_rbh_detection"   # premium groups → RBH detections panel
+GATE_PREMIUM_SOL = "premium_sol_detection"   # premium groups → SOL detections panel
 
 # ── Tunables ──────────────────────────────────────────────────────────────────
 # How often the live premium-group set is re-read from Mongo.
