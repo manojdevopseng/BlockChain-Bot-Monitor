@@ -14,7 +14,8 @@ import { FilterTabs, HistorySelect, SearchBox } from "@/components/SectionFilter
 import { DownloadCsv } from "@/components/features/Performance";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
-import { fmtEth, shortAddr, timeAgo, rowKey } from "@/lib/utils";
+import { fmtDateTime, fmtEth, shortAddr, rowKey } from "@/lib/utils";
+import { Age, TickProvider } from "@/components/Age";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
 
@@ -160,8 +161,9 @@ function GasSection() {
                   <td className="px-3 py-3">
                     <span className="font-mono text-xs font-semibold text-accent-amber">{fmtEth(r.fee_eth)}</span>
                   </td>
+                  {/* Age — ticks every second, same component as the AI page */}
                   <td className="px-3 py-3">
-                    <span className="text-text-muted">{r.age_seconds != null ? `${r.age_seconds}s` : "—"}</span>
+                    <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
                   </td>
                   <td className="px-3 py-3">
                     {r.tx_hash ? (
@@ -171,7 +173,12 @@ function GasSection() {
                       </span>
                     ) : "—"}
                   </td>
-                  <td className="px-3 py-3"><span className="text-text-muted">{r.created_at ? timeAgo(r.created_at) : "—"}</span></td>
+                  {/* When — the absolute time the buy landed */}
+                  <td className="px-3 py-3">
+                    <span className="font-mono text-xs text-text-muted">
+                      {r.created_at ? fmtDateTime(r.created_at) : "—"}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -224,6 +231,7 @@ function CrossChainSection() {
 
 export default function DetectionsPage() {
   return (
+    <TickProvider>
     <div className="space-y-5">
       <PageHeader
         title="Detections"
@@ -233,5 +241,6 @@ export default function DetectionsPage() {
       <CrossChainSection />
       <GasSection />
     </div>
+    </TickProvider>
   );
 }

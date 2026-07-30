@@ -4,7 +4,8 @@ import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
-import { fmtDateTime, shortAddr, timeAgo, rowKey } from "@/lib/utils";
+import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
+import { Age } from "@/components/Age";
 
 export type GroupEntry = {
   chat_id?: number;
@@ -57,8 +58,8 @@ export function DetectionTable(
             <th className="px-3 py-2.5 font-medium">Groups</th>
             <th className="px-3 py-2.5 font-medium">Keyword</th>
             <th className="px-3 py-2.5 font-medium">Count</th>
-            <th className="px-3 py-2.5 font-medium">Timestamp</th>
             <th className="px-3 py-2.5 font-medium">When</th>
+            <th className="px-3 py-2.5 font-medium">Age</th>
           </tr>
         </thead>
         <tbody>
@@ -146,13 +147,13 @@ export function DetectionTable(
                 <td className="px-3 py-3">
                   <span className="font-bold text-accent-amber">{d.count ?? 1}</span>
                 </td>
-                {/* Timestamp */}
+                {/* When — the absolute time it was recorded */}
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">{d.ts ? fmtDateTime(d.ts) : "—"}</span>
                 </td>
-                {/* When */}
+                {/* Age — ticks every second, same component as the AI page */}
                 <td className="px-3 py-3">
-                  <span className="text-text-muted">{d.ts ? timeAgo(d.ts) : "—"}</span>
+                  <span className="font-mono text-xs text-text-muted"><Age ts={d.ts} /></span>
                 </td>
               </tr>
             ))

@@ -4,7 +4,8 @@ import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
-import { fmtDateTime, fmtUsd, shortAddr, timeAgo, rowKey } from "@/lib/utils";
+import { fmtDateTime, fmtUsd, shortAddr, rowKey } from "@/lib/utils";
+import { Age } from "@/components/Age";
 
 export type CrossChainMatch = {
   token_symbol?: string;
@@ -47,8 +48,8 @@ export function CrossChainTable(
             <th className="px-3 py-2.5 font-medium">Matched Address</th>
             <th className="px-3 py-2.5 font-medium">DEX</th>
             <th className="px-3 py-2.5 font-medium">SOL MCap</th>
-            <th className="px-3 py-2.5 font-medium">Timestamp</th>
             <th className="px-3 py-2.5 font-medium">When</th>
+            <th className="px-3 py-2.5 font-medium">Age</th>
           </tr>
         </thead>
         <tbody>
@@ -98,13 +99,15 @@ export function CrossChainTable(
                 </td>
                 <td className="px-3 py-3"><Badge variant="purple">{r.dex || "—"}</Badge></td>
                 <td className="px-3 py-3 text-text-muted">{fmtUsd(r.sol_mcap_usd)}</td>
+                {/* When — the absolute time the match fired */}
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">
                     {r.created_at ? fmtDateTime(r.created_at) : "—"}
                   </span>
                 </td>
+                {/* Age — ticks every second */}
                 <td className="px-3 py-3">
-                  <span className="text-text-muted">{r.created_at ? timeAgo(r.created_at) : "—"}</span>
+                  <span className="font-mono text-xs text-text-muted"><Age ts={r.created_at} /></span>
                 </td>
               </tr>
             ))
