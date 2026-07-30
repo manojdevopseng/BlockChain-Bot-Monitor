@@ -52,6 +52,12 @@ class RobinhoodScanner:
         )
         self._detector = OnChainDetector(self._spec, self._on_token)
 
+    @property
+    def connected(self) -> bool:
+        """Proxies OnChainDetector.connected — see EthTrendingScanner.connected
+        for why this has to exist on the wrapper, not just the detector."""
+        return self._detector.connected
+
     async def run(self) -> None:
         if not config.RBH_RPC_WSS:
             log.error("[RBH-XCHAIN] RBH_RPC_WSS not set — SOL→Robinhood detection disabled")

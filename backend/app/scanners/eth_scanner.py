@@ -51,6 +51,17 @@ class EthTrendingScanner:
         self._gas_provider = None      # own socket only if GAS_RPC_WSS differs
         self._gas_task: Optional[asyncio.Task] = None
 
+    @property
+    def connected(self) -> bool:
+        """Proxies OnChainDetector.connected — supervisor.rpc_connected() reads
+        this on the instance it holds, which is this wrapper, not the detector
+        inside it. Without this property, `getattr(inst, "connected", False)`
+        silently found nothing and always fell back to False, so RPC Monitor
+        showed "stopped" for a socket that was live and delivering pairs the
+        whole time (caught live on the box: Robinhood was streaming pair
+        events non-stop while its own status row said stopped)."""
+        return self._detector.connected
+
     async def run(self) -> None:
         if not config.ETH_RPC_WSS:
             log.error("[ETH-XCHAIN] ETH_RPC_WSS not set — SOL→ETH on-chain detection disabled")
