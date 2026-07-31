@@ -32,13 +32,36 @@ from .store import col
 # chat from the userbot to the bot does not change its volume.
 CALL_CAP = 2
 
+# How much of the caller's own post is quoted back. Long enough for a real
+# call (ticker, thesis, links), short enough that the address underneath is
+# still on screen — and well inside Telegram's 4096-character message limit,
+# which a few pasted essays would otherwise blow past.
+CONTENT_MAX = 600
+
+
+def _content_block(content: str) -> str:
+    """The caller's message, quoted — or "" when there is nothing to quote.
+
+    A signal without the words around the address loses the reason it was
+    called. Rendered as a <blockquote> so it reads as somebody else's text
+    rather than the bot's, and collapsed to at most one blank line between
+    paragraphs: promo posts are mostly whitespace.
+    """
+    body = re.sub(r"\n{3,}", "\n\n", (content or "").strip())
+    if not body:
+        return ""
+    if len(body) > CONTENT_MAX:
+        body = body[:CONTENT_MAX].rstrip() + " …"
+    return f"<blockquote>{html.escape(body)}</blockquote>\n\n"
+
 
 class PremiumCaptureMixin:
     """`_record_eth_detection` / `_record_sol_detection`, called from the premium
     handler once an address has been spotted in a watched group."""
 
     async def _announce_detection(self, chain: str, address: str, symbol: str,
-                                  group: str, calls: int, post_url: str = "") -> None:
+                                  group: str, calls: int, post_url: str = "",
+                                  content: str = "") -> None:
         """Post a detection to its own chain's Telegram group.
 
         Sent by the BOT, not the userbot. The bot is not a member of the
@@ -68,7 +91,8 @@ class PremiumCaptureMixin:
             + (f"🪙 <b>{html.escape(symbol)}</b>\n" if symbol else "")
             + f"📢 {html.escape(group)}\n"
             f"📞 Call {calls} of {CALL_CAP}\n\n"
-            f"<code>{html.escape(address)}</code>"
+            + _content_block(content)
+            + f"<code>{html.escape(address)}</code>"
         )
         # "View on Telegram" opens the exact post the address was seen in.
         # Dropped when that post cannot be linked to — a plain (non-super)
@@ -157,7 +181,7 @@ class PremiumCaptureMixin:
                     )
                     log.info(f"[PREMIUM-{label}] {existing.get('symbol') or token_addr[:10]} shill count → {len(entries)} (from {group})")
                     await self._announce_detection(chain, token_addr, existing.get("symbol") or "",
-                                                   group, len(entries), post_url)
+                                                   group, len(entries), post_url, text)
                     return
                 # A token that implements neither name() nor symbol() is
                 # unusual but legal, and reverting them is not a reason to
@@ -196,7 +220,7 @@ class PremiumCaptureMixin:
                 await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
                 log.info(f"[PREMIUM-{label}] Captured {record['symbol'] or token_addr[:10]} from {group} | "
                          + (f"{keyword} Matched" if keyword else "Not Matched"))
-                await self._announce_detection(chain, token_addr, record["symbol"], group, 1, post_url)
+                await self._announce_detection(chain, token_addr, record["symbol"], group, 1, post_url, text)
             except Exception as exc:
                 # Was log.debug — invisible even on the Logs page (below its
                 # INFO floor). An RPC rejection is already handled (rotated,
@@ -247,7 +271,7 @@ class PremiumCaptureMixin:
                 "ts": time.time(), "keyword": existing.get("keyword") or keyword}})
             log.info(f"[PREMIUM-SOL] {existing.get('symbol') or addr[:10]} shill count → {len(entries)} (from {group})")
             await self._announce_detection("sol", addr, existing.get("symbol") or "",
-                                          group, len(entries), post_url)
+                                          group, len(entries), post_url, text)
             return
 
         meta = await self._sol_token_info(addr)
@@ -263,4 +287,4 @@ class PremiumCaptureMixin:
         await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
         log.info(f"[PREMIUM-SOL] Captured {record['symbol'] or addr[:10]} from {group} | "
                  + (f"{keyword} Matched" if keyword else "Not Matched"))
-        await self._announce_detection("sol", addr, record["symbol"], group, 1, post_url)
+        await self._announce_detection("sol", addr, record["symbol"], group, 1, post_url, text)
