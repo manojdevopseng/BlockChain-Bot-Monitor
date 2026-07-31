@@ -58,15 +58,20 @@ class PremiumCaptureMixin:
             return
         label = chain.upper()
         link = gmgn_url(chain, address)
+        # The address is the one thing that gets acted on, so it sits alone on
+        # its own line in <code> — a tap copies it whole. Everything above it
+        # is context. GMGN is an inline button rather than a link in the body:
+        # as text it rendered as a bare URL under the message.
         text = (
-            f"🎯 <b>{label} PREMIUM SIGNAL</b>\n\n"
-            f"SOURCE: {html.escape(group or 'Unknown')}\n"
-            + (f"Token: <b><code>{html.escape(symbol)}</code></b>\n" if symbol else "")
-            + f"{label}: <code>{html.escape(address)}</code>\n"
-            f"TOTAL CALLS: {calls}/{CALL_CAP}"
-            + (f"\n\n<a href=\"{link}\">GMGN</a>" if link else "")
+            f"🎯 <b>{label} PREMIUM SIGNAL</b>\n"
+            f"➖➖➖➖➖➖➖➖➖➖\n"
+            + (f"🪙 <b>{html.escape(symbol)}</b>\n" if symbol else "")
+            + f"📢 {html.escape(group or 'Unknown')}\n"
+            f"📞 Call {calls} of {CALL_CAP}\n\n"
+            f"<code>{html.escape(address)}</code>"
         )
-        if await notifier.send_to(chat_id, text):
+        buttons = [("📊 GMGN", link)] if link else None
+        if await notifier.send_to(chat_id, text, buttons=buttons):
             self.count_premium += 1
             log.info(f"[PREMIUM] [{group}] {symbol or address[:10]} -> {label} group ({calls}/{CALL_CAP})")
         else:

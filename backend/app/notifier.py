@@ -68,25 +68,35 @@ async def close() -> None:
     _session = None
 
 
-async def send_to(chat_id, text: str, *, silent: bool = False) -> bool:
+async def send_to(chat_id, text: str, *, silent: bool = False,
+                  buttons: Optional[list[tuple[str, str]]] = None) -> bool:
     """Send an HTML message to a specific chat. Never raises.
 
     `send` is the operational channel (ALERT_CHAT_ID); this is for features that
     have a chat of their own — premium detections go to one chat per chain.
+
+    `buttons` is [(label, url), …], laid out as one inline row. A link that is
+    a button instead of text keeps it out of the message body, where it would
+    otherwise sit as a bare URL under everything else.
     """
     if not chat_id or not settings.telegram_bot_token:
         return False
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+        "disable_notification": silent,
+    }
+    if buttons:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[{"text": label, "url": url} for label, url in buttons]]
+        }
     try:
         session = await _session_get()
         async with session.post(
             f"{TELEGRAM_API}/bot{settings.telegram_bot_token}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "disable_notification": silent,
-            },
+            json=payload,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
             if resp.status == 200:
