@@ -174,5 +174,9 @@ frontend/
   and BNB in parallel: an address does not say which chain it belongs to, and the
   same string can be a live contract on all three. A pool address resolves to the
   token behind it on all three EVM chains; on Solana it is recorded as posted.
+- **Premium signals** go to one Telegram group per chain (`DEST_PREMIUM_ETH` /
+  `_RBH` / `_BNB` / `_SOL`), posted by the bot — it is not in the source groups,
+  so it composes the message instead of forwarding it. Max 2 per address per
+  chain: the first sighting and the first repeat.
 - **`AI_DRY_RUN`** records decisions and sets the Telegram flag without sending.
   Read a day of them before turning it off.

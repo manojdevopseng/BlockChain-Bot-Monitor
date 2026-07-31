@@ -271,8 +271,16 @@ class Settings(BaseSettings):
     dest_otto: str = ""
     dest_signals: str = ""
     dest_dexs: str = ""
-    dest_premium_eth_caller: str = ""
     dest_premium_all: str = ""
+    # One chat per chain for premium-caller detections. Sent by the BOT, not
+    # the userbot: the bot cannot forward from the premium source groups (it is
+    # not in them — that is what the Telethon session is for), so it posts a
+    # composed message instead. Blank = that chain's detections are recorded in
+    # the dashboard panel and nothing is sent.
+    dest_premium_eth: str = ""
+    dest_premium_rbh: str = ""
+    dest_premium_bnb: str = ""
+    dest_premium_sol: str = ""
 
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"

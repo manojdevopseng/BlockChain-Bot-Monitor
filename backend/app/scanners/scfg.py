@@ -166,8 +166,17 @@ def _int_or_none(v: str):
 DEST_OTTO               = _int_or_none(settings.dest_otto)
 DEST_SIGNALS            = _int_or_none(settings.dest_signals)
 DEST_DEXS               = _int_or_none(settings.dest_dexs)
-DEST_PREMIUM_ETH_CALLER = _int_or_none(settings.dest_premium_eth_caller)
 DEST_PREMIUM_ALL        = _int_or_none(settings.dest_premium_all)
+
+# chain -> the chat its premium detections are announced in. Keyed by the same
+# chain slug the detection rows carry, so a new chain needs one entry and no
+# branching anywhere else.
+DEST_PREMIUM_BY_CHAIN = {
+    "eth": _int_or_none(settings.dest_premium_eth),
+    "rbh": _int_or_none(settings.dest_premium_rbh),
+    "bnb": _int_or_none(settings.dest_premium_bnb),
+    "sol": _int_or_none(settings.dest_premium_sol),
+}
 
 # ── Forwarder source channels (from .env) ───────────────────────
 SOURCE_CALL   = settings.source_call

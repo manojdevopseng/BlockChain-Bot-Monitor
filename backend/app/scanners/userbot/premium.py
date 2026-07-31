@@ -12,22 +12,67 @@ stop the others.
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 import time
 from typing import Optional
 
-from app import outcomes
+from app import notifier, outcomes
 from app.scanners import scfg as config
 from app.scanners.wss_pool import EndpointPool
+from app.util import gmgn_url
 
-from .common import log
+from .common import GATE_PREMIUM, log
 from .onchain import REVERTED, decode_symbol
 from .store import col
+
+# Messages sent per address per chain. The first sighting and the first repeat
+# are the signal; after that the shill count keeps rising in the panel and the
+# group stays quiet. Same 2 the old ETH-only forward used, so switching that
+# chat from the userbot to the bot does not change its volume.
+CALL_CAP = 2
 
 
 class PremiumCaptureMixin:
     """`_record_eth_detection` / `_record_sol_detection`, called from the premium
     handler once an address has been spotted in a watched group."""
+
+    async def _announce_detection(self, chain: str, address: str, symbol: str,
+                                  group: str, calls: int) -> None:
+        """Post a detection to its own chain's Telegram group.
+
+        Sent by the BOT, not the userbot. The bot is not a member of the
+        premium source groups — that is the whole reason a Telethon session
+        exists — so it cannot forward the original message and composes one
+        carrying the same fields instead.
+
+        Routing is by chain, so an address that turns out to be live on two
+        chains is announced in both groups and never in the wrong one. A chain
+        with no chat id in .env is simply not announced; its panel rows are
+        unaffected.
+        """
+        if calls > CALL_CAP or not self._on(GATE_PREMIUM):
+            return
+        chat_id = config.DEST_PREMIUM_BY_CHAIN.get(chain)
+        if not chat_id:
+            return
+        label = chain.upper()
+        link = gmgn_url(chain, address)
+        text = (
+            f"🎯 <b>{label} PREMIUM SIGNAL</b>\n\n"
+            f"SOURCE: {html.escape(group or 'Unknown')}\n"
+            + (f"Token: <b><code>{html.escape(symbol)}</code></b>\n" if symbol else "")
+            + f"{label}: <code>{html.escape(address)}</code>\n"
+            f"TOTAL CALLS: {calls}/{CALL_CAP}"
+            + (f"\n\n<a href=\"{link}\">GMGN</a>" if link else "")
+        )
+        if await notifier.send_to(chat_id, text):
+            self.count_premium += 1
+            log.info(f"[PREMIUM] [{group}] {symbol or address[:10]} -> {label} group ({calls}/{CALL_CAP})")
+        else:
+            # send_to never raises, so a failure would otherwise be invisible —
+            # and "the group went quiet" is exactly the symptom worth naming.
+            log.warning(f"[PREMIUM] {label} signal not delivered to {chat_id} for {address[:10]}")
 
     async def _record_eth_detection(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None,
@@ -98,6 +143,8 @@ class PremiumCaptureMixin:
                         }},
                     )
                     log.info(f"[PREMIUM-{label}] {existing.get('symbol') or token_addr[:10]} shill count → {len(entries)} (from {group})")
+                    await self._announce_detection(chain, token_addr,
+                                                   existing.get("symbol") or "", group, len(entries))
                     return
                 # A token that implements neither name() nor symbol() is
                 # unusual but legal, and reverting them is not a reason to
@@ -136,6 +183,7 @@ class PremiumCaptureMixin:
                 await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
                 log.info(f"[PREMIUM-{label}] Captured {record['symbol'] or token_addr[:10]} from {group} | "
                          + (f"{keyword} Matched" if keyword else "Not Matched"))
+                await self._announce_detection(chain, token_addr, record["symbol"], group, 1)
             except Exception as exc:
                 # Was log.debug — invisible even on the Logs page (below its
                 # INFO floor). An RPC rejection is already handled (rotated,
@@ -182,6 +230,7 @@ class PremiumCaptureMixin:
                 "group_ids": [e["chat_id"] for e in entries], "count": len(entries),
                 "ts": time.time(), "keyword": existing.get("keyword") or keyword}})
             log.info(f"[PREMIUM-SOL] {existing.get('symbol') or addr[:10]} shill count → {len(entries)} (from {group})")
+            await self._announce_detection("sol", addr, existing.get("symbol") or "", group, len(entries))
             return
 
         meta = await self._sol_token_info(addr)
@@ -197,3 +246,4 @@ class PremiumCaptureMixin:
         await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
         log.info(f"[PREMIUM-SOL] Captured {record['symbol'] or addr[:10]} from {group} | "
                  + (f"{keyword} Matched" if keyword else "Not Matched"))
+        await self._announce_detection("sol", addr, record["symbol"], group, 1)

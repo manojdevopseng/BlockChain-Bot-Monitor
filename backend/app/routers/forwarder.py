@@ -43,8 +43,11 @@ def _destinations() -> list[tuple[str, str, str]]:
         ("DEST_OTTO",               scfg.DEST_OTTO,               "Otto method/function hash matches"),
         ("DEST_SIGNALS",            scfg.DEST_SIGNALS,            "CallAnalyser2 first-calls + BuyBotTracker"),
         ("DEST_DEXS",               scfg.DEST_DEXS,               "DEX signals from dexssignal"),
-        ("DEST_PREMIUM_ETH_CALLER", scfg.DEST_PREMIUM_ETH_CALLER, "ETH addresses seen in premium groups"),
         ("DEST_PREMIUM_ALL",        scfg.DEST_PREMIUM_ALL,        "Raw mirror of every premium message"),
+        ("DEST_PREMIUM_ETH",        scfg.DEST_PREMIUM_BY_CHAIN["eth"], "ETH premium-caller detections"),
+        ("DEST_PREMIUM_RBH",        scfg.DEST_PREMIUM_BY_CHAIN["rbh"], "RBH premium-caller detections"),
+        ("DEST_PREMIUM_BNB",        scfg.DEST_PREMIUM_BY_CHAIN["bnb"], "BNB premium-caller detections"),
+        ("DEST_PREMIUM_SOL",        scfg.DEST_PREMIUM_BY_CHAIN["sol"], "SOL premium-caller detections"),
     ]
 
 

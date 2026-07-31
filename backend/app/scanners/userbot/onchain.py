@@ -18,7 +18,7 @@ import aiohttp
 
 from app.scanners.wss_pool import EndpointPool, host_of
 
-from .common import ETH_RPCS, log
+from .common import log
 
 
 def addr_from_word(hex_result: Optional[str]) -> Optional[str]:
@@ -200,25 +200,3 @@ class OnChainMixin:
             return {"symbol": tok.get("symbol") or "", "name": tok.get("name") or ""}
         except Exception:
             return {}
-
-    async def _fetch_token_symbol(self, address: str) -> str:
-        """Symbol for a premium-caller alert, off free public endpoints.
-
-        Deliberately not on the paid pool: this is cosmetic (it decorates the
-        forwarded message) and must never be the thing that burns a quota the
-        detection checks need.
-        """
-        if not self._http:
-            return ""
-        payload = {"jsonrpc": "2.0", "method": "eth_call",
-                   "params": [{"to": address, "data": "0x95d89b41"}, "latest"], "id": 1}
-        for rpc in ETH_RPCS:
-            try:
-                async with self._http.post(rpc, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    data = await resp.json(content_type=None)
-                hex_result = data.get("result", "")
-                if hex_result and hex_result != "0x":
-                    return decode_symbol(hex_result)
-            except Exception:
-                continue
-        return ""

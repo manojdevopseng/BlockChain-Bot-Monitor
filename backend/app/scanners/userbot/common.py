@@ -16,20 +16,10 @@ from app.scanners.slog import get_logger
 
 log = get_logger("app.scanners.forwarder")
 
-# Public JSON-RPC endpoints, tried in order, for the one lookup that does not
-# justify burning a paid key: the token symbol shown in a premium-caller alert.
-ETH_RPCS = [
-    "https://ethereum.publicnode.com",
-    "https://1rpc.io/eth",
-    "https://eth.llamarpc.com",
-    "https://rpc.flashbots.net",
-]
-
 # ── Telegram routing (from .env; None = that route is skipped) ─────────────────
 DEST_OTTO               = config.DEST_OTTO
 DEST_SIGNALS            = config.DEST_SIGNALS
 DEST_DEXS               = config.DEST_DEXS
-DEST_PREMIUM_ETH_CALLER = config.DEST_PREMIUM_ETH_CALLER
 DEST_PREMIUM_ALL        = config.DEST_PREMIUM_ALL
 
 SOURCE_OTTO   = config.SOURCE_OTTO
@@ -45,7 +35,7 @@ GATE_CALL        = "callanalyser2"         # SOURCE_CALL
 GATE_BUYBOT      = "buybottracker"         # SOURCE_BUYBOT
 GATE_DEXS        = "dexsignalcall"         # SOURCE_DEXS
 GATE_OTTO        = "eth_otto_group"        # SOURCE_OTTO
-GATE_PREMIUM     = "premium_callers_signal"  # premium groups → premium ETH caller
+GATE_PREMIUM     = "premium_callers_signal"  # premium groups → per-chain signal groups
 GATE_PREMIUM_ETH = "premium_eth_detection"   # premium groups → ETH detections panel
 GATE_PREMIUM_RBH = "premium_rbh_detection"   # premium groups → RBH detections panel
 GATE_PREMIUM_SOL = "premium_sol_detection"   # premium groups → SOL detections panel

@@ -48,8 +48,6 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         # without limit. FIFO eviction — an id old enough to be evicted is far
         # past any chance of arriving again. (The reference has the same leak.)
         self._processed:         BoundedSet = BoundedSet(DEDUP_MAX)
-        self._group_eth_tracker: BoundedSet = BoundedSet(DEDUP_MAX)
-        self._eth_global_counter: dict = {}
         self._http: Optional[aiohttp.ClientSession] = None
         # One pool per premium-check job, each its own provider doing its own
         # thing — see scfg.{SOL,ETH,RBH}_HTTP_ENDPOINTS. Distinct chain_labels

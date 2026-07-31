@@ -68,6 +68,37 @@ async def close() -> None:
     _session = None
 
 
+async def send_to(chat_id, text: str, *, silent: bool = False) -> bool:
+    """Send an HTML message to a specific chat. Never raises.
+
+    `send` is the operational channel (ALERT_CHAT_ID); this is for features that
+    have a chat of their own — premium detections go to one chat per chain.
+    """
+    if not chat_id or not settings.telegram_bot_token:
+        return False
+    try:
+        session = await _session_get()
+        async with session.post(
+            f"{TELEGRAM_API}/bot{settings.telegram_bot_token}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "disable_notification": silent,
+            },
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status == 200:
+                return True
+            body = await resp.text()
+            _safe_print(f"[notifier] Telegram error {resp.status} for {chat_id}: {body[:200]}")
+            return False
+    except Exception as exc:  # noqa: BLE001
+        _safe_print(f"[notifier] send to {chat_id} failed: {exc}")
+        return False
+
+
 async def send(text: str, *, silent: bool = False) -> bool:
     """Send an HTML message to the alert group. Never raises."""
     if not enabled():

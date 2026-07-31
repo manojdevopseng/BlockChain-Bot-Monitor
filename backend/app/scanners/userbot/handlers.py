@@ -22,7 +22,7 @@ from telethon import events
 from app import fwd_counters, heartbeat
 from app.util import bare_chat_id
 
-from .common import (DEST_DEXS, DEST_OTTO, DEST_PREMIUM_ALL, DEST_PREMIUM_ETH_CALLER,
+from .common import (DEST_DEXS, DEST_OTTO, DEST_PREMIUM_ALL,
                      DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_OTTO,
                      GATE_PREMIUM, GATE_PREMIUM_BNB, GATE_PREMIUM_ETH, GATE_PREMIUM_RBH,
                      GATE_PREMIUM_SOL,
@@ -103,9 +103,8 @@ class HandlersMixin:
 
     async def _premium_handler(self, event) -> None:
         # Four independent switches share this handler:
-        #   GATE_PREMIUM      — the premium-all forward + the caller-signal
-        #                       feature (cross-group counting, forward to
-        #                       DEST_PREMIUM_ETH_CALLER)
+        #   GATE_PREMIUM      — the premium-all mirror + the caller signal sent
+        #                       to each chain's own group (DEST_PREMIUM_*)
         #   GATE_PREMIUM_SOL  — SOL detections panel (getAccountInfo check)
         #   GATE_PREMIUM_ETH  — ETH detections panel (eth_getCode check)
         #   GATE_PREMIUM_RBH  — RBH detections panel (eth_getCode check)
@@ -193,47 +192,11 @@ class HandlersMixin:
                     check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
                 ))
 
-        # ── Premium caller signal (forward + cross-group counting) ───────────
-        # Everything below is the separate feature GATE_PREMIUM actually
-        # names — turning off Premium ETH/RBH above does not touch this.
-        if not premium_on or not eth_address:
-            return
-
-        group_key = (event.chat_id, eth_address)
-        if group_key in self._group_eth_tracker:
-            return
-        if self._eth_global_counter.get(eth_address, 0) >= 2:
-            return
-        self._group_eth_tracker.add(group_key)
-        self._eth_global_counter[eth_address] = self._eth_global_counter.get(eth_address, 0) + 1
-        self._processed.add(unique_id)
-
-        symbol = await self._fetch_token_symbol(eth_address)
-        token_line = f"Token: <b><code>{symbol}</code></b>\n" if symbol else ""
-        try:
-            forwarded_msg = await safe_send(
-                DEST_PREMIUM_ETH_CALLER,
-                lambda: event.forward_to(DEST_PREMIUM_ETH_CALLER),
-                self._limiter, "PREMIUM",
-            )
-            if forwarded_msg is None:
-                return
-            await safe_send(
-                DEST_PREMIUM_ETH_CALLER,
-                lambda: self._client.send_message(
-                    DEST_PREMIUM_ETH_CALLER,
-                    (f"SOURCE: {source_name}\n{token_line}"
-                     f"ETH: <code>{eth_address}</code>\n"
-                     f"TOTAL CALLS: {self._eth_global_counter[eth_address]}/2"),
-                    reply_to=forwarded_msg.id, parse_mode="html",
-                ),
-                self._limiter, "PREMIUM",
-            )
-            self.count_premium += 1
-            log.info(f"[PREMIUM] [{source_name}] {symbol or '?'} -> PremiumETH "
-                     f"({self._eth_global_counter[eth_address]}/2)")
-        except Exception as exc:
-            log.error(f"[PREMIUM] Forward error: {exc}")
+        # The caller signal itself — one message per chain, into that chain's
+        # own group — is sent from premium.py, off the detection it just
+        # recorded. It has to be: the chain is only known after the address has
+        # been checked on chain, and the same 0x string can be a contract on
+        # more than one of them.
 
     async def _otto_handler(self, event) -> None:
         if not self._on(GATE_OTTO):
