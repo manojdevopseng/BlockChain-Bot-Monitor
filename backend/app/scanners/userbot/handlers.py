@@ -176,6 +176,7 @@ class HandlersMixin:
                     asyncio.create_task(self._record_sol_detection(
                         sol_addr, bare, source_name, raw,
                         username=source_uname, msg_id=event.id,
+                        raw_chat_id=event.chat_id,
                     ))
 
         eth_match = ETH_RE.search(message)
@@ -190,6 +191,7 @@ class HandlersMixin:
                     eth_address, bare, source_name, raw,
                     username=source_uname, msg_id=event.id,
                     check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
+                    raw_chat_id=event.chat_id,
                 ))
 
         # The caller signal itself — one message per chain, into that chain's

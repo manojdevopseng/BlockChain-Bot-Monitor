@@ -111,6 +111,27 @@ _GMGN_SLUG = {"eth": "eth", "ethereum": "eth", "rbh": "robinhood",
               "bnb": "bsc", "bsc": "bsc"}
 
 
+def tg_message_url(chat_id: Any, message_id: Any, username: str | None = None) -> str:
+    """Deep link to one message, or "" when it cannot be linked to.
+
+    A public group is addressed by @username; a private supergroup by the
+    `t.me/c/<bare id>/<msg>` form, which opens only for members of that chat —
+    which is the point, these are premium groups.
+
+    `chat_id` must be Telegram's signed id, not the bare one: the -100 prefix
+    is the only thing that distinguishes a supergroup from a plain group, and
+    plain groups have no message links at all. Without it, return "" rather
+    than a link that opens nothing.
+    """
+    if not message_id:
+        return ""
+    if username:
+        return f"https://t.me/{str(username).lstrip('@')}/{message_id}"
+    if str(chat_id).strip().startswith("-100"):
+        return f"https://t.me/c/{bare_key(chat_id)}/{message_id}"
+    return ""
+
+
 def gmgn_url(chain: str | None, address: str | None) -> str:
     """A token's page on GMGN, or "" when there is nothing to link to."""
     if not address:
