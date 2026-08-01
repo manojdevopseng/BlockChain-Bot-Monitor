@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { CopyButton } from "@/components/CopyButton";
-import { SearchBox } from "@/components/SectionFilters";
+import { FilterTabs, SearchBox } from "@/components/SectionFilters";
 import { TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -40,6 +40,17 @@ type Dest = {
   configured: boolean;
   today: number;
 };
+
+// Which callers the Premium Groups list is showing. Starring is invisible in a
+// list of 116 rows otherwise — you would have to scroll it looking for filled
+// stars to answer "who did I add?".
+type IcFilter = "all" | "ic" | "not";
+
+const IC_TABS = [
+  { id: "all", label: "All" },
+  { id: "ic", label: "⭐ In IC" },
+  { id: "not", label: "Not in IC" },
+] as const satisfies readonly { id: IcFilter; label: string }[];
 
 function SourceRow({ s, onToggle, onRemove, onChip, onIc }: {
   s: Source;
@@ -154,6 +165,7 @@ function AddGroup() {
 
 export default function ForwarderPage() {
   const [q, setQ] = useState("");
+  const [icf, setIcf] = useState<IcFilter>("all");
   const { data: stats } = useApi<any>("/api/forwarder/stats");
   const { data: sources } = useApi<any>("/api/forwarder/sources");
   const { data: dests } = useApi<any>("/api/forwarder/destinations");
@@ -195,10 +207,13 @@ export default function ForwarderPage() {
   // all three against the one form we store.
   const digits = needle.replace(/\D/g, "");
   const allGroups = all.filter((s) => s.kind === "group");
-  const groups = allGroups.filter((s) => !needle
-    || s.name.toLowerCase().includes(needle)
-    || (s.subtitle ?? "").toLowerCase().includes(needle)
-    || (digits.length >= 4 && String(s.chat_id).includes(digits.replace(/^100/, ""))));
+  const icCount = allGroups.filter((s) => s.ic).length;
+  const groups = allGroups
+    .filter((s) => (icf === "all" ? true : icf === "ic" ? s.ic : !s.ic))
+    .filter((s) => !needle
+      || s.name.toLowerCase().includes(needle)
+      || (s.subtitle ?? "").toLowerCase().includes(needle)
+      || (digits.length >= 4 && String(s.chat_id).includes(digits.replace(/^100/, ""))));
 
   return (
     <div className="space-y-5">
@@ -235,13 +250,22 @@ export default function ForwarderPage() {
         id="fwd-groups"
         title="Premium Groups"
         icon={<Users size={14} />}
-        count={allGroups.length}
-        controls={<SearchBox value={q} onChange={setQ} placeholder="group name / id" />}
+        // The number on screen, so it follows the tab and the search rather
+        // than always reading the full 116.
+        count={groups.length}
+        controls={<>
+          <FilterTabs value={icf} onChange={setIcf} options={IC_TABS} />
+          <SearchBox value={q} onChange={setQ} placeholder="group name / id" />
+        </>}
       >
         <p className="mb-3 text-xs text-text-dim">
           {needle
             ? `${groups.length} of ${allGroups.length} groups match "${q.trim()}".`
-            : `${allGroups.length} groups mirrored by the userbot, with each chat id under the name.`}
+            : icf === "ic"
+              ? `${icCount} of ${allGroups.length} callers are mirrored into Important Caller.`
+              : icf === "not"
+                ? `${allGroups.length - icCount} callers are not in Important Caller.`
+                : `${allGroups.length} groups mirrored by the userbot, with each chat id under the name.`}
           {" "}The name is worked out on its own — the group's live Telegram
           title, otherwise the seeded one. ⭐ mirrors that caller into
           Important Caller as well, from its next message on.
@@ -254,7 +278,10 @@ export default function ForwarderPage() {
             ))}
             {groups.length === 0 && (
               <span className="text-xs text-text-dim">
-                {needle ? "No group matches this search" : "No premium groups"}
+                {needle ? "No group matches this search"
+                  : icf === "ic" ? "No caller starred for Important Caller yet"
+                  : icf === "not" ? "Every caller is in Important Caller"
+                  : "No premium groups"}
               </span>
             )}
           </div>
