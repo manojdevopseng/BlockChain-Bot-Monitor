@@ -6,7 +6,7 @@ import { useApi } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, DEX_TONE } from "@/components/ui/badge";
 import { DetectionTable } from "@/components/features/DetectionTable";
 import { CrossChainTable } from "@/components/features/CrossChainTable";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
@@ -83,13 +83,26 @@ function PremiumSection() {
 
 /* ── 4: ETH gas fees (per-tx) ───────────────────────────────────────────── */
 
+type Dex = "all" | "v2" | "v3" | "v4";
+
+const DEX_TABS = [
+  { id: "all", label: "All" },
+  { id: "v2", label: "V2" },
+  { id: "v3", label: "V3" },
+  { id: "v4", label: "V4" },
+] as const satisfies readonly { id: Dex; label: string }[];
+
 function GasSection() {
   const [q, setQ] = useState("");
   const [date, setDate] = useState("");
+  const [dex, setDex] = useState<Dex>("all");
   const query = useDebounced(q);
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (date) params.set("date", date);
+  // Filtered server-side, so `total` — and the count in the section header —
+  // is the number for the tab you are on, not the whole feed.
+  if (dex !== "all") params.set("dex", dex);
   const qs = params.toString();
 
   const { data } = useApi<any>(`/api/rpc/gas/recent${qs ? `?${qs}` : ""}`);
@@ -104,6 +117,7 @@ function GasSection() {
       icon={<Fuel size={14} />}
       count={data?.total ?? items.length}
       controls={<>
+        <FilterTabs value={dex} onChange={setDex} options={DEX_TABS} />
         <SearchBox value={q} onChange={setQ} placeholder="symbol / address / tx" />
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
         <span className="text-xs text-text-dim">
@@ -138,6 +152,7 @@ function GasSection() {
                 <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
                   {query ? "No high-gas buy matches this search"
                     : date ? `No high-gas buys on ${date}`
+                    : dex !== "all" ? `No ${dex.toUpperCase()} high-gas buys`
                     : "No high-gas buys caught yet"}
                 </td></tr>
               ) : items.map((r: any, i: number) => (
@@ -165,7 +180,11 @@ function GasSection() {
                       )}
                     </div>
                   </td>
-                  <td className="px-3 py-3"><Badge variant="purple">{(r.dex || "—").toUpperCase()}</Badge></td>
+                  <td className="px-3 py-3">
+                    <Badge variant={DEX_TONE[(r.dex || "").toLowerCase()] || "gray"}>
+                      {(r.dex || "—").toUpperCase()}
+                    </Badge>
+                  </td>
                   <td className="px-3 py-3">
                     <span className="font-mono text-xs font-semibold text-accent-amber">{fmtEth(r.fee_eth)}</span>
                   </td>

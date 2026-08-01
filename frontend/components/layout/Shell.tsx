@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { mutate } from "swr";
 import { Sidebar } from "./Sidebar";
+import { setUptime } from "@/components/layout/uptime";
 import { Topbar } from "./Topbar";
 import { StatusBar } from "./StatusBar";
 import { useWebSocket } from "@/lib/ws";
@@ -148,12 +149,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if (e.type === "hello" || e.type === "heartbeat") {
       if (e.data?.backend) setBackend(e.data.backend);
       if (e.data?.db_backend) setBackend(e.data.db_backend);
-      const up = document.getElementById("sidebar-uptime");
-      if (up && e.data?.uptime_seconds != null) {
-        const s = e.data.uptime_seconds;
-        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-        up.textContent = `${h}h ${String(m).padStart(2, "0")}m ${String(sec).padStart(2, "0")}s`;
-      }
+      // Hands the figure to the uptime store, which ticks it forward every
+       // second instead of holding it still between heartbeats.
+      if (e.data?.uptime_seconds != null) setUptime(e.data.uptime_seconds);
       return;
     }
     const keys = EVENT_KEYS[e.type];

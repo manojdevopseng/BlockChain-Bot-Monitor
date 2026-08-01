@@ -3,7 +3,7 @@
 import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
-import { Badge } from "@/components/ui/badge";
+import { Badge, DEX_TONE, Variant } from "@/components/ui/badge";
 import { fmtDateTime, fmtUsd, shortAddr, rowKey } from "@/lib/utils";
 import { Age } from "@/components/Age";
 
@@ -24,6 +24,12 @@ export type CrossChainMatch = {
 // the row says which one it was.
 const FLOW_LABEL: Record<string, string> = {
   eth: "SOL → ETH", robinhood: "SOL → RBH", rbh: "SOL → RBH",
+};
+
+// Destination chain gets the colour it has everywhere else — the Detections
+// Chain column uses the same two, so ETH is blue in both places.
+const FLOW_TONE: Record<string, Variant> = {
+  eth: "blue", robinhood: "green", rbh: "green",
 };
 
 // SOL→ETH / SOL→RBH ticker matches: the SOL side and the destination-chain side
@@ -64,7 +70,9 @@ export function CrossChainTable(
               <tr key={rowKey(r, i)} className="border-b border-border-soft hover:bg-bg-hover/40">
                 {showFlow && (
                   <td className="px-3 py-3">
-                    <Badge variant="purple">{FLOW_LABEL[r.chain || ""] || r.chain || "?"}</Badge>
+                    <Badge variant={FLOW_TONE[r.chain || ""] || "gray"}>
+                      {FLOW_LABEL[r.chain || ""] || r.chain || "?"}
+                    </Badge>
                   </td>
                 )}
                 <td className="px-3 py-3">
@@ -101,7 +109,9 @@ export function CrossChainTable(
                     )}
                   </div>
                 </td>
-                <td className="px-3 py-3"><Badge variant="purple">{r.dex || "—"}</Badge></td>
+                <td className="px-3 py-3">
+                  <Badge variant={DEX_TONE[(r.dex || "").toLowerCase()] || "gray"}>{r.dex || "—"}</Badge>
+                </td>
                 <td className="px-3 py-3 text-text-muted">{fmtUsd(r.sol_mcap_usd)}</td>
                 {/* When — the absolute time the match fired */}
                 <td className="px-3 py-3">

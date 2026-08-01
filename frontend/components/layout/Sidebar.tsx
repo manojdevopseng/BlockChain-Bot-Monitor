@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, Users, X } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
+import { useUptime, uptimeLabel } from "@/components/layout/uptime";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -36,6 +37,7 @@ export function Sidebar({
   onCloseMobile: () => void;
 }) {
   const path = usePathname();
+  const uptime = useUptime();
   const { blocks } = useRole();
   // On mobile the rail is always full-width inside the drawer; only desktop collapses.
   const isCollapsed = collapsed;
@@ -131,7 +133,7 @@ export function Sidebar({
             <span className="h-2 w-2 animate-pulse-soft rounded-full bg-accent-green" />
             Bot Uptime
           </div>
-          <div className="mt-1 font-mono text-sm text-accent-green" id="sidebar-uptime">—</div>
+          <div className="mt-1 font-mono text-sm text-accent-green">{uptimeLabel(uptime)}</div>
           <div className="mt-2 flex justify-between text-[11px] text-text-dim">
             <span>Version</span><span>0.1.0</span>
           </div>

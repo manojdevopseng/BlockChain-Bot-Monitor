@@ -3,7 +3,7 @@
 import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
-import { Badge } from "@/components/ui/badge";
+import { Badge, Variant } from "@/components/ui/badge";
 import { ChipMap, GroupChip, chipStyleOf } from "@/components/GroupChip";
 import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
 import { Age } from "@/components/Age";
@@ -33,6 +33,13 @@ export type Detection = {
 // says which chain a row came from.
 const CHAIN_LABEL: Record<string, string> = {
   eth: "Ethereum", rbh: "Robinhood", bnb: "BNB", sol: "Solana",
+};
+
+// One colour per chain, so the merged view reads at a glance instead of four
+// identical purple pills. Theme tokens, not hex: each already has a light and
+// a dark value, so both themes stay legible without a second palette.
+const CHAIN_TONE: Record<string, Variant> = {
+  eth: "blue", rbh: "green", bnb: "amber", sol: "purple",
 };
 
 // Records written before group_entries existed only carry plain names; show
@@ -74,7 +81,9 @@ export function DetectionTable(
               <tr key={rowKey(d, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
                 {showChain && (
                   <td className="px-3 py-3">
-                    <Badge variant="purple">{CHAIN_LABEL[d.chain || ""] || d.chain || "?"}</Badge>
+                    <Badge variant={CHAIN_TONE[d.chain || ""] || "gray"}>
+                      {CHAIN_LABEL[d.chain || ""] || d.chain || "?"}
+                    </Badge>
                   </td>
                 )}
                 {/* Symbol */}

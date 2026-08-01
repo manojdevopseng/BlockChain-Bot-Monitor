@@ -158,18 +158,24 @@ async def gas_dates():
 
 
 @router.get("/gas/recent")
-async def gas_recent(limit: int = 50, q: str | None = None, date: str | None = None):
+async def gas_recent(limit: int = 50, q: str | None = None, date: str | None = None,
+                     dex: str | None = None):
     """Recent high-gas early buys — feeds the dashboard's ETH Gas Fees panel.
 
     `date` pins the panel to one IST day (History); without it the panel is the
     live view. Search applies to either, so a search on a past day filters that
-    day rather than being ignored.
+    day rather than being ignored. `dex` is the V2/V3/V4 filter, applied before
+    the count so the section header reports the filtered total rather than the
+    whole day's.
     """
     gas_on = await registry.is_enabled("eth_gas_fees")
     docs = await db.get_collection("gas_alerts").find({}).to_list(5000)
     docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
     if date:
         docs = [d for d in docs if ist_date_str(d.get("created_at") or 0) == date]
+    if dex and dex != "all":
+        want = dex.strip().lower()
+        docs = [d for d in docs if str(d.get("dex") or "").lower() == want]
     if q:
         ql = q.lower()
         docs = [d for d in docs
