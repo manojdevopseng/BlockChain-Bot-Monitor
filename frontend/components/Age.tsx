@@ -26,15 +26,17 @@ export function TickProvider({ children }: { children: React.ReactNode }) {
   return <TickContext.Provider value={n}>{children}</TickContext.Provider>;
 }
 
-// Seconds only while they mean something: by the second for the first minute,
-// then minutes, then hours — after a minute the seconds are just noise ticking
-// in the corner of the eye.
+// Each unit only while it means something: by the second for the first minute,
+// then minutes, then hours, then days — after a minute the seconds are just
+// noise ticking in the corner of the eye, and past a day "36h 20m" makes you
+// do the division yourself.
 export function ageLabel(ts: number): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  const pad = (n: number) => String(n).padStart(2, "0");
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
-  const h = Math.floor(s / 3600);
-  return `${h}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${pad(Math.floor((s % 3600) / 60))}m`;
+  return `${Math.floor(s / 86400)}d ${pad(Math.floor((s % 86400) / 3600))}h`;
 }
 
 export function Age({ ts }: { ts?: number }) {
