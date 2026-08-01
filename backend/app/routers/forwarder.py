@@ -11,7 +11,10 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db, fwd_counters, registry
 from ..scanners import scfg, userbot
+from ..scanners.slog import get_logger
 from ..util import gmgn_url, clean_list, ist_date_str
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
@@ -269,14 +272,20 @@ async def set_source_ic(key: str, payload: dict = Body(...)):
     if not res.matched_count:
         raise HTTPException(404, f"unknown premium group '{key}'")
     # Push it to the running userbot rather than waiting for its reload timer,
-    # so the next message from that group is already mirrored.
-    fwd = _userbot()
+    # so the next message from that group is already mirrored. `_userbot()` is
+    # the Telethon client, not the forwarder — the reload lives on the worker,
+    # which is what `instance("fwd")` returns.
+    from .. import supervisor
+    fwd = supervisor.instance("fwd")
+    live = None
     if fwd is not None:
         try:
-            await fwd.reload_ic_ids()
-        except Exception:  # noqa: BLE001
-            pass  # the timer will pick it up
-    return {"key": key, "ic": on}
+            live = await fwd.reload_ic_ids()
+        except Exception as exc:  # noqa: BLE001
+            # Not fatal — the reload timer picks it up within a cycle — but a
+            # silent pass here is how "the star did nothing" goes unexplained.
+            log.warning(f"[IC] live reload failed, falling back to the timer: {exc}")
+    return {"key": key, "ic": on, "live": live}
 
 
 @router.get("/group-chips")
