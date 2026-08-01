@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
+import { ChipMap, GroupChip, chipStyleOf } from "@/components/GroupChip";
 import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
 import { Age } from "@/components/Age";
 
@@ -42,8 +43,11 @@ function groupEntries(d: Detection): GroupEntry[] {
 }
 
 export function DetectionTable(
-  { items, maxHeight, showChain = false }: {
+  { items, maxHeight, showChain = false, chips }: {
     items: Detection[]; maxHeight?: number | false; showChain?: boolean;
+    // Per-group chip colours, set in Forwarder → Premium Groups. Absent for a
+    // group nobody has styled, which is the default look.
+    chips?: ChipMap;
   },
 ) {
   return (
@@ -116,26 +120,24 @@ export function DetectionTable(
                       // Entries are newest-first, so the last one is the group
                       // that called it first.
                       const first = arr.length > 1 && j === arr.length - 1;
-                      const label = `${first ? "🥇 " : ""}${e.name || "?"}`;
                       const url = e.username && e.message_id
                         ? `https://t.me/${e.username}/${e.message_id}`
                         : null;
-                      if (!url) {
-                        return (
-                          <Badge key={j} variant="gray"
-                            title={first ? `First caller — ${e.name || "?"}`
-                                         : `${e.name || "?"} — private group, no message link`}>
-                            <span className="block max-w-[130px] truncate">{label}</span>
-                          </Badge>
-                        );
-                      }
                       return (
-                        <a key={j} href={url} target="_blank" rel="noopener noreferrer"
-                          title={first ? "First caller — open this call on Telegram"
-                                       : "Open this call on Telegram"}
-                          className="inline-flex max-w-[130px] items-center gap-1 truncate rounded-md border border-border bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted transition-colors hover:border-brand/40 hover:text-brand-soft">
-                          {label}
-                        </a>
+                        <GroupChip
+                          key={j}
+                          label={`${first ? "🥇 " : ""}${e.name || "?"}`}
+                          url={url}
+                          // Keyed by chat id, never by name: Telegram titles are
+                          // re-read and overwritten, and a group can rename
+                          // itself — the id is the only stable handle.
+                          style={chipStyleOf(chips, e.chat_id)}
+                          title={url
+                            ? (first ? "First caller — open this call on Telegram"
+                                     : "Open this call on Telegram")
+                            : (first ? `First caller — ${e.name || "?"}`
+                                     : `${e.name || "?"} — private group, no message link`)}
+                        />
                       );
                     })}
                     {groupEntries(d).length === 0 && <span className="text-text-dim">—</span>}

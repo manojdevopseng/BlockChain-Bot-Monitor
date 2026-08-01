@@ -3,6 +3,7 @@ and the premium-caller address detection panels (ETH / RBH / SOL)."""
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 
@@ -97,6 +98,7 @@ async def sources():
             "named": bool(g.get("name")),
             "enabled": g.get("enabled", True) is not False,
             "today": counts.get(fwd_counters.bare_key(gid), 0),
+            "chip": g.get("chip") or None,
         })
     return {"items": items}
 
@@ -189,6 +191,76 @@ async def toggle_source(key: str, payload: dict = Body(...)):
     if not res.matched_count:
         raise HTTPException(404, f"unknown premium group '{key}'")
     return {"key": key, "kind": "group", "enabled": enabled}
+
+
+# ── Per-caller chip colours ─────────────────────────────────────────────────────
+#
+# Each premium group can carry its own chip style, so a call from a group you
+# trust is recognisable at a glance in the Detections table instead of being
+# one more identical grey pill. Three free colours — background, text, border —
+# because that is what the chip is made of.
+#
+# Stored as hex on the group itself, which means one style for both themes: a
+# colour picked while in dark mode is the same colour in light mode. The picker
+# previews both for that reason. No style stored = the default grey chip, so
+# nothing changes for a group until it is given one.
+
+_CHIP_FIELDS = ("bg", "text", "border")
+_HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _clean_chip(payload) -> dict | None:
+    """Validate a chip style. None means "clear it and go back to default"."""
+    if not payload:
+        return None
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "chip must be an object")
+    chip = {}
+    for field in _CHIP_FIELDS:
+        value = str(payload.get(field) or "").strip()
+        if not value:
+            raise HTTPException(400, f"chip.{field} is required")
+        if not _HEX.match(value):
+            # Rejected here rather than stored: an unparseable colour reaches
+            # the browser as a style that silently does nothing, and the chip
+            # looks broken with no clue why.
+            raise HTTPException(400, f"chip.{field} must be a hex colour like #7c5cff, got {value!r}")
+        chip[field] = value.lower()
+    return chip
+
+
+@router.patch("/sources/{key}/chip")
+async def set_source_chip(key: str, payload: dict = Body(default=None)):
+    """Set (or clear) one premium group's chip colours.
+
+    Body `{"bg": "#…", "text": "#…", "border": "#…"}`, or an empty body to drop
+    back to the default chip.
+    """
+    try:
+        gid = int(key)
+    except ValueError:
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    chip = _clean_chip(payload)
+    update = {"$set": {"chip": chip}} if chip else {"$unset": {"chip": ""}}
+    res = await db.get_collection("premium_groups").update_one({"id": gid}, update)
+    if not res.matched_count:
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    return {"key": key, "chip": chip}
+
+
+@router.get("/group-chips")
+async def group_chips():
+    """chat id -> chip style, for every group that has one.
+
+    Its own endpoint, and deliberately not part of the detections payload: a
+    group called by 100 rows would otherwise repeat its three colours 100
+    times. It is also cheap enough to poll — unlike /sources, it does no
+    Telegram name resolution.
+    """
+    rows = await db.get_collection("premium_groups").find(
+        {"chip": {"$exists": True, "$ne": None}}, {"id": 1, "chip": 1}
+    ).to_list(5000)
+    return {"chips": {str(r["id"]): r["chip"] for r in rows if r.get("id") is not None}}
 
 
 # ── Adding / removing premium groups ────────────────────────────────────────────

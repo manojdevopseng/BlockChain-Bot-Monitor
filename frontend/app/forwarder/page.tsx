@@ -14,6 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ChipStyleEditor } from "@/components/ChipStyleEditor";
+import { ChipStyle } from "@/components/GroupChip";
 import { fmtNum } from "@/lib/utils";
 
 type Source = {
@@ -25,6 +27,8 @@ type Source = {
   named?: boolean;
   enabled: boolean;
   today: number;
+  // Set here, read by the Detections table's Groups column. Absent = default chip.
+  chip?: ChipStyle | null;
 };
 
 type Dest = {
@@ -35,10 +39,11 @@ type Dest = {
   today: number;
 };
 
-function SourceRow({ s, onToggle, onRemove }: {
+function SourceRow({ s, onToggle, onRemove, onChip }: {
   s: Source;
   onToggle: (s: Source, v: boolean) => void;
   onRemove?: (s: Source) => void;
+  onChip?: (s: Source, chip: ChipStyle | null) => Promise<void>;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border-soft px-3 py-2.5">
@@ -53,6 +58,10 @@ function SourceRow({ s, onToggle, onRemove }: {
         <span className="text-xs text-text-muted" title="messages seen today">
           {fmtNum(s.today)}
         </span>
+        {onChip && (
+          <ChipStyleEditor name={s.name} value={s.chip}
+                           onSave={(chip) => onChip(s, chip)} />
+        )}
         <Switch checked={s.enabled} onCheckedChange={(v) => onToggle(s, v)} />
         {onRemove && (
           <button
@@ -138,6 +147,14 @@ export default function ForwarderPage() {
     if (s.kind === "channel") mutate("/api/settings/services");
   }
 
+  // Saved straight away — the point of the picker is that what you chose is
+  // what the Detections table shows, without a second "apply" step.
+  async function setChip(s: Source, chip: ChipStyle | null) {
+    await apiSend(`/api/forwarder/sources/${s.chat_id}/chip`, "PATCH", chip ?? {});
+    mutate("/api/forwarder/sources");
+    mutate("/api/forwarder/group-chips");
+  }
+
   async function remove(s: Source) {
     if (!confirm(`Stop mirroring "${s.name}"?`)) return;
     await apiSend(`/api/forwarder/groups/${s.chat_id}`, "DELETE");
@@ -207,7 +224,7 @@ export default function ForwarderPage() {
         <TableScroll>
           <div className="space-y-1">
             {groups.map((s) => (
-              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove} />
+              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove} onChip={setChip} />
             ))}
             {groups.length === 0 && (
               <span className="text-xs text-text-dim">

@@ -47,6 +47,10 @@ function PremiumSection() {
   // there silently did nothing.
   const filters = `&multi=${multi}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
   const { data: datesData } = useApi<any>(`/api/forwarder/detections/dates?chain=${chain}`);
+  // Per-caller chip colours from Forwarder → Premium Groups. Its own request
+  // rather than a field on every row: one group called by a hundred rows would
+  // otherwise repeat its three colours a hundred times.
+  const { data: chipData } = useApi<any>("/api/forwarder/group-chips");
   const live = useApi<any>(
     date ? null : `/api/forwarder/detections?chain=${chain}${filters}`
   );
@@ -72,7 +76,7 @@ function PremiumSection() {
           filename={`detections-${chain}.csv`} />
       </>}
     >
-      <DetectionTable items={data?.items ?? []} showChain={chain === "all"} />
+      <DetectionTable items={data?.items ?? []} showChain={chain === "all"} chips={chipData?.chips} />
     </CollapsibleSection>
   );
 }
