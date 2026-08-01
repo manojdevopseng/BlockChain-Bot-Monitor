@@ -3,11 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, CheckCheck } from "lucide-react";
+import { mutate } from "swr";
 import { useApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { cn, timeAgo } from "@/lib/utils";
 
 const SEEN_KEY = "notif_seen_ts";
+
+// Above this the badge stops counting and says "50+". Past it the exact number
+// stops being information — it is "a lot", and a four-digit badge would not
+// fit over the bell anyway.
+const BADGE_CAP = 50;
 
 // Bell backed by real alerts: unread = alerts newer than the last time the user
 // opened/cleared the panel (persisted in localStorage).
@@ -24,9 +30,26 @@ export function NotificationBell() {
   const { data } = useApi<any>("/api/alerts?limit=12");
   const items: any[] = data?.items ?? [];
 
+  // Counted server-side over the whole collection. Deriving it from `items`
+  // capped the badge at the page size — 12 — however many had actually come
+  // in. Skipped until the stored timestamp is known, so the first render does
+  // not ask for "everything since 1970".
+  const { data: unreadData } = useApi<any>(
+    ready ? `/api/alerts/unread?since=${seenTs}` : null,
+  );
+  const unread: number = unreadData?.unread ?? 0;
+
   useEffect(() => {
     const raw = Number(localStorage.getItem(SEEN_KEY) || 0);
-    setSeenTs(raw);
+    if (raw > 0) {
+      setSeenTs(raw);
+    } else {
+      // First visit on this browser. Start from now rather than 0, or every
+      // alert ever kept would arrive as unread.
+      const now = Date.now() / 1000;
+      setSeenTs(now);
+      try { localStorage.setItem(SEEN_KEY, String(now)); } catch {}
+    }
     setReady(true);
   }, []);
 
@@ -45,12 +68,14 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const unread = ready ? items.filter((a) => (a.created_at ?? 0) > seenTs).length : 0;
-
   function markAllRead() {
     const now = Date.now() / 1000;
     setSeenTs(now);
     try { localStorage.setItem(SEEN_KEY, String(now)); } catch {}
+    // Seed the new key with 0 instead of waiting for the round trip: SWR keeps
+    // showing the previous key's data while the next one loads, which would
+    // leave the badge sitting there after it had been cleared.
+    mutate(`/api/alerts/unread?since=${now}`, { unread: 0, since: now }, false);
   }
 
   function toggle() {
@@ -75,7 +100,7 @@ export function NotificationBell() {
         <Bell size={18} />
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid min-w-[16px] place-items-center rounded-full bg-accent-red px-1 text-[9px] font-semibold text-white">
-            {unread > 99 ? "99+" : unread}
+            {unread > BADGE_CAP ? `${BADGE_CAP}+` : unread}
           </span>
         )}
       </button>

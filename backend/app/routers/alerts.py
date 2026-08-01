@@ -123,6 +123,24 @@ async def list_alerts(
     return {"total": total, "items": merged[skip:skip + limit]}
 
 
+@router.get("/unread")
+async def unread_count(since: float = 0.0):
+    """How many alerts arrived after `since`, counted in Mongo.
+
+    The bell used to count the rows it had already fetched, and it fetches a
+    page of 12 — so the badge could never say more than 12 no matter how many
+    had come in. Counting here also means the number does not depend on how
+    big that page happens to be.
+
+    Both feeds, because the panel shows both: `alerts` and the gas hits that
+    are projected into the same shape at read time.
+    """
+    flt = {"created_at": {"$gt": since}}
+    total = (await db.get_collection("alerts").count_documents(flt)
+             + await db.get_collection("gas_alerts").count_documents(flt))
+    return {"unread": total, "since": since}
+
+
 @router.get("/dates")
 async def alert_dates():
     """Days (IST, newest first) that have alerts — the History dropdown.
