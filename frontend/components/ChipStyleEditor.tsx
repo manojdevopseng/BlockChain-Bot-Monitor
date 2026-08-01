@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, Palette, RotateCcw, X } from "lucide-react";
 import { ColorPicker, isDark } from "@/components/ColorPicker";
 import { ChipStyle, GroupChip } from "@/components/GroupChip";
@@ -9,7 +10,11 @@ import { ChipStyle, GroupChip } from "@/components/GroupChip";
  *
  * Nothing is written until Save, so dragging through forty shades costs no
  * requests — but the preview follows every pixel of the drag, which is the
- * point of picking a colour by eye instead of typing a hex. */
+ * point of picking a colour by eye instead of typing a hex.
+ *
+ * The panel is portalled to <body> and positioned from the button's own rect.
+ * An absolutely-positioned panel was clipped to a sliver: the group list lives
+ * inside a scroll container, and no z-index escapes an ancestor's overflow. */
 
 type Target = keyof ChipStyle;
 
@@ -24,6 +29,10 @@ const TARGETS: { key: Target; label: string }[] = [
 // starts somewhere usable.
 const SEED: ChipStyle = { bg: "#2a2344", text: "#c4b5fd", border: "#7c5cff" };
 
+// Fixed size, so the panel can be placed before it has ever been measured.
+const PANEL_W = 256;
+const PANEL_H = 400;
+
 export function ChipStyleEditor({ name, value, onSave }: {
   name: string;
   value?: ChipStyle | null;
@@ -33,7 +42,36 @@ export function ChipStyleEditor({ name, value, onSave }: {
   const [target, setTarget] = useState<Target>("bg");
   const [draft, setDraft] = useState<ChipStyle>(value || SEED);
   const [busy, setBusy] = useState(false);
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+
+  // Right-aligned under the button, flipped above when the bottom of the
+  // window is closer than the panel is tall, and nudged back inside if either
+  // edge would cut it off.
+  const place = useCallback(() => {
+    const el = box.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom;
+    setAt({
+      top: below < PANEL_H + 12 && r.top > PANEL_H ? r.top - PANEL_H - 6 : r.bottom + 6,
+      left: Math.min(Math.max(8, r.right - PANEL_W), window.innerWidth - PANEL_W - 8),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    // Follow the button: the list it sits in scrolls, and so does the page.
+    // `true` catches scrolls on those inner containers too, not just window.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
 
   // Reopening after a save elsewhere should show what is actually stored, not
   // the draft from last time.
@@ -44,7 +82,10 @@ export function ChipStyleEditor({ name, value, onSave }: {
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The panel is no longer a child of the button, so it has to be asked
+      // separately — otherwise clicking inside the picker closes it.
+      if (!box.current?.contains(t) && !panel.current?.contains(t)) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", away);
@@ -76,8 +117,9 @@ export function ChipStyleEditor({ name, value, onSave }: {
         <Palette size={12} />
       </button>
 
-      {open && (
-        <div className="absolute right-0 z-50 mt-2 w-64 rounded-lg border border-border bg-bg-card p-3 shadow-xl">
+      {open && at && createPortal(
+        <div ref={panel} style={{ top: at.top, left: at.left, width: PANEL_W }}
+             className="fixed z-[100] rounded-lg border border-border bg-bg-card p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between">
             <span className="truncate text-xs font-medium text-text" title={name}>{name}</span>
             <button onClick={() => setOpen(false)}
@@ -91,9 +133,9 @@ export function ChipStyleEditor({ name, value, onSave }: {
               in is a trap worth seeing before saving. */}
           <div className="mb-2 grid grid-cols-2 gap-1.5">
             {[["#0b0d14", "Dark"], ["#f8fafc", "Light"]].map(([bg, label]) => (
-              <div key={label} className="rounded-md border border-border-soft p-2 text-center"
+              <div key={label} className="overflow-hidden rounded-md border border-border-soft p-2 text-center"
                    style={{ background: bg }}>
-                <GroupChip label={name} style={draft} />
+                <GroupChip label={name} style={draft} className="max-w-full" />
                 <div className="mt-1 text-[9px] uppercase tracking-wide"
                      style={{ color: isDark(bg) ? "#64748b" : "#94a3b8" }}>{label}</div>
               </div>
@@ -133,7 +175,8 @@ export function ChipStyleEditor({ name, value, onSave }: {
               </button>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

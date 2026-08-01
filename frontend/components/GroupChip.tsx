@@ -26,23 +26,27 @@ const BASE =
 const DEFAULT = "border-border bg-white/5 text-text-muted";
 const DEFAULT_LINK = `${DEFAULT} hover:border-brand/40 hover:text-brand-soft`;
 
-export function GroupChip({ label, url, style, title }: {
+export function GroupChip({ label, url, style, title, className = "" }: {
   label: string;
   url?: string | null;
   style?: ChipStyle;
   title?: string;
+  // Lets a caller override the width cap — the editor's preview boxes are
+  // narrower than a table cell, and a chip wider than its box spills out of
+  // the panel instead of truncating.
+  className?: string;
 }) {
   const custom = style
     ? { background: style.bg, color: style.text, borderColor: style.border }
     : undefined;
-  const className = `${BASE} ${style ? "" : url ? DEFAULT_LINK : DEFAULT}`;
+  const cls = `${BASE} ${style ? "" : url ? DEFAULT_LINK : DEFAULT} ${className}`;
 
   if (!url) {
-    return <span className={className} style={custom} title={title}>{label}</span>;
+    return <span className={cls} style={custom} title={title}>{label}</span>;
   }
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" title={title}
-       className={className} style={custom}>
+       className={cls} style={custom}>
       {label}
     </a>
   );
