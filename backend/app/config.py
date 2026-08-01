@@ -281,6 +281,10 @@ class Settings(BaseSettings):
     dest_premium_rbh: str = ""
     dest_premium_bnb: str = ""
     dest_premium_sol: str = ""
+    # The Important Caller group. Callers starred in Forwarder → Premium Groups
+    # have their messages mirrored here as well as to DEST_PREMIUM_ALL, so it
+    # is the filtered read of the same feed. Blank = the feature is off.
+    dest_important_caller: str = ""
 
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"

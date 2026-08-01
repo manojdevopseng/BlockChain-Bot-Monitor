@@ -49,6 +49,7 @@ def _destinations() -> list[tuple[str, str, str]]:
         ("DEST_PREMIUM_RBH",        scfg.DEST_PREMIUM_BY_CHAIN["rbh"], "RBH premium-caller detections"),
         ("DEST_PREMIUM_BNB",        scfg.DEST_PREMIUM_BY_CHAIN["bnb"], "BNB premium-caller detections"),
         ("DEST_PREMIUM_SOL",        scfg.DEST_PREMIUM_BY_CHAIN["sol"], "SOL premium-caller detections"),
+        ("DEST_IMPORTANT_CALLER",   scfg.DEST_IMPORTANT_CALLER,   "Messages from starred callers only"),
     ]
 
 
@@ -99,6 +100,7 @@ async def sources():
             "enabled": g.get("enabled", True) is not False,
             "today": counts.get(fwd_counters.bare_key(gid), 0),
             "chip": g.get("chip") or None,
+            "ic": bool(g.get("ic")),
         })
     return {"items": items}
 
@@ -246,6 +248,35 @@ async def set_source_chip(key: str, payload: dict = Body(default=None)):
     if not res.matched_count:
         raise HTTPException(404, f"unknown premium group '{key}'")
     return {"key": key, "chip": chip}
+
+
+@router.patch("/sources/{key}/ic")
+async def set_source_ic(key: str, payload: dict = Body(...)):
+    """Star (or unstar) a premium group for the Important Caller mirror.
+
+    From the next message on: this marks the group, it does not go back over
+    what it has already posted.
+    """
+    if "on" not in payload:
+        raise HTTPException(400, "body must include 'on'")
+    on = bool(payload["on"])
+    try:
+        gid = int(key)
+    except ValueError:
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    update = {"$set": {"ic": True}} if on else {"$unset": {"ic": ""}}
+    res = await db.get_collection("premium_groups").update_one({"id": gid}, update)
+    if not res.matched_count:
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    # Push it to the running userbot rather than waiting for its reload timer,
+    # so the next message from that group is already mirrored.
+    fwd = _userbot()
+    if fwd is not None:
+        try:
+            await fwd.reload_ic_ids()
+        except Exception:  # noqa: BLE001
+            pass  # the timer will pick it up
+    return {"key": key, "ic": on}
 
 
 @router.get("/group-chips")

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Users, MessageSquare, Send, Radio, Plus, Loader2, Trash2 } from "lucide-react";
+import { Users, MessageSquare, Send, Radio, Plus, Loader2, Star, Trash2 } from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -29,6 +29,8 @@ type Source = {
   today: number;
   // Set here, read by the Detections table's Groups column. Absent = default chip.
   chip?: ChipStyle | null;
+  // Starred for the Important Caller mirror.
+  ic?: boolean;
 };
 
 type Dest = {
@@ -39,11 +41,12 @@ type Dest = {
   today: number;
 };
 
-function SourceRow({ s, onToggle, onRemove, onChip }: {
+function SourceRow({ s, onToggle, onRemove, onChip, onIc }: {
   s: Source;
   onToggle: (s: Source, v: boolean) => void;
   onRemove?: (s: Source) => void;
   onChip?: (s: Source, chip: ChipStyle | null) => Promise<void>;
+  onIc?: (s: Source, on: boolean) => Promise<void>;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border-soft px-3 py-2.5">
@@ -58,6 +61,21 @@ function SourceRow({ s, onToggle, onRemove, onChip }: {
         <span className="text-xs text-text-muted" title="messages seen today">
           {fmtNum(s.today)}
         </span>
+        {onIc && (
+          <button
+            onClick={() => onIc(s, !s.ic)}
+            title={s.ic
+              ? "In Important Caller — click to stop mirroring this caller there"
+              : "Copy to IC — mirror this caller's messages to Important Caller"}
+            className={`grid h-6 w-6 place-items-center rounded border transition-colors ${
+              s.ic
+                ? "border-accent-amber/40 bg-accent-amber/15 text-accent-amber"
+                : "border-border text-text-dim hover:border-accent-amber/40 hover:text-accent-amber"
+            }`}
+          >
+            <Star size={12} fill={s.ic ? "currentColor" : "none"} />
+          </button>
+        )}
         {onChip && (
           <ChipStyleEditor name={s.name} value={s.chip}
                            onSave={(chip) => onChip(s, chip)} />
@@ -155,6 +173,13 @@ export default function ForwarderPage() {
     mutate("/api/forwarder/group-chips");
   }
 
+  // Starring only marks the group: it mirrors from the next message on, and
+  // does not go back over what the caller has already posted.
+  async function setIc(s: Source, on: boolean) {
+    await apiSend(`/api/forwarder/sources/${s.chat_id}/ic`, "PATCH", { on });
+    mutate("/api/forwarder/sources");
+  }
+
   async function remove(s: Source) {
     if (!confirm(`Stop mirroring "${s.name}"?`)) return;
     await apiSend(`/api/forwarder/groups/${s.chat_id}`, "DELETE");
@@ -218,13 +243,14 @@ export default function ForwarderPage() {
             ? `${groups.length} of ${allGroups.length} groups match "${q.trim()}".`
             : `${allGroups.length} groups mirrored by the userbot, with each chat id under the name.`}
           {" "}The name is worked out on its own — the group's live Telegram
-          title, otherwise the seeded one.
+          title, otherwise the seeded one. ⭐ mirrors that caller into
+          Important Caller as well, from its next message on.
         </p>
         <AddGroup />
         <TableScroll>
           <div className="space-y-1">
             {groups.map((s) => (
-              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove} onChip={setChip} />
+              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove} onChip={setChip} onIc={setIc} />
             ))}
             {groups.length === 0 && (
               <span className="text-xs text-text-dim">

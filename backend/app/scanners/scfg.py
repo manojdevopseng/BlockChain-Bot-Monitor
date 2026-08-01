@@ -171,6 +171,8 @@ DEST_PREMIUM_ALL        = _int_or_none(settings.dest_premium_all)
 # chain -> the chat its premium detections are announced in. Keyed by the same
 # chain slug the detection rows carry, so a new chain needs one entry and no
 # branching anywhere else.
+DEST_IMPORTANT_CALLER   = _int_or_none(settings.dest_important_caller)
+
 DEST_PREMIUM_BY_CHAIN = {
     "eth": _int_or_none(settings.dest_premium_eth),
     "rbh": _int_or_none(settings.dest_premium_rbh),

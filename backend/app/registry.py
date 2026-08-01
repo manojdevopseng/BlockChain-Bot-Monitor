@@ -73,6 +73,10 @@ DEFAULT_SERVICES: list[dict] = [
     # and record it in the matching Detections panel.
     {"id": "premium_callers_signal","category": BOT, "label": "Premium Callers Signal",
      "chain": "eth", "enabled": True},
+    # The starred-caller mirror. Its own switch so the filtered feed can be
+    # stopped without touching the full one, and the other way round.
+    {"id": "important_caller",      "category": BOT, "label": "Important Caller",
+     "chain": "eth", "enabled": True},
     {"id": "premium_eth_detection",   "category": BOT, "label": "Premium ETH",
      "chain": "eth", "enabled": True},
     {"id": "premium_rbh_detection",   "category": BOT, "label": "Premium RBH",

@@ -21,6 +21,7 @@ DEST_OTTO               = config.DEST_OTTO
 DEST_SIGNALS            = config.DEST_SIGNALS
 DEST_DEXS               = config.DEST_DEXS
 DEST_PREMIUM_ALL        = config.DEST_PREMIUM_ALL
+DEST_IC                 = config.DEST_IMPORTANT_CALLER
 
 SOURCE_OTTO   = config.SOURCE_OTTO
 SOURCE_DEXS   = config.SOURCE_DEXS
@@ -40,6 +41,7 @@ GATE_PREMIUM_ETH = "premium_eth_detection"   # premium groups → ETH detections
 GATE_PREMIUM_RBH = "premium_rbh_detection"   # premium groups → RBH detections panel
 GATE_PREMIUM_SOL = "premium_sol_detection"   # premium groups → SOL detections panel
 GATE_PREMIUM_BNB = "premium_bnb_detection"   # premium groups → BNB detections panel
+GATE_IC          = "important_caller"        # starred groups → Important Caller
 
 # Every chain the premium panels hold. The daily rollover iterates this, and it
 # used to be a hardcoded ("eth", "rbh") — so when SOL and BNB detection were

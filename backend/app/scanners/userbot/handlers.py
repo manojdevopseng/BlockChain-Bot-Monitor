@@ -22,8 +22,9 @@ from telethon import events
 from app import fwd_counters, heartbeat
 from app.util import bare_chat_id
 
-from .common import (DEST_DEXS, DEST_OTTO, DEST_PREMIUM_ALL,
-                     DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_OTTO,
+from .common import (DEST_DEXS, DEST_IC, DEST_OTTO, DEST_PREMIUM_ALL,
+                     DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_IC,
+                     GATE_OTTO,
                      GATE_PREMIUM, GATE_PREMIUM_BNB, GATE_PREMIUM_ETH, GATE_PREMIUM_RBH,
                      GATE_PREMIUM_SOL,
                      HASH_RE, SOL_RE, SOURCE_BUYBOT, SOURCE_CALL, SOURCE_DEXS,
@@ -114,11 +115,12 @@ class HandlersMixin:
         # independent of whether the caller-signal forward is switched on.
         # Turning one off must not silently stop another.
         premium_on = self._on(GATE_PREMIUM)
+        ic_on = self._on(GATE_IC)
         sol_on = self._on(GATE_PREMIUM_SOL)
         eth_on = self._on(GATE_PREMIUM_ETH)
         rbh_on = self._on(GATE_PREMIUM_RBH)
         bnb_on = self._on(GATE_PREMIUM_BNB)
-        if not any((premium_on, sol_on, eth_on, rbh_on, bnb_on)):
+        if not any((premium_on, ic_on, sol_on, eth_on, rbh_on, bnb_on)):
             return
         bare = bare_chat_id(event.chat_id)
         if bare not in self._premium_ids:
@@ -157,6 +159,36 @@ class HandlersMixin:
                                         f"chat {event.chat_id}: {exc2}")
                 else:
                     log.error(f"[PREMIUM-ALL] Forward error: {exc}")
+
+        # ── Important Caller mirror ──────────────────────────────────────────
+        # The same message, forwarded again to a second group — the starred
+        # callers only. PREMIUM-ALL keeps carrying everything from every group;
+        # this is the filtered read of the same feed, not a replacement, so the
+        # two are deliberately independent branches.
+        if ic_on and DEST_IC and bare in self._ic_ids:
+            try:
+                await safe_send(DEST_IC, lambda: event.forward_to(DEST_IC),
+                                self._limiter, "IC")
+            except Exception as exc:
+                err = str(exc)
+                # Same no-forwards fallback PREMIUM-ALL has: a group with
+                # forwarding restricted still gets its text through, just
+                # without the "forwarded from" header Telegram will not give us.
+                if "noforwards" in err or "can't do that operation" in err or "invalid" in err.lower():
+                    body = event.raw_text or ""
+                    if body:
+                        try:
+                            chat = await event.get_chat()
+                            src = getattr(chat, "title", "Unknown")
+                            await safe_send(
+                                DEST_IC,
+                                lambda: self._client.send_message(DEST_IC, f"⭐ {src}\n\n{body}"),
+                                self._limiter, "IC",
+                            )
+                        except Exception as exc2:  # noqa: BLE001
+                            log.warning(f"[IC] copy fallback failed for chat {event.chat_id}: {exc2}")
+                else:
+                    log.error(f"[IC] Forward error: {exc}")
 
         raw = event.raw_text or ""
         message = raw.lower()

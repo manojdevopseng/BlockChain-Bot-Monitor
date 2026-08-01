@@ -26,6 +26,18 @@ async def load_premium_ids() -> set:
     return {bare_chat_id(d["id"]) for d in docs if d.get("id") is not None}
 
 
+async def load_ic_ids() -> set:
+    """Groups starred for the Important Caller mirror.
+
+    Only starred AND enabled ones: a group switched off should go quiet
+    everywhere, not keep feeding one destination.
+    """
+    docs = await col("premium_groups").find(
+        {"ic": True, "enabled": {"$ne": False}}
+    ).to_list(5000)
+    return {bare_chat_id(d["id"]) for d in docs if d.get("id") is not None}
+
+
 async def load_otto_rules() -> tuple[set, set, set]:
     doc = await col("otto_rules").find_one({}) or {}
     return (set(doc.get("method_ids", [])),

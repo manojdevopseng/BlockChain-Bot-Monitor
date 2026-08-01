@@ -33,7 +33,7 @@ from .onchain import OnChainMixin
 from .premium import PremiumCaptureMixin
 from .sending import ChatRateLimiter
 from .store import (col, load_detections, load_filter_keywords, load_otto_rules,
-                    load_premium_ids)
+                    load_ic_ids, load_premium_ids)
 
 
 class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
@@ -68,6 +68,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
 
         # Loaded from Mongo in start() (seeded from seed_data.json, user-editable).
         self._premium_ids: set = set()
+        self._ic_ids: set = set()
         # Groups whose title we have already written back.
         self._named: set = set()
         self._call_keywords: list = []
@@ -118,6 +119,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         # Load all runtime data from Mongo (seeded from seed_data.json, editable
         # via the dashboard — nothing hardcoded).
         self._premium_ids = await load_premium_ids()
+        self._ic_ids = await load_ic_ids()
         self._method_ids, self._function_texts, self._rugger_hashes = await load_otto_rules()
         self._call_keywords, self._buybot_keywords = await load_filter_keywords()
         # Warm the dedup guard from existing detections so a restart doesn't re-count.
@@ -186,6 +188,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
             try:
                 await asyncio.sleep(PREMIUM_RELOAD_SECONDS)
                 await self.reload_premium_ids()
+                self._ic_ids = await load_ic_ids()
             except asyncio.CancelledError:
                 return
             except Exception as exc:  # noqa: BLE001
@@ -206,6 +209,17 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
                 log.info(f"[PREMIUM] Group list updated — {len(fresh)} live "
                          f"(+{added} / -{removed})")
         return len(self._premium_ids)
+
+    async def reload_ic_ids(self) -> int:
+        """Re-read the starred groups. Called by the dashboard on a star click,
+        so the mirror starts with the next message rather than up to a reload
+        cycle later."""
+        fresh = await load_ic_ids()
+        if fresh != self._ic_ids:
+            log.info(f"[IC] Starred callers updated — {len(fresh)} live "
+                     f"(+{len(fresh - self._ic_ids)} / -{len(self._ic_ids - fresh)})")
+            self._ic_ids = fresh
+        return len(self._ic_ids)
 
     async def _daily_rollover_watcher(self) -> None:
         """At IST midnight, archive every detection panel into premium_archive
