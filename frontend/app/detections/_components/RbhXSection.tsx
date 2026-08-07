@@ -196,6 +196,9 @@ export function RbhXSection() {
                   <a href={r.link} target="_blank" rel="noopener noreferrer"
                      className="text-xs text-accent-blue hover:underline">@{r.handle}</a>
                   {r.verified && <span title={r.verified_type || "verified"}> ✅</span>}
+                  {/* Not the same claim as the tick: this is the launchpad
+                      having watched the deployer sign in to that account. */}
+                  {r.proved && <span title="Ownership proved to the launchpad at launch"> 🔒</span>}
                 </td>
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text">{fmtNum(r.followers)}</span>

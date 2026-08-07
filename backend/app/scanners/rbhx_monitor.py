@@ -26,6 +26,8 @@ separates the two, so tweet links are dropped where they are classified.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import re
 import time
 from typing import Optional
@@ -114,6 +116,41 @@ _REVERT_WORDS = ("execution reverted", "revert", "invalid opcode",
 def _is_revert(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(w in msg for w in _REVERT_WORDS)
+
+
+# X handles are 1-15 of [A-Za-z0-9_]; anything else out of a metadata blob is
+# not a handle and must not be looked up.
+_HANDLE_OK = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+
+
+def handle_from_proof(fields: list[str]) -> str:
+    """The handle a launchpad made the deployer prove they own, or "".
+
+    The best source there is. Some launchpads have the deployer sign in to X
+    and stamp the result into the metadata as
+    {"v":1,"xVerificationToken":"<base64 JSON>"} — the payload carries
+    x_handle, x_user_id and the wallet it was issued to. Anyone can paste a
+    link to somebody else's account; nobody can forge this into the token they
+    are launching.
+
+    The base64 is a payload followed by a signature, so it is read with
+    raw_decode and the trailing bytes ignored — this reads the claim, it does
+    not check the launchpad's signature over it.
+    """
+    for field in fields:
+        value = (field or "").strip()
+        if not value.startswith("{") or "xVerificationToken" not in value:
+            continue
+        try:
+            token = json.loads(value).get("xVerificationToken") or ""
+            raw = base64.b64decode(token + "=" * (-len(token) % 4)).decode("utf-8", "ignore")
+            payload, _ = json.JSONDecoder().raw_decode(raw)
+            handle = str(payload.get("x_handle") or "").strip().lstrip("@")
+            if _HANDLE_OK.match(handle):
+                return handle
+        except Exception:  # noqa: BLE001
+            continue        # malformed proof — fall through to the plain link
+    return ""
 
 
 def _description(fields: list[str]) -> str:
@@ -258,17 +295,21 @@ class RbhXMonitor:
                 break
         if not any(fields):
             return          # no launchpad metadata on this token
-        link = find_x_link(fields)
-        if not link:
-            return
-        ref = x_client.parse_ref(link)
-        if ref.kind != "profile":
-            # A status link. Dropped on purpose: it identifies a post, not the
-            # account behind the launch.
-            log.info(f"[RBHX] {tok.symbol or addr[:10]} skipped — link is a post, not a profile")
-            return
-
-        handle = ref.handle
+        # A proven handle first: that is the deployer's own account,
+        # established by the launchpad, not a link they typed.
+        handle = handle_from_proof(fields)
+        proved = bool(handle)
+        if not handle:
+            link = find_x_link(fields)
+            if not link:
+                return
+            ref = x_client.parse_ref(link)
+            if ref.kind != "profile":
+                # A status link. Dropped on purpose: it identifies a post, not
+                # the account behind the launch.
+                log.info(f"[RBHX] {tok.symbol or addr[:10]} skipped — link is a post, not a profile")
+                return
+            handle = ref.handle
         if self._on("rbhx_skip") and await _col("rbhx_skip").find_one(
                 {"handle": handle.lower()}):
             log.info(f"[RBHX] {tok.symbol or addr[:10]} skipped — @{handle} is on the skip list")
@@ -300,6 +341,9 @@ class RbhXMonitor:
             "pair": tok.pair,
             "link": f"https://x.com/{handle}",
             "handle": handle,
+            # Two different claims, kept apart: `verified` is X's own tick,
+            # `proved` is the launchpad having watched this deployer sign in.
+            "proved": proved,
             "verified": prof.verified,
             "verified_type": prof.verified_type,
             "followers": prof.followers,
@@ -320,7 +364,8 @@ class RbhXMonitor:
         from app.ws_hub import hub
         await hub.broadcast("rbhx_token", {k: v for k, v in row.items() if k != "dt"})
         log.info(f"[RBHX] {row['symbol']} — @{handle} "
-                 f"({prof.followers:,} followers{', verified' if prof.verified else ''})"
+                 f"({prof.followers:,} followers{', verified' if prof.verified else ''}"
+                 f"{', proved' if proved else ''})"
                  f"{' · WATCHED' if watched else ''}")
         await self._notify(row)
 
@@ -335,7 +380,8 @@ class RbhXMonitor:
             f"🪙 <b>{html.escape(row['symbol'])}</b>"
             + (f" — {html.escape(row['name'])}" if row["name"] else "") + "\n"
             f"👤 @{html.escape(row['handle'])}"
-            + (" ✅" if row["verified"] else "") + "\n"
+            + (" ✅" if row["verified"] else "")
+            + (" 🔒" if row.get("proved") else "") + "\n"
             f"👥 {row['followers']:,} followers\n"
             + (f"\n<blockquote>{html.escape(row['excerpt'][:300])}</blockquote>\n"
                if row["excerpt"] else "")
