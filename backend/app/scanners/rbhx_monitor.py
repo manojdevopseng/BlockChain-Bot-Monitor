@@ -89,6 +89,18 @@ def decode_string_tuple(hexstr: str) -> list[str]:
     return out
 
 
+# A contract answering "I do not have that function" comes back as a revert.
+# Same distinction onchain.py draws for the premium checks: a revert is a valid
+# answer from the chain, not an endpoint that failed.
+_REVERT_WORDS = ("execution reverted", "revert", "invalid opcode",
+                 "out of gas", "function selector was not recognized")
+
+
+def _is_revert(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(w in msg for w in _REVERT_WORDS)
+
+
 def find_x_link(fields: list[str]) -> str:
     """The first x.com/twitter.com link in any metadata field, or ""."""
     for field in fields:
@@ -200,8 +212,16 @@ class RbhXMonitor:
                         f"{type(exc).__name__}: {exc}")
 
     async def _handle(self, tok: DetectedToken, addr: str) -> None:
-        raw = await self._detector.provider.rpc(
-            "eth_call", [{"to": addr, "data": _SEL_METADATA}, "latest"], timeout=8.0)
+        try:
+            raw = await self._detector.provider.rpc(
+                "eth_call", [{"to": addr, "data": _SEL_METADATA}, "latest"], timeout=8.0)
+        except RuntimeError as exc:
+            # A token with no metadata() reverts, and most of them do — that is
+            # the answer to the question, not a failure. Logging it as one
+            # buried the real errors under a warning per launch.
+            if _is_revert(exc):
+                return
+            raise
         fields = decode_string_tuple(raw or "")
         if not any(fields):
             return          # plain ERC-20 — no metadata, nothing to read
