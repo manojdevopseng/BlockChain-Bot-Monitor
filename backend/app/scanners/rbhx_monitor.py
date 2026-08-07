@@ -37,6 +37,7 @@ import aiohttp
 from app import notifier, x_client
 from app.scanners import scfg as config
 from app.scanners.onchain_detector import ChainSpec, DetectedToken, OnChainDetector, NATIVE_ZERO
+from app.scanners.ws_provider import SubscriptionSpec
 from app.scanners.slog import get_logger
 from app.util import gmgn_url, ist_date_str
 
@@ -242,10 +243,19 @@ class RbhXMonitor:
     async def run(self) -> None:
         self._session = self._session_factory()
         self._detector = self._build()
+        # Watch each launchpad's own mint event as well as pool creation. This
+        # is what makes a launch visible in seconds instead of whenever its
+        # bonding curve happens to end — measured at 1h 04m and 3h 33m on two
+        # real tokens, and never at all for one that has not graduated.
+        for factory, topic, _kind, _idx in config.RBHX_LAUNCHPADS:
+            self._detector.provider.add_persistent_spec(SubscriptionSpec(
+                params=["logs", {"address": factory, "topics": [topic]}],
+                callback=self._on_launch, label=f"RBHX-LAUNCH-{factory[:8]}",
+            ))
         which = "its own" if config.RBHX_OWN_ENDPOINTS else "Robinhood Chain's (none set yet)"
         pairs = "V2/V3/V4" if self._v2v3 else "V4 only"
-        log.info(f"[RBHX] started — {pairs}, on {which} endpoints "
-                 f"({len(config.RBHX_WSS_ENDPOINTS)} slot(s))")
+        log.info(f"[RBHX] started — {pairs} pools + {len(config.RBHX_LAUNCHPADS)} launchpad(s), "
+                 f"on {which} endpoints ({len(config.RBHX_WSS_ENDPOINTS)} slot(s))")
         try:
             await self._detector.run()
         finally:
@@ -261,22 +271,55 @@ class RbhXMonitor:
     # ── the pipeline ──────────────────────────────────────────────────────────
 
     async def _on_token(self, tok: DetectedToken) -> None:
-        addr = (tok.address or "").lower()
+        """A pool was created. Late for a launchpad token — the curve may have
+        been running for hours — but it is the only signal for a launchpad we
+        do not watch, and it costs nothing when the launch already came in."""
+        await self._process((tok.address or "").lower(), tok.symbol or "", tok.name or "",
+                            tok.dex or "v4", source="pool")
+
+    async def _on_launch(self, log_obj: dict) -> None:
+        """A launchpad minted a token. This is the moment the X profile goes on
+        chain, so it is the moment worth reading it."""
+        addr = self._token_from_log(log_obj)
+        if addr:
+            await self._process(addr, "", "", "launch", source="launch")
+
+    def _token_from_log(self, log_obj: dict) -> str:
+        """Pull the new token's address out of whichever slot this launchpad
+        put it in. Every one shapes its event differently."""
+        topics = [t.lower() for t in (log_obj.get("topics") or [])]
+        if not topics:
+            return ""
+        data = (log_obj.get("data") or "0x")[2:]
+        for _addr, topic, kind, index in config.RBHX_LAUNCHPADS:
+            if topics[0] != topic:
+                continue
+            if kind == "t":
+                word = topics[index] if index < len(topics) else ""
+            else:
+                word = data[index * 64:(index + 1) * 64]
+            if len(word.replace("0x", "")) >= 40:
+                return "0x" + word.replace("0x", "")[-40:]
+        return ""
+
+    async def _process(self, addr: str, symbol: str, name: str, dex: str,
+                       source: str) -> None:
         if not addr or addr in self._seen:
-            return
+            return          # already handled — a launch, then its pool, is one token
         self._seen.add(addr)
         # Bounded by hand: this is a plain set and the process runs for weeks.
         if len(self._seen) > 50_000:
             self._seen = set(list(self._seen)[-25_000:])
         try:
-            await self._handle(tok, addr)
+            await self._handle(addr, symbol, name, dex, source)
         except Exception as exc:  # noqa: BLE001
             # Warning, not debug: a launch lost here is indistinguishable from
             # one that never had a link, and the two want opposite fixes.
-            log.warning(f"[RBHX] failed on {tok.symbol or addr[:10]}: "
+            log.warning(f"[RBHX] failed on {symbol or addr[:10]}: "
                         f"{type(exc).__name__}: {exc}")
 
-    async def _handle(self, tok: DetectedToken, addr: str) -> None:
+    async def _handle(self, addr: str, symbol: str, name: str, dex: str,
+                      source: str) -> None:
         fields: list[str] = []
         for _name, selector in _METADATA_SELECTORS:
             try:
@@ -295,6 +338,11 @@ class RbhXMonitor:
                 break
         if not any(fields):
             return          # no launchpad metadata on this token
+
+        # Straight off a launchpad event there is no name/symbol yet — the
+        # event carries the address and little else.
+        if not symbol:
+            symbol, name = await self._name_symbol(addr)
         # A proven handle first: that is the deployer's own account,
         # established by the launchpad, not a link they typed.
         handle = handle_from_proof(fields)
@@ -307,12 +355,12 @@ class RbhXMonitor:
             if ref.kind != "profile":
                 # A status link. Dropped on purpose: it identifies a post, not
                 # the account behind the launch.
-                log.info(f"[RBHX] {tok.symbol or addr[:10]} skipped — link is a post, not a profile")
+                log.info(f"[RBHX] {symbol or addr[:10]} skipped — link is a post, not a profile")
                 return
             handle = ref.handle
         if self._on("rbhx_skip") and await _col("rbhx_skip").find_one(
                 {"handle": handle.lower()}):
-            log.info(f"[RBHX] {tok.symbol or addr[:10]} skipped — @{handle} is on the skip list")
+            log.info(f"[RBHX] {symbol or addr[:10]} skipped — @{handle} is on the skip list")
             return
 
         async with _LOOKUP_GATE:
@@ -325,7 +373,7 @@ class RbhXMonitor:
                 await asyncio.sleep(_X_RETRY_DELAY)
                 prof = await x_client.fetch_profile(self._session, handle)
         if prof.lookup_failed:
-            log.info(f"[RBHX] {tok.symbol or addr[:10]} dropped — X gave no answer for @{handle}")
+            log.info(f"[RBHX] {symbol or addr[:10]} dropped — X gave no answer for @{handle}")
             return
         if self._on("rbhx_verified_only", False) and not prof.verified:
             return
@@ -335,10 +383,12 @@ class RbhXMonitor:
         now = time.time()
         row = {
             "address": addr,
-            "symbol": tok.symbol or "?",
-            "name": tok.name or "",
-            "dex": tok.dex,
-            "pair": tok.pair,
+            "symbol": symbol or "?",
+            "name": name or "",
+            "dex": dex,
+            # How we found it: "launch" is the launchpad's own mint event,
+            # "pool" is graduation. The gap between them is the curve.
+            "source": source,
             "link": f"https://x.com/{handle}",
             "handle": handle,
             # Two different claims, kept apart: `verified` is X's own tick,
@@ -363,11 +413,23 @@ class RbhXMonitor:
 
         from app.ws_hub import hub
         await hub.broadcast("rbhx_token", {k: v for k, v in row.items() if k != "dt"})
-        log.info(f"[RBHX] {row['symbol']} — @{handle} "
+        log.info(f"[RBHX] {row['symbol']} — @{handle} [{source}] "
                  f"({prof.followers:,} followers{', verified' if prof.verified else ''}"
                  f"{', proved' if proved else ''})"
                  f"{' · WATCHED' if watched else ''}")
         await self._notify(row)
+
+    async def _name_symbol(self, addr: str) -> tuple[str, str]:
+        """ERC-20 name/symbol, for a token found before it had a pair."""
+        async def one(selector: str) -> str:
+            try:
+                raw = await self._detector.provider.rpc(
+                    "eth_call", [{"to": addr, "data": selector}, "latest"], timeout=8.0)
+            except RuntimeError:
+                return ""
+            return (decode_string_tuple(raw or "") or [""])[0]
+        symbol, name = await asyncio.gather(one("0x95d89b41"), one("0x06fdde03"))
+        return symbol.strip().upper(), name.strip()
 
     async def _notify(self, row: dict) -> None:
         if not self._on("rbhx_telegram") or not config.DEST_RBH_X_MONITOR:

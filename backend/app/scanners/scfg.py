@@ -194,6 +194,34 @@ RBHX_WSS_ENDPOINTS = [u for u in (settings.rbhx_rpc_wss,
 RBHX_OWN_ENDPOINTS = bool(settings.rbhx_rpc_wss or settings.rbhx_rpc_wss_fallback
                           or settings.rbhx_rpc_wss_fallback2)
 RBHX_ALERT_CHAT_ID = _int_or_none(settings.rbhx_alert_chat_id)
+
+
+def _parse_launchpads(raw: str) -> list[tuple[str, str, str, int]]:
+    """"addr:topic:t1, addr:topic:d0" -> [(addr, topic, kind, index), ...].
+
+    A malformed entry is skipped with a note rather than taking the whole
+    feature down — one bad paste in .env should cost that launchpad, not all
+    of them.
+    """
+    out = []
+    for chunk in (raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split(":")
+        if len(parts) != 3:
+            print(f"[scfg] RBHX_LAUNCHPADS: skipping {chunk!r} — need address:topic0:where")
+            continue
+        addr, topic, where = (p.strip() for p in parts)
+        kind, idx = where[:1].lower(), where[1:]
+        if kind not in ("t", "d") or not idx.isdigit():
+            print(f"[scfg] RBHX_LAUNCHPADS: skipping {chunk!r} — 'where' must be t<N> or d<N>")
+            continue
+        out.append((addr.lower(), topic.lower(), kind, int(idx)))
+    return out
+
+
+RBHX_LAUNCHPADS = _parse_launchpads(settings.rbhx_launchpads)
 RBHX_RETENTION_DAYS = settings.rbhx_retention_days
 
 # ── Forwarder source channels (from .env) ───────────────────────

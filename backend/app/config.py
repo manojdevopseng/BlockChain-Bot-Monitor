@@ -305,6 +305,17 @@ class Settings(BaseSettings):
     rbhx_alert_chat_id: str = ""
     # Rows and skip/watch entries are dropped this many days after they land.
     rbhx_retention_days: int = 15
+    # Launchpads to watch for a new token, so a launch is seen when it is
+    # minted rather than when it graduates to a Uniswap pool — a curve can run
+    # for hours, and a token that never graduates would never be seen at all.
+    #
+    #   address:topic0:where   (comma-separated)
+    #
+    # `where` says which part of the event carries the new token's address:
+    # t<N> for topic N, d<N> for data word N. Each launchpad shapes its event
+    # differently; all three below were read off real creation receipts.
+    # Blank = fall back to watching pool creation only.
+    rbhx_launchpads: str = ""
 
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
