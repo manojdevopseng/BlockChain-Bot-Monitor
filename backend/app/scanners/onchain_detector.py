@@ -53,6 +53,9 @@ class ChainSpec:
     # snapshot taken when the scanner was built and goes stale the moment the
     # list is edited.
     wss_source: Optional[Callable[[], list]] = None
+    # Where this chain's "all endpoints refusing" alert goes. None = the
+    # general alert group. A feature with its own endpoints wants its own.
+    alert_chat_id: Optional[int] = None
     # Human name for alerts — "Ethereum", not "ETH-XCHAIN".
     chain_label: str = ""
 
@@ -85,6 +88,7 @@ class OnChainDetector:
             spec.wss_source or (list(spec.wss_endpoints) or spec.wss_url),
             name=spec.name,
             chain_label=spec.chain_label or spec.name,
+            alert_chat_id=spec.alert_chat_id,
         )
         self._seen: BoundedSet = BoundedSet(_SEEN_MAX)
 

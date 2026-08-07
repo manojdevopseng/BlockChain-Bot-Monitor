@@ -216,6 +216,12 @@ _TTL_COLLECTIONS = {
     "x_links": "log_retention_days",
     # Hourly counts of launches that did not become a row, and why.
     "x_drops": "log_retention_days",
+    # Robinhood — X — Token Monitor: the panel and both username lists. The
+    # lists expire too, on purpose — a skip you stop maintaining stops shaping
+    # the feed instead of silencing an account forever.
+    "rbhx_tokens": "rbhx_retention_days",
+    "rbhx_skip": "rbhx_retention_days",
+    "rbhx_watch": "rbhx_retention_days",
 }
 
 
@@ -295,6 +301,13 @@ async def ensure_indexes() -> None:
         # drop bucket. A multikey index, so one token is a lookup rather than a
         # scan of every bucket in the retention window.
         ("x_drops",            [("mints.mint", 1)]),
+        ("rbhx_tokens",        "address"),
+        ("rbhx_tokens",        [("open_timestamp", -1)]),      # newest-first panel
+        ("rbhx_tokens",        [("day", -1)]),                 # History filter
+        ("rbhx_tokens",        [("followers", -1)]),           # Min Followers
+        # Read once per detection, so it has to be a lookup not a scan.
+        ("rbhx_skip",          "handle"),
+        ("rbhx_watch",         "handle"),
     ]
     for coll, keys in plan:
         try:
@@ -320,6 +333,9 @@ _TS_FIELD = {
     "tokens": "created_at",
     "gas_alerts": "created_at",
     "premium_archive": None,   # no float ts — fall back to "now"
+    "rbhx_tokens": "open_timestamp",
+    "rbhx_skip": "added_at",
+    "rbhx_watch": "added_at",
 }
 
 

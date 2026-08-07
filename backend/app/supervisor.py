@@ -146,6 +146,10 @@ async def reconcile() -> None:
         want.add("eth")
     if want_rbh:
         want.add("rbh")
+    # Its own worker, its own endpoints: it runs whether or not the Robinhood
+    # cross-chain scanner does, and stopping one must not stop the other.
+    if bool(enabled.get("rbhx_monitor")) and bool(enabled.get("rbhx_rpc", True)):
+        want.add("rbhx")
     if want_fwd:
         want.add("fwd")
     if want_cmd:
@@ -160,7 +164,7 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "fwd", "cmd"):
+    for name in ("sol", "eth", "rbh", "rbhx", "fwd", "cmd"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -238,6 +242,16 @@ async def _start_worker(name: str) -> None:
         _instances["eth"] = inst
         _tasks["eth"] = asyncio.create_task(inst.run(), name="eth-scanner")
         return
+    if name == "rbhx":
+        from .scanners.rbhx_monitor import RbhXMonitor
+        inst = RbhXMonitor()
+        # Toggles before start: which pair versions it subscribes to is fixed
+        # when the detector is built.
+        inst.apply_toggles(await registry.enabled_map())
+        _instances["rbhx"] = inst
+        _tasks["rbhx"] = asyncio.create_task(inst.run(), name="rbhx-monitor")
+        return
+
     if name == "rbh":
         from .scanners.robinhood_scanner import RobinhoodScanner
         inst = RobinhoodScanner(sol_scanner=_sol, session_factory=aiohttp.ClientSession)
@@ -330,7 +344,7 @@ def rpc_connected(name: str) -> bool:
     true the entire time a chain is fully rate-limited and seeing nothing.
     Reads the real per-socket signal where one exists.
     """
-    if name in ("eth", "rbh"):
+    if name in ("eth", "rbh", "rbhx"):
         inst = _instances.get(name)
         return bool(inst is not None and getattr(inst, "connected", False))
     if name == "sol":
@@ -348,7 +362,7 @@ def rpc_active_url(name: str) -> str:
     not say which one is in use — RPC Monitor needs this to tell the live slot
     apart from the standby ones. "" when there is nothing running to ask.
     """
-    if name in ("eth", "rbh"):
+    if name in ("eth", "rbh", "rbhx"):
         inst = _instances.get(name)
         return getattr(inst, "active_endpoint", "") if inst is not None else ""
     if name == "sol":
@@ -361,6 +375,7 @@ def status() -> dict[str, str]:
     return {
         _SVC_ETH: "running" if _worker_alive("eth") else "stopped",
         _SVC_RBH: "running" if _worker_alive("rbh") else "stopped",
+        "rbhx_monitor": "running" if _worker_alive("rbhx") else "stopped",
         "forwarder": "running" if _worker_alive("fwd") else "stopped",
         "bot_commands": "running" if _worker_alive("cmd") else "stopped",
     }
@@ -392,6 +407,10 @@ _DEPENDS_ON = {
     "rpc_eth":                "eth",
     "rpc_rbh":                "rbh",
     "rpc_sol":                "sol",
+    # Every switch the monitor reads at start rather than per message.
+    "rbhx_monitor":           "rbhx",
+    "rbhx_rpc":               "rbhx",
+    "rbhx_v2v3":              "rbhx",
     "bot_commands":           "cmd",
 }
 

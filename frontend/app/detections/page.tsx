@@ -16,6 +16,7 @@ import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtDateTime, fmtEth, shortAddr, rowKey } from "@/lib/utils";
 import { Age, TickProvider } from "@/components/Age";
+import { RbhXSection } from "./_components/RbhXSection";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
 
@@ -258,9 +259,10 @@ export default function DetectionsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Detections"
-        subtitle="Premium-caller addresses, cross-chain matches and ETH gas fees"
+        subtitle="Premium-caller addresses, Robinhood launches on X, cross-chain matches and ETH gas fees"
       />
       <PremiumSection />
+      <RbhXSection />
       <CrossChainSection />
       <GasSection />
     </div>

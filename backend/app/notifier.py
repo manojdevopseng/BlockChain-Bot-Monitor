@@ -198,22 +198,28 @@ async def notify_error(service: str, message: str) -> None:
 # it, which is exactly what happened on 29-07-2026 — three sockets logged
 # individual 429s for hours and nothing said "all of them are down".
 
-async def notify_rpc_exhausted(chain: str, body: str) -> None:
-    """Every endpoint for a chain is refusing. Detection there is down."""
-    await send(
+async def notify_rpc_exhausted(chain: str, body: str, chat_id=None) -> None:
+    """Every endpoint for a chain is refusing. Detection there is down.
+
+    `chat_id` sends it somewhere other than the alert group: a pool that
+    belongs to one feature reports where that feature is being watched.
+    """
+    text = (
         "🛑 <b>ALL RPC ENDPOINTS EXHAUSTED</b> — " + html.escape(chain) + "\n"
         f"<i>{_now()}</i>\n\n"
         + html.escape(body)
     )
+    await (send_to(chat_id, text) if chat_id else send(text))
 
 
-async def notify_rpc_recovered(chain: str, body: str) -> None:
+async def notify_rpc_recovered(chain: str, body: str, chat_id=None) -> None:
     """A chain that was fully down has a working endpoint again."""
-    await send(
+    text = (
         "✅ <b>RPC RECOVERED</b> — " + html.escape(chain) + "\n"
         f"<i>{_now()}</i>\n\n"
         + html.escape(body)
     )
+    await (send_to(chat_id, text) if chat_id else send(text))
 
 
 def _now() -> str:

@@ -172,6 +172,7 @@ DEST_PREMIUM_ALL        = _int_or_none(settings.dest_premium_all)
 # chain slug the detection rows carry, so a new chain needs one entry and no
 # branching anywhere else.
 DEST_IMPORTANT_CALLER   = _int_or_none(settings.dest_important_caller)
+DEST_RBH_X_MONITOR      = _int_or_none(settings.dest_rbh_x_monitor)
 
 DEST_PREMIUM_BY_CHAIN = {
     "eth": _int_or_none(settings.dest_premium_eth),
@@ -179,6 +180,21 @@ DEST_PREMIUM_BY_CHAIN = {
     "bnb": _int_or_none(settings.dest_premium_bnb),
     "sol": _int_or_none(settings.dest_premium_sol),
 }
+
+# ── Robinhood — X — Token Monitor (from .env) ───────────────────
+# Its own three-slot pool. Empty slots fall back to the Robinhood Chain
+# endpoints — the same shape as GAS_RPC_WSS above, and what makes the feature
+# run before its own endpoints have been set.
+RBHX_WSS_ENDPOINTS = [u for u in (settings.rbhx_rpc_wss,
+                                  settings.rbhx_rpc_wss_fallback,
+                                  settings.rbhx_rpc_wss_fallback2) if u] or list(RBH_WSS_ENDPOINTS)
+# True when the section is running on its own endpoints rather than borrowing
+# Robinhood's — RPC Monitor says which, instead of showing slots that look set
+# when they are not.
+RBHX_OWN_ENDPOINTS = bool(settings.rbhx_rpc_wss or settings.rbhx_rpc_wss_fallback
+                          or settings.rbhx_rpc_wss_fallback2)
+RBHX_ALERT_CHAT_ID = _int_or_none(settings.rbhx_alert_chat_id)
+RBHX_RETENTION_DAYS = settings.rbhx_retention_days
 
 # ── Forwarder source channels (from .env) ───────────────────────
 SOURCE_CALL   = settings.source_call

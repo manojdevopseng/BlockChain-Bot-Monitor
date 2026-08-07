@@ -35,7 +35,7 @@ class SubscriptionSpec:
 
 class WSProvider:
     def __init__(self, wss_url: str | list[str] | Callable[[], list[str]],
-                 name: str = "", chain_label: str = "") -> None:
+                 name: str = "", chain_label: str = "", alert_chat_id=None) -> None:
         # One endpoint, several, or a callable returning the current list. The
         # callable form is what lets an endpoint added in Settings be dialled on
         # the next reconnect instead of at the next process restart.
@@ -47,6 +47,9 @@ class WSProvider:
             fixed = [u for u in fixed if u]
             source = lambda: fixed  # noqa: E731
         self._pool = EndpointPool(self.name, source, chain_label or name)
+        # Where this pool's outage is reported. None = the general alert group,
+        # which is every existing caller.
+        self._alert_chat_id = alert_chat_id
         self.wss_url = self._pool.current()
         self._ws: Optional[Any] = None
         self._running = False
@@ -226,7 +229,8 @@ class WSProvider:
         try:
             from .. import notifier
             await notifier.notify_rpc_recovered(self._pool.label,
-                                                self._pool.recovery_text(url))
+                                                self._pool.recovery_text(url),
+                                                self._alert_chat_id)
         except Exception as exc:  # noqa: BLE001
             log.error(f"[{self.name}] could not send recovery alert: {exc}")
 
@@ -242,7 +246,8 @@ class WSProvider:
         log.warning(f"[{self.name}] ALL RPC ENDPOINTS EXHAUSTED — {body.splitlines()[0]}")
         try:
             from .. import notifier
-            await notifier.notify_rpc_exhausted(self._pool.label, body)
+            await notifier.notify_rpc_exhausted(self._pool.label, body,
+                                                self._alert_chat_id)
         except Exception as exc:  # noqa: BLE001
             log.error(f"[{self.name}] could not send exhaustion alert: {exc}")
 

@@ -36,6 +36,9 @@ BOT = "bot"
 AI = "ai"
 CHAIN = "chain"
 RPC = "rpc"
+# Its own category so the Settings page can give the feature a section of its
+# own rather than scattering six switches through Bots.
+RBHX = "rbhx"
 
 # Registry ids that were renamed, old -> new. `seed` carries the user's on/off
 # state across so a rename never silently re-enables something they had turned
@@ -73,6 +76,28 @@ DEFAULT_SERVICES: list[dict] = [
     # and record it in the matching Detections panel.
     {"id": "premium_callers_signal","category": BOT, "label": "Premium Callers Signal",
      "chain": "eth", "enabled": True},
+    # ── Robinhood — X — Token Monitor ──────────────────────────────────────
+    # One feature, six switches, because each answers a different question and
+    # you want to change one without the others: is it running, is it on its
+    # own endpoints, do the two username lists apply, does V2/V3 count, and
+    # does it post to Telegram.
+    {"id": "rbhx_monitor",   "category": RBHX, "label": "Robinhood — X — Token Monitor",
+     "chain": "rbh", "enabled": True},
+    {"id": "rbhx_rpc",       "category": RBHX, "label": "RPC Endpoints",
+     "chain": "rbh", "enabled": True},
+    {"id": "rbhx_skip",      "category": RBHX, "label": "Skip List (ignored usernames)",
+     "chain": "rbh", "enabled": True},
+    {"id": "rbhx_watch",     "category": RBHX, "label": "Watch List (followed usernames)",
+     "chain": "rbh", "enabled": True},
+    {"id": "rbhx_v2v3",      "category": RBHX, "label": "Include V2 / V3 pairs",
+     "chain": "rbh", "enabled": False},
+    {"id": "rbhx_telegram",  "category": RBHX, "label": "Telegram Alerts",
+     "chain": "rbh", "enabled": True},
+    # Off today: every account is recorded and Min Followers does the filtering.
+    # Here so the rule can be tightened later without a code change.
+    {"id": "rbhx_verified_only", "category": RBHX, "label": "Verified accounts only",
+     "chain": "rbh", "enabled": False},
+
     # The starred-caller mirror. Its own switch so the filtered feed can be
     # stopped without touching the full one, and the other way round.
     {"id": "important_caller",      "category": BOT, "label": "Important Caller",
@@ -231,7 +256,7 @@ async def grouped() -> dict[str, list[dict]]:
     `data?.ai ?? []` rather than checking, so a whole section would vanish
     instead of rendering empty.
     """
-    out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: []}
+    out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: []}
     for svc in await list_services():
         out.setdefault(svc["category"], []).append(svc)
     return out

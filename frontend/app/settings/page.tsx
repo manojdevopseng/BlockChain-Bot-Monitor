@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2 } from "lucide-react";
+import { Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2, Twitter } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,6 +21,10 @@ const CAT = {
   ai: { title: "AI", icon: Brain, desc: "The narrative agent, its feed, and what it is asked" },
   chain: { title: "Chains", icon: Link2, desc: "Turn a whole chain on or off" },
   rpc: { title: "RPCs", icon: Radio, desc: "Toggle individual RPC endpoints" },
+  // Its own section rather than six more switches in Bots: they belong to one
+  // feature and are only understandable together.
+  rbhx: { title: "Robinhood — X — Token Monitor", icon: Twitter,
+          desc: "Who is behind a Robinhood launch, read off the token's own metadata" },
 };
 
 function ServiceGroup({ cat, items }: { cat: keyof typeof CAT; items: Svc[] }) {
@@ -317,6 +321,7 @@ export default function SettingsPage() {
           <NarrativeManager />
         </div>
         <div className="space-y-5">
+          <ServiceGroup cat="rbhx" items={data?.rbhx ?? []} />
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
           <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
           {/* The endpoint URLs themselves live on the RPC Monitor page, next to

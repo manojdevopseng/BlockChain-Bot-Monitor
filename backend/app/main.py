@@ -23,7 +23,7 @@ from . import db, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
     ai_agent as ai_router, alerts, analytics, auth, chains, chat_lookup,
-    commands, dashboard, forwarder, logs, outcomes as outcomes_router, rpc,
+    commands, dashboard, forwarder, logs, outcomes as outcomes_router, rbhx, rpc,
     settings as settings_router, system, tokens, users as users_router,
 )
 from .ws_hub import hub
@@ -145,7 +145,7 @@ app.add_middleware(
 # The auth router itself stays open — the login has to be reachable.
 _PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
               analytics, logs, rpc, system, settings_router, chat_lookup,
-              outcomes_router, ai_router, users_router)
+              outcomes_router, ai_router, users_router, rbhx)
 
 app.include_router(auth.router)
 # `require_write` is the login check AND the read-only rule in one dependency:

@@ -149,6 +149,23 @@ EDITABLE: dict[str, dict] = {
         "group": "RPC Endpoints — Robinhood Chain", "applies": "worker:rbh",
         "help": "Third endpoint.",
     },
+    "RBHX_RPC_WSS": {
+        "label": "RBH-X Monitor WebSocket #1", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints — Robinhood X Monitor", "applies": "worker:rbhx",
+        "help": "Tried first. On a quota rejection rotation goes 1 → 2 → 3 → 1. "
+                "Leave all three blank and the monitor borrows the Robinhood "
+                "Chain endpoints instead.",
+    },
+    "RBHX_RPC_WSS_FALLBACK": {
+        "label": "RBH-X Monitor WebSocket #2", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints — Robinhood X Monitor", "applies": "worker:rbhx",
+        "help": "Use a different provider from #1.",
+    },
+    "RBHX_RPC_WSS_FALLBACK2": {
+        "label": "RBH-X Monitor WebSocket #3", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints — Robinhood X Monitor", "applies": "worker:rbhx",
+        "help": "Third endpoint.",
+    },
     # Same split as ETH above: premium-caller detection (Premium RBH toggle),
     # unrelated to the on-chain discovery WebSockets.
     "RBH_RPC_HTTP": {
@@ -440,6 +457,7 @@ _WSS_SLOT_SUFFIXES = {
     "ETH": ("", "_fallback", "_fallback2"),
     "RBH": ("", "_fallback", "_fallback2"),
     "SOL": ("", "_fallback"),
+    "RBHX": ("", "_fallback", "_fallback2"),
 }
 
 
@@ -460,6 +478,15 @@ def _refresh_derived(scfg, key: str) -> None:
                [u for u in (getattr(settings, f"{low}_rpc_http", "") or "",
                            getattr(settings, f"{low}_rpc_http_fallback", "") or "")
                 if u])
+        return
+    if key.startswith("RBHX_RPC_WSS"):
+        slots = [getattr(settings, f"rbhx_rpc_wss{sfx}", "") or ""
+                 for sfx in _WSS_SLOT_SUFFIXES["RBHX"]]
+        live = [u for u in slots if u]
+        # Blank slots borrow Robinhood's, which is how it runs before its own
+        # endpoints are set — and what the "own endpoints" flag reports.
+        scfg.RBHX_WSS_ENDPOINTS = live or list(scfg.RBH_WSS_ENDPOINTS)
+        scfg.RBHX_OWN_ENDPOINTS = bool(live)
         return
     if not key.startswith(("ETH_RPC_WSS", "RBH_RPC_WSS", "SOL_RPC_WSS")):
         return

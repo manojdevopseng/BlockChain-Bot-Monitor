@@ -59,6 +59,11 @@ async def _build() -> list[dict]:
         ("ETH Gas Fees", "eth", "rpc_eth", "", "HTTP", [scfg.GAS_RPC_HTTP]),
         ("Robinhood Chain", "rbh", "rpc_rbh", "rbh", "WSS", list(scfg.RBH_WSS_ENDPOINTS)),
         ("Robinhood Chain", "rbh", "rpc_rbh", "",    "HTTP", list(scfg.RBH_HTTP_ENDPOINTS)),
+        # Its own three slots. While they are empty it borrows Robinhood's, and
+        # the label says so rather than showing slots that look configured.
+        ("Robinhood — X — Token Monitor" if scfg.RBHX_OWN_ENDPOINTS
+         else "Robinhood — X — Token Monitor (borrowing Robinhood Chain)",
+         "rbh", "rbhx_rpc", "rbhx", "WSS", list(scfg.RBHX_WSS_ENDPOINTS)),
         ("BNB Chain", "bnb", "", "", "HTTP", list(scfg.BNB_HTTP_ENDPOINTS)),
         ("Solana", "sol", "rpc_sol", "sol", "WSS", list(scfg.SOL_WSS_ENDPOINTS)),
         ("Solana", "sol", "rpc_sol", "",    "HTTP", list(scfg.SOL_HTTP_ENDPOINTS)),

@@ -286,6 +286,26 @@ class Settings(BaseSettings):
     # is the filtered read of the same feed. Blank = the feature is off.
     dest_important_caller: str = ""
 
+    # ── Robinhood — X — Token Monitor ───────────────────────
+    # A Robinhood launchpad token carries its socials in the contract's own
+    # metadata() string. This watches new pairs, pulls the X profile link out
+    # of it and records who is behind the launch. Only @username links: a link
+    # to one post says nothing about the account.
+    #
+    # Its own WebSockets, so a busy discovery socket cannot starve it and its
+    # quota is its own. Blank falls back to the Robinhood Chain endpoints,
+    # which is also how it runs before you have set any.
+    rbhx_rpc_wss: str = ""
+    rbhx_rpc_wss_fallback: str = ""
+    rbhx_rpc_wss_fallback2: str = ""
+    # Where detections are posted. Blank = recorded in the panel, not sent.
+    dest_rbh_x_monitor: str = ""
+    # Where "all its endpoints are refusing" goes. Its own chat, not the
+    # general alert group, so this feed's health is readable on its own.
+    rbhx_alert_chat_id: str = ""
+    # Rows and skip/watch entries are dropped this many days after they land.
+    rbhx_retention_days: int = 15
+
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
     eth_v3_factory: str = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
