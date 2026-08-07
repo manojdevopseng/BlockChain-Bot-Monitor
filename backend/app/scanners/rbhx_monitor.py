@@ -40,9 +40,19 @@ from app.util import gmgn_url, ist_date_str
 
 log = get_logger(__name__)
 
-# metadata() — the launchpad string tuple. Not a standard, which is why it is
-# probed rather than assumed: a token that does not answer is skipped, quietly.
-_SEL_METADATA = "0x392f37e9"
+# Every launchpad keeps the socials somewhere different, and none of it is a
+# standard — so the getters are probed in order and the first one that answers
+# wins. Both of these were read off verified contracts on chain:
+#
+#   metadata()  Trendor-style — (description, social, image, extra)
+#   socials()   PonsLauncherToken — five slots, X first, website fourth
+#
+# A token from a launchpad we have not met yet answers neither and is skipped.
+# Adding one is a line here once its getter is known.
+_METADATA_SELECTORS = (
+    ("metadata()", "0x392f37e9"),
+    ("socials()",  "0x53cd512a"),
+)
 
 # The link can be in any slot — one token carries it in the second field and
 # another in the first — but the whole field has to BE the link, not contain
@@ -104,6 +114,15 @@ _REVERT_WORDS = ("execution reverted", "revert", "invalid opcode",
 def _is_revert(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(w in msg for w in _REVERT_WORDS)
+
+
+def _description(fields: list[str]) -> str:
+    """The prose among the metadata fields, if there is any."""
+    for field in fields:
+        value = (field or "").strip()
+        if value and not re.match(r"^@?(?:https?://|ipfs://|www\.)", value):
+            return value
+    return ""
 
 
 def find_x_link(fields: list[str]) -> str:
@@ -221,19 +240,24 @@ class RbhXMonitor:
                         f"{type(exc).__name__}: {exc}")
 
     async def _handle(self, tok: DetectedToken, addr: str) -> None:
-        try:
-            raw = await self._detector.provider.rpc(
-                "eth_call", [{"to": addr, "data": _SEL_METADATA}, "latest"], timeout=8.0)
-        except RuntimeError as exc:
-            # A token with no metadata() reverts, and most of them do — that is
-            # the answer to the question, not a failure. Logging it as one
-            # buried the real errors under a warning per launch.
-            if _is_revert(exc):
-                return
-            raise
-        fields = decode_string_tuple(raw or "")
+        fields: list[str] = []
+        for _name, selector in _METADATA_SELECTORS:
+            try:
+                raw = await self._detector.provider.rpc(
+                    "eth_call", [{"to": addr, "data": selector}, "latest"], timeout=8.0)
+            except RuntimeError as exc:
+                # "I do not have that function" comes back as a revert, and for
+                # most tokens every one of these does — that is the answer, not
+                # a failure. Logging it as one buried the real errors under a
+                # warning per launch.
+                if _is_revert(exc):
+                    continue
+                raise
+            fields = decode_string_tuple(raw or "")
+            if any(fields):
+                break
         if not any(fields):
-            return          # plain ERC-20 — no metadata, nothing to read
+            return          # no launchpad metadata on this token
         link = find_x_link(fields)
         if not link:
             return
@@ -281,8 +305,10 @@ class RbhXMonitor:
             "followers": prof.followers,
             # Same field the AI page's X Links uses, so the shared <Age> cell
             # and the timestamp column read the same thing in both places.
-            "excerpt": (fields[0] or prof.bio or "")[:200],
-            "description": (fields[0] or "")[:400],
+            # The first field that is not itself a URL: Trendor puts the
+            # description first, Pons puts the X link there and has none.
+            "excerpt": (_description(fields) or prof.bio or "")[:200],
+            "description": _description(fields)[:400],
             "watched": watched,
             "open_timestamp": now,
             "found_at": now,
