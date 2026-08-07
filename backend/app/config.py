@@ -316,6 +316,17 @@ class Settings(BaseSettings):
     # differently; all three below were read off real creation receipts.
     # Blank = fall back to watching pool creation only.
     rbhx_launchpads: str = ""
+    # Skip a launch whose own deployer buys more than this much of it, in the
+    # chain's native ETH. The dev wallet comes from the same signed blob the
+    # handle does, so this only applies to launches that carry one — and only
+    # to that wallet, not to a fresh one funded on the side.
+    #
+    # 0 disables the check and every launch is kept.
+    rbhx_dev_buy_max_eth: float = 3.0
+    # How long after a launch the deployer's buying is watched. The first
+    # trades on a measured launch came at +30s, so this has to be long enough
+    # to see them and short enough that the Telegram alert is still news.
+    rbhx_dev_buy_window: int = 120
 
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"

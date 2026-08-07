@@ -136,6 +136,11 @@ export function RbhXSection() {
         A Robinhood launchpad token carries its socials in the contract's own
         metadata. Only <b>@username</b> links are kept — a link to one post says
         nothing about who is behind the launch. Kept {stats?.retention_days ?? 15} days.
+        {stats?.dev_buy_max_eth ? (
+          <> {" "}A launch whose own deployer buys more than{" "}
+            <b>{stats.dev_buy_max_eth} Ξ</b> of it inside {stats.dev_buy_window}s is
+            dropped — the Dev Buy column fills in over that window.</>
+        ) : null}
         {stats && !stats.own_endpoints && (
           <> {" "}<span className="text-accent-amber">
             Running on the Robinhood Chain endpoints — set its own in RPC Monitor.
@@ -160,6 +165,7 @@ export function RbhXSection() {
               <th className="px-3 py-2.5 font-medium">Age</th>
               <th className="px-3 py-2.5 font-medium">Account</th>
               <th className="px-3 py-2.5 font-medium">Followers</th>
+              <th className="px-3 py-2.5 font-medium">Dev Buy</th>
               <th className="px-3 py-2.5 font-medium">Text</th>
               <th className="px-3 py-2.5 font-medium">Timestamp</th>
               <th className="px-3 py-2.5 font-medium"></th>
@@ -167,7 +173,7 @@ export function RbhXSection() {
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-10 text-center text-text-dim">
+              <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
                 {query ? "Nothing matches this search"
                   : date ? `No tokens on ${date}`
                   : floor > 0 ? `No account above ${fmtNum(floor)} followers`
@@ -202,6 +208,19 @@ export function RbhXSection() {
                 </td>
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text">{fmtNum(r.followers)}</span>
+                </td>
+                {/* Fills in over the watch window. A launch whose deployer
+                    goes past the limit is taken off the page entirely, so
+                    anything shown here was under it. */}
+                <td className="px-3 py-3">
+                  {r.dev_buy_eth == null ? (
+                    <span className="text-xs text-text-dim" title="No signed proof on this launch, so its deployer is unknown">—</span>
+                  ) : (
+                    <span className={`font-mono text-xs ${r.dev_buy_eth > 0 ? "text-accent-amber" : "text-text-dim"}`}
+                          title={r.dev_wallet || ""}>
+                      {r.dev_buy_eth.toFixed(3)} Ξ
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-3">
                   <span className="block max-w-[320px] truncate text-xs text-text-muted"

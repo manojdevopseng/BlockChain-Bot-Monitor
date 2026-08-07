@@ -66,6 +66,14 @@ _METADATA_SELECTORS = (
 _X_FIELD = re.compile(r"^@?(?:https?://)?(?:www\.)?(?:x|twitter)\.com/[A-Za-z0-9_]{1,15}"
                       r"(?:/status/\d+)?/?$", re.I)
 
+# ERC-20 Transfer(address,address,uint256). A standard, unlike everything else
+# on this chain — so the dev-buy watch works the same on every launchpad.
+_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+# Concurrent dev-buy watches. Each is one filtered subscription that stays
+# quiet unless that exact wallet receives that exact token, but a socket has
+# to hold them all — the same reason the gas monitor caps its own.
+_MAX_DEV_WATCHES = 120
+
 # X's own mirrors are free and rate-limited; the same handle turns up across a
 # burst of copycat launches, so the lookups are serialised behind this.
 _LOOKUP_GATE = asyncio.Semaphore(2)
@@ -124,6 +132,38 @@ def _is_revert(exc: Exception) -> bool:
 _HANDLE_OK = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
+def _proof_payload(fields: list[str]) -> dict:
+    """The decoded xVerificationToken payload, or {}.
+
+    The base64 is a payload followed by a signature, so it is read with
+    raw_decode and the trailing bytes ignored — this reads the claim, it does
+    not check the launchpad's signature over it.
+    """
+    for field in fields:
+        value = (field or "").strip()
+        if not value.startswith("{") or "xVerificationToken" not in value:
+            continue
+        try:
+            token = json.loads(value).get("xVerificationToken") or ""
+            raw = base64.b64decode(token + "=" * (-len(token) % 4)).decode("utf-8", "ignore")
+            payload, _ = json.JSONDecoder().raw_decode(raw)
+            return payload if isinstance(payload, dict) else {}
+        except Exception:  # noqa: BLE001
+            continue        # malformed proof — treat it as absent
+    return {}
+
+
+def dev_wallet_from_proof(fields: list[str]) -> str:
+    """The wallet the launchpad issued the proof to — the deployer's own.
+
+    Only this wallet is watched for a dev buy. Someone determined funds a
+    fresh one, and nothing on chain ties that back; this catches the launch
+    that buys its own supply openly, which is the common case.
+    """
+    wallet = str(_proof_payload(fields).get("wallet_address") or "").strip()
+    return wallet.lower() if re.match(r"^0x[0-9a-fA-F]{40}$", wallet) else ""
+
+
 def handle_from_proof(fields: list[str]) -> str:
     """The handle a launchpad made the deployer prove they own, or "".
 
@@ -138,20 +178,8 @@ def handle_from_proof(fields: list[str]) -> str:
     raw_decode and the trailing bytes ignored — this reads the claim, it does
     not check the launchpad's signature over it.
     """
-    for field in fields:
-        value = (field or "").strip()
-        if not value.startswith("{") or "xVerificationToken" not in value:
-            continue
-        try:
-            token = json.loads(value).get("xVerificationToken") or ""
-            raw = base64.b64decode(token + "=" * (-len(token) % 4)).decode("utf-8", "ignore")
-            payload, _ = json.JSONDecoder().raw_decode(raw)
-            handle = str(payload.get("x_handle") or "").strip().lstrip("@")
-            if _HANDLE_OK.match(handle):
-                return handle
-        except Exception:  # noqa: BLE001
-            continue        # malformed proof — fall through to the plain link
-    return ""
+    handle = str(_proof_payload(fields).get("x_handle") or "").strip().lstrip("@")
+    return handle if _HANDLE_OK.match(handle) else ""
 
 
 def _description(fields: list[str]) -> str:
@@ -190,6 +218,7 @@ class RbhXMonitor:
         self._enabled: dict[str, bool] = {}
         self._seen: set[str] = set()
         self._v2v3 = False
+        self._dev_watches = 0
         # Built in run(), not here: OnChainDetector registers its subscriptions
         # in __init__, so which of V2/V3/V4 it watches has to be decided before
         # it exists — and that comes from a switch read at start.
@@ -347,6 +376,7 @@ class RbhXMonitor:
         # established by the launchpad, not a link they typed.
         handle = handle_from_proof(fields)
         proved = bool(handle)
+        dev = dev_wallet_from_proof(fields)
         if not handle:
             link = find_x_link(fields)
             if not link:
@@ -394,6 +424,11 @@ class RbhXMonitor:
             # Two different claims, kept apart: `verified` is X's own tick,
             # `proved` is the launchpad having watched this deployer sign in.
             "proved": proved,
+            # The deployer's own wallet, and what it spent buying this token
+            # inside the window. None = there was no proof to read it from, so
+            # the question cannot be asked of this launch.
+            "dev_wallet": dev or None,
+            "dev_buy_eth": 0.0 if dev else None,
             "verified": prof.verified,
             "verified_type": prof.verified_type,
             "followers": prof.followers,
@@ -417,7 +452,73 @@ class RbhXMonitor:
                  f"({prof.followers:,} followers{', verified' if prof.verified else ''}"
                  f"{', proved' if proved else ''})"
                  f"{' · WATCHED' if watched else ''}")
+        # Published now, judged over the next window: the launch is on the
+        # page in about a second, and a deployer that buys its own supply is
+        # taken off it when that becomes visible.
+        if dev and config.RBHX_DEV_BUY_MAX_ETH > 0:
+            asyncio.create_task(self._watch_dev_buy(addr, dev, row["symbol"]),
+                                name=f"rbhx-devbuy-{addr[:10]}")
         await self._notify(row)
+
+    async def _watch_dev_buy(self, addr: str, dev: str, symbol: str) -> None:
+        """Add up what the deployer spends on its own token, and drop the row
+        if it goes past the limit.
+
+        One subscription, filtered to Transfer(*, dev) on this token alone, so
+        it costs nothing until that exact wallet receives that exact token. The
+        ETH is the native value of the transaction that moved them — a buy
+        pays; an allocation handed over by the launchpad does not, and is
+        correctly counted as zero.
+        """
+        if self._dev_watches >= _MAX_DEV_WATCHES:
+            log.warning(f"[RBHX] dev-buy watch skipped for {symbol} — {_MAX_DEV_WATCHES} already running")
+            return
+        provider = self._detector.provider
+        spent = 0.0
+        seen_tx: set[str] = set()
+
+        async def on_transfer(log_obj: dict) -> None:
+            nonlocal spent
+            tx = (log_obj.get("transactionHash") or "").lower()
+            # One transaction can move tokens to the same wallet twice; its
+            # value must only be counted once.
+            if not tx or tx in seen_tx:
+                return
+            seen_tx.add(tx)
+            try:
+                info = await provider.rpc("eth_getTransactionByHash", [tx], timeout=8.0)
+            except Exception:  # noqa: BLE001
+                return
+            if not info or (info.get("from") or "").lower() != dev:
+                return      # tokens arriving from elsewhere are not a dev buy
+            spent += int(info.get("value") or "0x0", 16) / 1e18
+
+        sub = None
+        self._dev_watches += 1
+        try:
+            sub = await provider.subscribe(
+                ["logs", {"address": addr,
+                          "topics": [_TRANSFER_TOPIC, None, "0x" + "0" * 24 + dev[2:]]}],
+                on_transfer, label=f"RBHX-DEV-{addr[:8]}")
+            await asyncio.sleep(config.RBHX_DEV_BUY_WINDOW)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"[RBHX] dev-buy watch failed for {symbol}: {type(exc).__name__}: {exc}")
+            return
+        finally:
+            self._dev_watches -= 1
+            if sub:
+                try:
+                    await provider.unsubscribe(sub)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        if spent > config.RBHX_DEV_BUY_MAX_ETH:
+            await _col("rbhx_tokens").delete_one({"address": addr})
+            log.info(f"[RBHX] {symbol} removed — its deployer bought {spent:.4f} ETH of it "
+                     f"(limit {config.RBHX_DEV_BUY_MAX_ETH})")
+        else:
+            await _col("rbhx_tokens").update_one({"address": addr},
+                                                 {"$set": {"dev_buy_eth": round(spent, 4)}})
 
     async def _name_symbol(self, addr: str) -> tuple[str, str]:
         """ERC-20 name/symbol, for a token found before it had a pair."""

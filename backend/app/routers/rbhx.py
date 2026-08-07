@@ -87,6 +87,9 @@ async def stats():
         "enabled": bool(enabled.get("rbhx_monitor", True)),
         "own_endpoints": scfg.RBHX_OWN_ENDPOINTS,
         "retention_days": scfg.RBHX_RETENTION_DAYS,
+        "dev_buy_max_eth": scfg.RBHX_DEV_BUY_MAX_ETH,
+        "dev_buy_window": scfg.RBHX_DEV_BUY_WINDOW,
+        "launchpads": len(scfg.RBHX_LAUNCHPADS),
     }
 
 

@@ -222,6 +222,8 @@ def _parse_launchpads(raw: str) -> list[tuple[str, str, str, int]]:
 
 
 RBHX_LAUNCHPADS = _parse_launchpads(settings.rbhx_launchpads)
+RBHX_DEV_BUY_MAX_ETH = settings.rbhx_dev_buy_max_eth
+RBHX_DEV_BUY_WINDOW  = settings.rbhx_dev_buy_window
 RBHX_RETENTION_DAYS = settings.rbhx_retention_days
 
 # ── Forwarder source channels (from .env) ───────────────────────
