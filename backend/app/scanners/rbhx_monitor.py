@@ -44,9 +44,14 @@ log = get_logger(__name__)
 # probed rather than assumed: a token that does not answer is skipped, quietly.
 _SEL_METADATA = "0x392f37e9"
 
-# The link can be in any slot: one token had it in the description field and
-# another in the second. So every string is searched rather than one position.
-_X_IN_TEXT = re.compile(r"(?:https?://)?(?:www\.)?(?:x|twitter)\.com/[A-Za-z0-9_/]+", re.I)
+# The link can be in any slot — one token carries it in the second field and
+# another in the first — but the whole field has to BE the link, not contain
+# one. A description that says "…— launched by @Trendorxyz https://x.com/
+# Trendorxyz" is the launchpad crediting itself, not the token's account: that
+# handle belongs to whoever deployed it and would be attached to every token
+# that launchpad ever mints. A social slot holds a bare URL and nothing else.
+_X_FIELD = re.compile(r"^@?(?:https?://)?(?:www\.)?(?:x|twitter)\.com/[A-Za-z0-9_]{1,15}"
+                      r"(?:/status/\d+)?/?$", re.I)
 
 # X's own mirrors are free and rate-limited; the same handle turns up across a
 # burst of copycat launches, so the lookups are serialised behind this.
@@ -102,11 +107,15 @@ def _is_revert(exc: Exception) -> bool:
 
 
 def find_x_link(fields: list[str]) -> str:
-    """The first x.com/twitter.com link in any metadata field, or ""."""
+    """The token's own X link, or "".
+
+    A field counts only when it is nothing but the link. See _X_FIELD for why
+    a link mentioned inside a description is thrown away.
+    """
     for field in fields:
-        m = _X_IN_TEXT.search(field or "")
-        if m:
-            return m.group(0)
+        value = (field or "").strip()
+        if _X_FIELD.match(value):
+            return value.lstrip("@")
     return ""
 
 
