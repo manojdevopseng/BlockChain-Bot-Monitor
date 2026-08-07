@@ -304,14 +304,17 @@ class RbhXMonitor:
         been running for hours — but it is the only signal for a launchpad we
         do not watch, and it costs nothing when the launch already came in."""
         await self._process((tok.address or "").lower(), tok.symbol or "", tok.name or "",
-                            tok.dex or "v4", source="pool")
+                            tok.dex or "v4", source="pool", tx=tok.tx_hash or "")
 
     async def _on_launch(self, log_obj: dict) -> None:
         """A launchpad minted a token. This is the moment the X profile goes on
         chain, so it is the moment worth reading it."""
         addr = self._token_from_log(log_obj)
         if addr:
-            await self._process(addr, "", "", "launch", source="launch")
+            # The event's own transaction IS the launch — the deployer, and
+            # whatever it paid to buy in, are both in it.
+            await self._process(addr, "", "", "launch", source="launch",
+                                tx=log_obj.get("transactionHash") or "")
 
     def _token_from_log(self, log_obj: dict) -> str:
         """Pull the new token's address out of whichever slot this launchpad
@@ -332,7 +335,7 @@ class RbhXMonitor:
         return ""
 
     async def _process(self, addr: str, symbol: str, name: str, dex: str,
-                       source: str) -> None:
+                       source: str, tx: str = "") -> None:
         if not addr or addr in self._seen:
             return          # already handled — a launch, then its pool, is one token
         self._seen.add(addr)
@@ -340,7 +343,7 @@ class RbhXMonitor:
         if len(self._seen) > 50_000:
             self._seen = set(list(self._seen)[-25_000:])
         try:
-            await self._handle(addr, symbol, name, dex, source)
+            await self._handle(addr, symbol, name, dex, source, tx)
         except Exception as exc:  # noqa: BLE001
             # Warning, not debug: a launch lost here is indistinguishable from
             # one that never had a link, and the two want opposite fixes.
@@ -348,7 +351,7 @@ class RbhXMonitor:
                         f"{type(exc).__name__}: {exc}")
 
     async def _handle(self, addr: str, symbol: str, name: str, dex: str,
-                      source: str) -> None:
+                      source: str, tx: str = "") -> None:
         fields: list[str] = []
         for _name, selector in _METADATA_SELECTORS:
             try:
@@ -376,7 +379,20 @@ class RbhXMonitor:
         # established by the launchpad, not a link they typed.
         handle = handle_from_proof(fields)
         proved = bool(handle)
-        dev = dev_wallet_from_proof(fields)
+        dev, first_buy = await self._launch_buy(tx)
+        # The signed proof names the same wallet where both exist; it is the
+        # better source, so it wins when it is there.
+        dev = dev_wallet_from_proof(fields) or dev
+
+        # Decided here, not two minutes later: on this chain the deployer
+        # usually buys inside the launch transaction itself (`launchAndBuy`),
+        # which is already mined before any subscription of ours could see it.
+        # A launch that takes this much of its own supply is never recorded.
+        if config.RBHX_DEV_BUY_MAX_ETH > 0 and first_buy > config.RBHX_DEV_BUY_MAX_ETH:
+            log.info(f"[RBHX] {symbol or addr[:10]} skipped — its deployer bought "
+                     f"{first_buy:.4f} ETH of it in the launch itself "
+                     f"(limit {config.RBHX_DEV_BUY_MAX_ETH})")
+            return
         if not handle:
             link = find_x_link(fields)
             if not link:
@@ -428,7 +444,7 @@ class RbhXMonitor:
             # inside the window. None = there was no proof to read it from, so
             # the question cannot be asked of this launch.
             "dev_wallet": dev or None,
-            "dev_buy_eth": 0.0 if dev else None,
+            "dev_buy_eth": round(first_buy, 4) if dev else None,
             "verified": prof.verified,
             "verified_type": prof.verified_type,
             "followers": prof.followers,
@@ -456,13 +472,42 @@ class RbhXMonitor:
         # page in about a second, and a deployer that buys its own supply is
         # taken off it when that becomes visible.
         if dev and config.RBHX_DEV_BUY_MAX_ETH > 0:
-            asyncio.create_task(self._watch_dev_buy(addr, dev, row["symbol"]),
-                                name=f"rbhx-devbuy-{addr[:10]}")
+            asyncio.create_task(
+                self._watch_dev_buy(addr, dev, row["symbol"], first_buy),
+                name=f"rbhx-devbuy-{addr[:10]}")
         await self._notify(row)
 
-    async def _watch_dev_buy(self, addr: str, dev: str, symbol: str) -> None:
+    async def _launch_buy(self, tx: str) -> tuple[str, float]:
+        """(deployer, ETH it paid) from the launch transaction.
+
+        Its sender is the human who launched the token — checked against the
+        wallet in the signed proof, where a launchpad writes one, and they
+        match. So this gives the dev-buy check a wallet even on launchpads
+        that write no proof at all, which is most of them.
+
+        Its value is the buy-in: a deployer that wants supply attaches ETH to
+        the same call that mints the token.
+        """
+        if not tx:
+            return "", 0.0
+        try:
+            info = await self._detector.provider.rpc(
+                "eth_getTransactionByHash", [tx], timeout=8.0)
+        except Exception:  # noqa: BLE001
+            return "", 0.0
+        if not info:
+            return "", 0.0
+        return ((info.get("from") or "").lower(),
+                int(info.get("value") or "0x0", 16) / 1e18)
+
+    async def _watch_dev_buy(self, addr: str, dev: str, symbol: str,
+                             already: float = 0.0) -> None:
         """Add up what the deployer spends on its own token, and drop the row
         if it goes past the limit.
+
+        The launch transaction is already counted by the caller — this covers
+        what comes after it, like the deployer buying from a second call
+        seconds later.
 
         One subscription, filtered to Transfer(*, dev) on this token alone, so
         it costs nothing until that exact wallet receives that exact token. The
@@ -474,7 +519,9 @@ class RbhXMonitor:
             log.warning(f"[RBHX] dev-buy watch skipped for {symbol} — {_MAX_DEV_WATCHES} already running")
             return
         provider = self._detector.provider
-        spent = 0.0
+        # Starts from what the launch transaction already paid, so a deployer
+        # that buys a little at launch and more a minute later is added up.
+        spent = already
         seen_tx: set[str] = set()
 
         async def on_transfer(log_obj: dict) -> None:
