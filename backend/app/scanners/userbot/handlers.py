@@ -31,6 +31,50 @@ from .common import (DEST_DEXS, DEST_IC, DEST_OTTO, DEST_PREMIUM_ALL,
                      SOURCE_OTTO, log)
 from .sending import safe_send
 
+# Forward failures a text copy can stand in for.
+#
+#   noforwards / can't do that operation  the group forbids forwarding
+#   invalid                               a malformed peer
+#   from_peer must be given               Telethon could not resolve the source
+#                                         chat's input entity for this message,
+#                                         so its own forward_to() had nothing to
+#                                         name as the sender
+#
+# The last one is why this is a list rather than two strings: it fell through to
+# a bare log line, and that message was mirrored nowhere at all.
+_COPYABLE_FORWARD_ERRORS = ("noforwards", "can't do that operation", "invalid",
+                            "from_peer must be given")
+
+
+def _can_copy(exc: Exception) -> bool:
+    err = str(exc).lower()
+    return any(w in err for w in _COPYABLE_FORWARD_ERRORS)
+
+
+async def _source_title(event, bare: int) -> str:
+    """The source group's name, for a copied message.
+
+    Telegram first, then the name the dashboard already stored. That order
+    matters for the from_peer case: the lookup that just failed is the same one
+    a title needs, so the stored name is what saves the copy.
+    """
+    try:
+        chat = await event.get_chat()
+        title = getattr(chat, "title", None) or getattr(chat, "username", None)
+        if title:
+            return str(title)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from .store import col
+        row = await col("premium_groups").find_one(
+            {"id": {"$in": [bare, -bare, int(f"-100{bare}")]}}, {"name": 1})
+        if row and row.get("name"):
+            return str(row["name"])
+    except Exception:  # noqa: BLE001
+        pass
+    return f"group {bare}"
+
 
 class HandlersMixin:
     def _register_handlers(self) -> None:
@@ -139,24 +183,22 @@ class HandlersMixin:
                 await safe_send(DEST_PREMIUM_ALL, lambda: event.forward_to(DEST_PREMIUM_ALL),
                                 self._limiter, "PREMIUM-ALL")
             except Exception as exc:
-                err = str(exc)
-                if "noforwards" in err or "can't do that operation" in err or "invalid" in err.lower():
-                    text = event.raw_text or ""
-                    if text:
-                        try:
-                            chat = await event.get_chat()
-                            source = getattr(chat, "title", "Unknown")
-                            await safe_send(
-                                DEST_PREMIUM_ALL,
-                                lambda: self._client.send_message(DEST_PREMIUM_ALL, f"📢 {source}\n\n{text}"),
-                                self._limiter, "PREMIUM-ALL",
-                            )
-                        except Exception as exc2:  # noqa: BLE001
-                            # Last resort for a no-forwards group failed too, so
-                            # this message is not mirrored anywhere. Identical
-                            # repeats are collapsed by the log dedup filter.
-                            log.warning(f"[PREMIUM-ALL] copy fallback failed for "
-                                        f"chat {event.chat_id}: {exc2}")
+                text = event.raw_text or ""
+                if _can_copy(exc) and text:
+                    try:
+                        source = await _source_title(event, bare)
+                        await safe_send(
+                            DEST_PREMIUM_ALL,
+                            lambda: self._client.send_message(
+                                DEST_PREMIUM_ALL, f"📢 {source}\n\n{text}"),
+                            self._limiter, "PREMIUM-ALL",
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        # The copy failed too, so this message is mirrored
+                        # nowhere. Identical repeats are collapsed by the log
+                        # dedup filter.
+                        log.warning(f"[PREMIUM-ALL] copy fallback failed for "
+                                    f"chat {event.chat_id}: {exc2}")
                 else:
                     log.error(f"[PREMIUM-ALL] Forward error: {exc}")
 
@@ -170,23 +212,20 @@ class HandlersMixin:
                 await safe_send(DEST_IC, lambda: event.forward_to(DEST_IC),
                                 self._limiter, "IC")
             except Exception as exc:
-                err = str(exc)
-                # Same no-forwards fallback PREMIUM-ALL has: a group with
-                # forwarding restricted still gets its text through, just
-                # without the "forwarded from" header Telegram will not give us.
-                if "noforwards" in err or "can't do that operation" in err or "invalid" in err.lower():
-                    body = event.raw_text or ""
-                    if body:
-                        try:
-                            chat = await event.get_chat()
-                            src = getattr(chat, "title", "Unknown")
-                            await safe_send(
-                                DEST_IC,
-                                lambda: self._client.send_message(DEST_IC, f"⭐ {src}\n\n{body}"),
-                                self._limiter, "IC",
-                            )
-                        except Exception as exc2:  # noqa: BLE001
-                            log.warning(f"[IC] copy fallback failed for chat {event.chat_id}: {exc2}")
+                # Same fallback PREMIUM-ALL has: a message that cannot be
+                # forwarded still gets its text through, just without the
+                # "forwarded from" header Telegram will not give us.
+                body = event.raw_text or ""
+                if _can_copy(exc) and body:
+                    try:
+                        src = await _source_title(event, bare)
+                        await safe_send(
+                            DEST_IC,
+                            lambda: self._client.send_message(DEST_IC, f"⭐ {src}\n\n{body}"),
+                            self._limiter, "IC",
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        log.warning(f"[IC] copy fallback failed for chat {event.chat_id}: {exc2}")
                 else:
                     log.error(f"[IC] Forward error: {exc}")
 
