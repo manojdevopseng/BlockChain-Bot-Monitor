@@ -87,6 +87,17 @@ _LOOKUP_GATE = asyncio.Semaphore(2)
 _X_RETRIES = 2
 _X_RETRY_DELAY = 3.0
 
+# Launchpad alerts are paced; the X Monitor's are not. That panel takes a
+# handful of launches a day, this one took 23 in four minutes — and Telegram
+# starts answering 429 at around twenty messages a minute to one group. So the
+# launchpad alerts queue up and leave one at a time, which costs a few seconds
+# of delay and never costs the group a flood ban.
+_PAD_ALERT_INTERVAL = 4.0
+# A backlog this long means launches are arriving faster than Telegram will
+# take them for minutes on end. The oldest are dropped rather than delivered
+# ten minutes stale, and the panel has them all regardless.
+_PAD_ALERT_BACKLOG = 60
+
 
 def _col(name: str):
     from app import db
@@ -226,6 +237,10 @@ class RbhXMonitor:
         self._seen: set[str] = set()
         self._v2v3 = False
         self._dev_watches = 0
+        # Launchpad alerts leave one at a time; the pump starts with the first
+        # one rather than at boot, so a run with the panel off never has it.
+        self._pad_alerts: asyncio.Queue = asyncio.Queue(maxsize=_PAD_ALERT_BACKLOG)
+        self._pad_pump: Optional[asyncio.Task] = None
         # Built in run(), not here: OnChainDetector registers its subscriptions
         # in __init__, so which of V2/V3/V4 it watches has to be decided before
         # it exists — and that comes from a switch read at start.
@@ -555,6 +570,7 @@ class RbhXMonitor:
         }
 
         # ── the Launchpad Monitor: every launch, account or not ──────────────
+        pad_row = None
         if pad is not None and self._on("launchpad_monitor"):
             row = {**shared, "launchpad": pad.id, "launchpad_label": pad.label,
                    "website": (launch.website if launch is not None else ""),
@@ -567,6 +583,7 @@ class RbhXMonitor:
             log.info(f"[PAD-{pad.id.upper()}] {row['symbol']}"
                      + (f" — @{handle}" if handle else " — no X account")
                      + (f" ({prof.followers:,} followers)" if got_profile else ""))
+            pad_row = row
 
         # ── the X Monitor: only launches with an account we could read ───────
         # A handle taken out of a post link does not belong here: that panel
@@ -575,9 +592,9 @@ class RbhXMonitor:
         if handle_source == "post":
             log.info(f"[RBHX] {shared['symbol']} — @{handle} came from a post link, "
                      "launchpad panel only")
-        if handle and got_profile and not skipped and handle_source != "post":
-            if self._on("rbhx_verified_only", False) and not prof.verified:
-                return
+        x_alerted = False
+        if (handle and got_profile and not skipped and handle_source != "post"
+                and not (self._on("rbhx_verified_only", False) and not prof.verified)):
             await _col("rbhx_tokens").update_one({"address": addr},
                                                  {"$set": shared}, upsert=True)
             from app.ws_hub import hub
@@ -588,6 +605,14 @@ class RbhXMonitor:
                      f"{', proved' if proved else ''})"
                      f"{' · WATCHED' if watched else ''}")
             await self._notify(shared)
+            x_alerted = self._on("rbhx_telegram")
+
+        # Both panels post to the same chat, so a launch that lands in both
+        # would otherwise arrive twice. The X Monitor's alert is the one that
+        # goes out; this covers everything it does not take — no account, an
+        # account taken from a post link, or the panel switched off.
+        if pad_row is not None and not x_alerted:
+            self._notify_pad(pad_row)
 
         # Published now, judged over the next window: the launch is on the page
         # in about a second, and a deployer that buys more of its own supply
@@ -712,6 +737,37 @@ class RbhXMonitor:
         symbol, name = await asyncio.gather(one("0x95d89b41"), one("0x06fdde03"))
         return symbol.strip().upper(), name.strip()
 
+    def _notify_pad(self, row: dict) -> None:
+        """Queue a Launchpad Monitor alert. Same chat as the X Monitor.
+
+        Queued rather than sent: see _PAD_ALERT_INTERVAL. Nothing here awaits,
+        so a launch is never held up by Telegram.
+        """
+        if not self._on("launchpad_telegram") or not config.DEST_RBH_X_MONITOR:
+            return
+        if self._pad_pump is None or self._pad_pump.done():
+            self._pad_pump = asyncio.create_task(self._pad_alert_pump(),
+                                                 name="rbhx-pad-alerts")
+        try:
+            self._pad_alerts.put_nowait(row)
+        except asyncio.QueueFull:
+            log.warning(f"[PAD] alert backlog full — {row['symbol']} not sent")
+
+    async def _pad_alert_pump(self) -> None:
+        """One queued launchpad alert every _PAD_ALERT_INTERVAL seconds."""
+        while True:
+            row = await self._pad_alerts.get()
+            try:
+                if not await notifier.send_to(config.DEST_RBH_X_MONITOR,
+                                              _pad_alert_text(row),
+                                              buttons=_pad_alert_buttons(row)):
+                    log.warning(f"[PAD] alert not delivered for {row['symbol']}")
+            except Exception as exc:  # noqa: BLE001
+                # The pump outliving one bad message matters more than the
+                # message: if it dies, every later alert is silently lost.
+                log.warning(f"[PAD] alert failed for {row.get('symbol')}: {exc}")
+            await asyncio.sleep(_PAD_ALERT_INTERVAL)
+
     async def _notify(self, row: dict) -> None:
         if not self._on("rbhx_telegram") or not config.DEST_RBH_X_MONITOR:
             return
@@ -736,6 +792,48 @@ class RbhXMonitor:
         ) if b[1]]
         if not await notifier.send_to(config.DEST_RBH_X_MONITOR, text, buttons=buttons):
             log.warning(f"[RBHX] alert not delivered for {row['symbol']}")
+
+
+def _pad_alert_text(row: dict) -> str:
+    """A Launchpad Monitor alert, shaped like the X Monitor's.
+
+    The differences are the ones between the panels: which launchpad minted it
+    leads, and the account may be missing, unread, or taken from a post link —
+    all three say so rather than showing a blank line.
+    """
+    import html
+    pad = html.escape(row.get("launchpad_label") or row.get("launchpad") or "?")
+    handle, source = row.get("handle"), row.get("handle_source")
+    if handle:
+        who = (f"👤 @{html.escape(handle)}"
+               + (" ✅" if row.get("verified") else "")
+               + (" 🔒" if row.get("proved") else "")
+               + (" · from a post" if source == "post" else "") + "\n"
+               + (f"👥 {row['followers']:,} followers\n"
+                  if row.get("followers") else ""))
+    else:
+        who = "👤 no X account named\n"
+    dev = row.get("dev_buy_eth")
+    return (
+        ("👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
+        + f"🚀 <b>{pad.upper()} LAUNCH</b>\n"
+        f"➖➖➖➖➖➖➖➖➖➖\n"
+        f"🪙 <b>{html.escape(row.get('symbol') or '?')}</b>"
+        + (f" — {html.escape(row['name'])}" if row.get("name") else "") + "\n"
+        + who
+        + (f"💰 dev bought {dev:.3f} Ξ\n" if dev else "")
+        + (f"\n<blockquote>{html.escape(row['excerpt'][:300])}</blockquote>\n"
+           if row.get("excerpt") else "")
+        + f"\n<code>{html.escape(row.get('address') or '')}</code>"
+    )
+
+
+def _pad_alert_buttons(row: dict) -> list[tuple[str, str]]:
+    return [b for b in (
+        ("📊 GMGN", gmgn_url("rbh", row.get("address") or "")),
+        ("𝕏 Profile", row.get("link") or ""),
+        ("🌐 Website", row.get("website") or ""),
+    ) if b[1]]
 
 
 def _utc_now():

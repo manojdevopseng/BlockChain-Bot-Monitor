@@ -107,6 +107,11 @@ DEFAULT_SERVICES: list[dict] = [
     # line and nothing else. Off means its launches are not read at all — the
     # worker returns before any eth_call, so a launchpad you do not care about
     # costs nothing.
+    # Its own switch, separate from the X Monitor's: both post to the same
+    # chat and this one is much the louder of the two, so it is the one you
+    # turn off when the group gets busy.
+    {"id": "launchpad_telegram", "category": RBHX, "label": "— Telegram Alerts",
+     "chain": "rbh", "enabled": True},
     {"id": "launchpad_pons",   "category": RBHX, "label": "— Pons launches",
      "chain": "rbh", "enabled": True},
     {"id": "launchpad_flap",   "category": RBHX, "label": "— Flap launches",
