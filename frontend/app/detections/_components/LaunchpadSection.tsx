@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, Globe, Rocket, RefreshCw, Trash2, Twitter } from "lucide-react";
+import { ExternalLink, Eye, Globe, Rocket, RefreshCw, Trash2, Twitter, UserMinus } from "lucide-react";
 import { mutate } from "swr";
 import { useApi, apiSend } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
@@ -13,6 +13,7 @@ import { Badge, Variant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
+import { HandleList } from "@/components/HandleList";
 import { fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 
 /* Robinhood Launchpad Monitor.
@@ -39,6 +40,7 @@ export function LaunchpadSection() {
   const [minF, setMinF] = useState("");
   const [withX, setWithX] = useState(false);
   const [date, setDate] = useState("");
+  const [lists, setLists] = useState(false);
   const query = useDebounced(q);
 
   // The tabs come from the backend, not a list typed in here: a launchpad
@@ -89,6 +91,10 @@ export function LaunchpadSection() {
         <Button size="sm" variant="outline" onClick={() => mutate(key)} title="Refresh now">
           <RefreshCw size={13} />
         </Button>
+        <Button size="sm" variant={lists ? "primary" : "outline"}
+                onClick={() => setLists((v) => !v)} title="Skip and watch lists">
+          <Eye size={13} /> Lists
+        </Button>
       </>}
     >
       <p className="mb-3 text-xs text-text-dim">
@@ -112,6 +118,19 @@ export function LaunchpadSection() {
           </span></>
         ) : null}
       </p>
+
+      {/* This panel's own two lists — the same widget the X Monitor uses, over
+          its own entries. Adding an account here does not touch that one. */}
+      {lists && (
+        <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <HandleList base="/api/launchpad" kind="skip" title="Skip list"
+            icon={<UserMinus size={12} />}
+            hint="New launches from these accounts are not recorded. Rows already on the page stay." />
+          <HandleList base="/api/launchpad" kind="watch" title="Watch list"
+            icon={<Eye size={12} />}
+            hint="Launches from these accounts are flagged 👁 here and in the Telegram alert." />
+        </div>
+      )}
 
       <TableScroll>
         <table className="w-full min-w-[1000px] text-sm">

@@ -120,6 +120,12 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "Flap launches", "chain": "rbh", "enabled": True},
     {"id": "launchpad_pools",  "category": RBHX, "group": "Launchpad Monitor",
      "label": "Pools.trade launches", "chain": "rbh", "enabled": True},
+    # This panel's own two lists, separate from the X Monitor's above: same
+    # feature, same rules, its own entries.
+    {"id": "launchpad_skip",   "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Skip List (ignored usernames)", "chain": "rbh", "enabled": True},
+    {"id": "launchpad_watch",  "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Watch List (followed usernames)", "chain": "rbh", "enabled": True},
 
     # One socket serves both panels, so this switch is in neither block: it
     # stops both, and it is the one thing here that is not about what to

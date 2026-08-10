@@ -577,7 +577,20 @@ class RbhXMonitor:
         # ── the Launchpad Monitor: every launch, account or not ──────────────
         pad_row = None
         if pad is not None and self._on("launchpad_monitor"):
+            # This panel's own two lists, read here rather than above so the
+            # queries only happen for a launch it is going to record. The X
+            # Monitor's lists are separate and are not consulted.
+            pad_skipped = bool(handle and self._on("launchpad_skip")
+                               and await _col("launchpad_skip").find_one(
+                                   {"handle": handle.lower()}))
+            if pad_skipped:
+                log.info(f"[PAD-{pad.id.upper()}] {symbol or addr[:10]} skipped — "
+                         f"@{handle} is on the launchpad skip list")
+            pad_watched = bool(not pad_skipped and handle and self._on("launchpad_watch")
+                               and await _col("launchpad_watch").find_one(
+                                   {"handle": handle.lower()}))
             row = {**shared, "launchpad": pad.id, "launchpad_label": pad.label,
+                   "watched": pad_watched,
                    # Text here is the account's own bio, not the token's
                    # description. The description is whatever the deployer typed
                    # about their own coin — "The Family", "the best dog coin" —
@@ -589,15 +602,17 @@ class RbhXMonitor:
                    "excerpt": ((prof.bio if got_profile else "") or "")[:200],
                    "website": (launch.website if launch is not None else ""),
                    "image": (launch.image if launch is not None else "")}
-            await _col("launchpad_tokens").update_one({"address": addr},
-                                                      {"$set": row}, upsert=True)
-            from app.ws_hub import hub
-            await hub.broadcast("launchpad_token",
-                                {k: v for k, v in row.items() if k != "dt"})
-            log.info(f"[PAD-{pad.id.upper()}] {row['symbol']}"
-                     + (f" — @{handle}" if handle else " — no X account")
-                     + (f" ({prof.followers:,} followers)" if got_profile else ""))
-            pad_row = row
+            if not pad_skipped:
+                await _col("launchpad_tokens").update_one({"address": addr},
+                                                          {"$set": row}, upsert=True)
+                from app.ws_hub import hub
+                await hub.broadcast("launchpad_token",
+                                    {k: v for k, v in row.items() if k != "dt"})
+                log.info(f"[PAD-{pad.id.upper()}] {row['symbol']}"
+                         + (f" — @{handle}" if handle else " — no X account")
+                         + (f" ({prof.followers:,} followers)" if got_profile else "")
+                         + (" · WATCHED" if pad_watched else ""))
+                pad_row = row
 
         # ── the X Monitor: only launches with an account we could read ───────
         # A handle taken out of a post link does not belong here: that panel

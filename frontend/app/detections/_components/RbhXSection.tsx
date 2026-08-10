@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, Eye, RefreshCw, Trash2, Twitter, UserMinus, X } from "lucide-react";
+import { ExternalLink, Eye, RefreshCw, Trash2, Twitter, UserMinus } from "lucide-react";
 import { mutate } from "swr";
 import { useApi, apiSend } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
+import { HandleList } from "@/components/HandleList";
 import { fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 
 /* Robinhood — X — Token Monitor.
@@ -20,75 +21,6 @@ import { fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
  * Same columns and the same Age/Timestamp pair as AI Narrative's X Links, on
  * purpose: it answers the same question on a different chain, and two panels
  * that read differently for the same thing is a tax on whoever reads both. */
-
-type Entry = { handle: string; note: string; added_at: number; expires_in_days: number };
-
-/** Skip and Watch are the same widget twice — one list of @usernames each,
- *  add and remove, with what each list does written on it. */
-function HandleList({ kind, title, hint, icon }: {
-  kind: "skip" | "watch";
-  title: string;
-  hint: string;
-  icon: React.ReactNode;
-}) {
-  const path = `/api/rbhx/${kind}`;
-  const { data } = useApi<any>(path);
-  const [val, setVal] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const items: Entry[] = data?.items ?? [];
-
-  async function add() {
-    const handle = val.trim();
-    if (!handle) return;
-    setBusy(true); setErr("");
-    try {
-      await apiSend(path, "POST", { handle });
-      setVal("");
-      mutate(path);
-    } catch (e: any) {
-      setErr(e?.message || "could not add that username");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(handle: string) {
-    await apiSend(`${path}/${handle}`, "DELETE");
-    mutate(path);
-  }
-
-  return (
-    <div className="rounded-lg border border-border-soft p-3">
-      <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-text">
-        {icon} {title}
-        <Badge variant="gray">{items.length}</Badge>
-      </div>
-      <p className="mb-2 text-[11px] text-text-dim">{hint}</p>
-      <div className="mb-2 flex gap-1.5">
-        <Input value={val} onChange={(e) => setVal(e.target.value)}
-               onKeyDown={(e) => e.key === "Enter" && add()}
-               placeholder="@username" className="h-7 text-xs" />
-        <Button size="sm" onClick={add} disabled={busy}>Add</Button>
-      </div>
-      {err && <div className="mb-2 text-[11px] text-accent-red">{err}</div>}
-      <div className="flex flex-wrap gap-1">
-        {items.map((e) => (
-          <span key={e.handle}
-                title={`expires in ${e.expires_in_days} days unless removed sooner`}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-white/5 px-2 py-0.5 text-[11px] text-text-muted">
-            @{e.handle}
-            <span className="text-text-dim">{e.expires_in_days}d</span>
-            <button onClick={() => remove(e.handle)} className="hover:text-accent-red">
-              <X size={10} />
-            </button>
-          </span>
-        ))}
-        {items.length === 0 && <span className="text-[11px] text-text-dim">empty</span>}
-      </div>
-    </div>
-  );
-}
 
 export function RbhXSection() {
   const [q, setQ] = useState("");
@@ -150,9 +82,9 @@ export function RbhXSection() {
 
       {lists && (
         <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <HandleList kind="skip" title="Skip list" icon={<UserMinus size={12} />}
+          <HandleList base="/api/rbhx" kind="skip" title="Skip list" icon={<UserMinus size={12} />}
             hint="New tokens from these accounts are not recorded. Rows already on the page stay." />
-          <HandleList kind="watch" title="Watch list" icon={<Eye size={12} />}
+          <HandleList base="/api/rbhx" kind="watch" title="Watch list" icon={<Eye size={12} />}
             hint="Tokens from these accounts are flagged 👁 here and in the Telegram alert." />
         </div>
       )}

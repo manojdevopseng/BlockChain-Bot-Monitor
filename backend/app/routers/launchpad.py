@@ -13,7 +13,7 @@ import re
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db, registry
 from ..scanners import launchpads, scfg
@@ -101,6 +101,9 @@ async def stats():
     today = ist_date_str(time.time())
     return {
         "total": await col.count_documents({}),
+        "watched": await col.count_documents({"watched": True}),
+        "skip_entries": await db.get_collection("launchpad_skip").count_documents({}),
+        "watch_entries": await db.get_collection("launchpad_watch").count_documents({}),
         "today": await col.count_documents({"day": today}),
         "with_x": await col.count_documents({"handle": {"$ne": None}}),
         "per_pad": {pad.id: await col.count_documents({"launchpad": pad.id})
@@ -120,3 +123,69 @@ async def delete_token(address: str):
     if not res.deleted_count:
         raise HTTPException(404, f"no row for {address}")
     return {"address": address, "removed": True}
+
+
+# ── The two username lists ─────────────────────────────────────────────────────
+#
+# The same feature the X Monitor has, with its own entries: skip drops an
+# account's future launches, watch marks them. Separate collections on purpose —
+# editing one panel's list must not edit the other's.
+#
+# Both expire on their own after LAUNCHPAD_RETENTION_DAYS, through the same TTL
+# index every other collection here uses: a list you stop maintaining stops
+# shaping the panel rather than silencing an account forever.
+
+# X handles are 1-15 of [A-Za-z0-9_]. Anything else is a typo, not a handle.
+_HANDLE_RE = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
+
+
+def _clean_handle(value) -> str:
+    m = _HANDLE_RE.match(str(value or "").strip())
+    if not m:
+        raise HTTPException(400, f"{value!r} is not an X username — 1-15 letters, "
+                                 "digits or underscore, with or without the @")
+    return m.group(1).lower()
+
+
+def _list_col(kind: str):
+    if kind not in ("skip", "watch"):
+        raise HTTPException(404, f"unknown list '{kind}'")
+    return db.get_collection(f"launchpad_{kind}")
+
+
+@router.get("/{kind}")
+async def list_entries(kind: str):
+    rows = await _list_col(kind).find({}).sort("added_at", -1).to_list(1000)
+    now = time.time()
+    days = scfg.LAUNCHPAD_RETENTION_DAYS
+    return {"items": [{
+        "handle": r.get("handle"),
+        "note": r.get("note") or "",
+        "added_at": r.get("added_at"),
+        # Shown rather than left to be worked out: the point of the TTL is that
+        # it is visible when an entry is about to stop applying.
+        "expires_in_days": max(0, round(days - (now - (r.get("added_at") or now)) / 86400, 1)),
+    } for r in rows]}
+
+
+@router.post("/{kind}")
+async def add_entry(kind: str, payload: dict = Body(...)):
+    handle = _clean_handle(payload.get("handle"))
+    now = time.time()
+    await _list_col(kind).update_one(
+        {"handle": handle},
+        {"$set": {"handle": handle, "note": str(payload.get("note") or "")[:200],
+                  # Re-adding restarts the clock, which is what "I still want
+                  # this" means.
+                  "added_at": now, "dt": datetime.utcnow()}},
+        upsert=True,
+    )
+    return {"handle": handle, "kind": kind, "added": True}
+
+
+@router.delete("/{kind}/{handle}")
+async def remove_entry(kind: str, handle: str):
+    res = await _list_col(kind).delete_one({"handle": _clean_handle(handle)})
+    if not res.deleted_count:
+        raise HTTPException(404, f"@{handle} is not on the {kind} list")
+    return {"handle": handle, "kind": kind, "removed": True}
