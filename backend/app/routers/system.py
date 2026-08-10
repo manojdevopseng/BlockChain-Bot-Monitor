@@ -130,7 +130,10 @@ async def services():
         st = states.get(s["id"], {"status": "unknown", "reason": "", "depends_on": None})
         out.append({
             "id": s["id"],
-            "label": s["label"],
+            # This list is flat, where Settings draws a heading per group — so
+            # the label carries the group here, or two panels both showing
+            # "Telegram Alerts" would be indistinguishable.
+            "label": (f"{s['group']} — {s['label']}" if s.get("group") else s["label"]),
             "category": s["category"],
             "enabled": s["enabled"],
             "status": st["status"],

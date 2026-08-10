@@ -14,23 +14,41 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { CredentialsManager } from "@/components/features/CredentialsManager";
 
-type Svc = { id: string; label: string; enabled: boolean; category: string };
+type Svc = { id: string; label: string; enabled: boolean; category: string;
+             // Optional sub-heading inside a section. Set in the registry, so
+             // a section that wants blocks gets them and one that does not is
+             // unchanged.
+             group?: string | null };
 
 const CAT = {
   bot: { title: "Bots", icon: Bot, desc: "Enable or disable each bot / signal source" },
   ai: { title: "AI", icon: Brain, desc: "The narrative agent, its feed, and what it is asked" },
   chain: { title: "Chains", icon: Link2, desc: "Turn a whole chain on or off" },
   rpc: { title: "RPCs", icon: Radio, desc: "Toggle individual RPC endpoints" },
-  // Its own section rather than six more switches in Bots: they belong to one
-  // feature and are only understandable together.
-  rbhx: { title: "Robinhood — X — Token Monitor", icon: Twitter,
-          desc: "Who is behind a Robinhood launch, read off the token's own metadata" },
+  // Its own section rather than eleven more switches in Bots: they belong to
+  // one feature and are only understandable together. Two panels share it, so
+  // it is drawn in blocks — see `group` on Svc.
+  rbhx: { title: "Robinhood Monitors", icon: Twitter,
+          desc: "Who is behind a Robinhood launch, read off the token's own metadata. "
+              + "Two panels, one socket — each block is one of them." },
 };
 
 function ServiceGroup({ cat, items }: { cat: keyof typeof CAT; items: Svc[] }) {
   const meta = CAT[cat];
   const Icon = meta.icon;
   const [busy, setBusy] = useState<string | null>(null);
+
+  // One block per group, in the order the registry lists them — the registry
+  // is where "which panel does this switch belong to" is already decided, so
+  // it is not decided a second time here. No groups means one nameless block,
+  // which renders as the flat list every other section has always been.
+  const blocks: [string, Svc[]][] = [];
+  for (const s of items) {
+    const title = s.group || "";
+    const last = blocks[blocks.length - 1];
+    if (last && last[0] === title) last[1].push(s);
+    else blocks.push([title, [s]]);
+  }
 
   async function toggle(svc: Svc, enabled: boolean) {
     setBusy(svc.id);
@@ -55,17 +73,35 @@ function ServiceGroup({ cat, items }: { cat: keyof typeof CAT; items: Svc[] }) {
       </CardHeader>
       <CardContent className="space-y-1">
         <p className="mb-3 text-xs text-text-dim">{meta.desc}</p>
-        {items.map((s) => (
-          <div key={s.id} className={cn(
-            "flex items-center justify-between rounded-lg border border-border-soft px-3 py-2.5 transition-colors",
-            s.enabled ? "bg-bg-hover/30" : "bg-transparent"
-          )}>
-            <div className="flex items-center gap-2.5">
-              <span className={cn("h-2 w-2 rounded-full", s.enabled ? "bg-accent-green" : "bg-text-dim")} />
-              <span className={cn("text-sm", s.enabled ? "text-text" : "text-text-muted")}>{s.label}</span>
+        {blocks.map(([title, rows]) => (
+          <div key={title || "_"} className={title ? "pt-2 first:pt-0" : undefined}>
+            {/* Only a section whose registry entries carry a group draws
+                headings — every other section renders exactly as before. */}
+            {title && (
+              <div className="mb-1.5 flex items-baseline justify-between px-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  {title}
+                </span>
+                <span className="text-[10px] text-text-dim">
+                  {rows.filter((s) => s.enabled).length}/{rows.length} on
+                </span>
+              </div>
+            )}
+            <div className="space-y-1">
+              {rows.map((s) => (
+                <div key={s.id} className={cn(
+                  "flex items-center justify-between rounded-lg border border-border-soft px-3 py-2.5 transition-colors",
+                  s.enabled ? "bg-bg-hover/30" : "bg-transparent"
+                )}>
+                  <div className="flex items-center gap-2.5">
+                    <span className={cn("h-2 w-2 rounded-full", s.enabled ? "bg-accent-green" : "bg-text-dim")} />
+                    <span className={cn("text-sm", s.enabled ? "text-text" : "text-text-muted")}>{s.label}</span>
+                  </div>
+                  <Switch checked={s.enabled} disabled={busy === s.id}
+                    onCheckedChange={(v) => toggle(s, v)} />
+                </div>
+              ))}
             </div>
-            <Switch checked={s.enabled} disabled={busy === s.id}
-              onCheckedChange={(v) => toggle(s, v)} />
           </div>
         ))}
       </CardContent>

@@ -76,46 +76,49 @@ DEFAULT_SERVICES: list[dict] = [
     # and record it in the matching Detections panel.
     {"id": "premium_callers_signal","category": BOT, "label": "Premium Callers Signal",
      "chain": "eth", "enabled": True},
-    # ── Robinhood — X — Token Monitor ──────────────────────────────────────
-    # One feature, six switches, because each answers a different question and
-    # you want to change one without the others: is it running, is it on its
-    # own endpoints, do the two username lists apply, does V2/V3 count, and
-    # does it post to Telegram.
-    {"id": "rbhx_monitor",   "category": RBHX, "label": "Robinhood — X — Token Monitor",
-     "chain": "rbh", "enabled": True},
-    {"id": "rbhx_rpc",       "category": RBHX, "label": "RPC Endpoints",
-     "chain": "rbh", "enabled": True},
-    {"id": "rbhx_skip",      "category": RBHX, "label": "Skip List (ignored usernames)",
-     "chain": "rbh", "enabled": True},
-    {"id": "rbhx_watch",     "category": RBHX, "label": "Watch List (followed usernames)",
-     "chain": "rbh", "enabled": True},
-    {"id": "rbhx_v2v3",      "category": RBHX, "label": "Include V2 / V3 pairs",
-     "chain": "rbh", "enabled": False},
-    {"id": "rbhx_telegram",  "category": RBHX, "label": "Telegram Alerts",
-     "chain": "rbh", "enabled": True},
+    # ── Robinhood monitors ─────────────────────────────────────────────────
+    # Eleven switches for two panels that share one worker. `group` is what
+    # keeps them readable: the Settings page draws a block per group in this
+    # order, so which switch belongs to which panel is visible instead of
+    # remembered. The first switch in each block is that panel's own on/off.
+    {"id": "rbhx_monitor",   "category": RBHX, "group": "X Monitor",
+     "label": "Section on / off", "chain": "rbh", "enabled": True},
+    {"id": "rbhx_telegram",  "category": RBHX, "group": "X Monitor",
+     "label": "Telegram Alerts", "chain": "rbh", "enabled": True},
+    {"id": "rbhx_skip",      "category": RBHX, "group": "X Monitor",
+     "label": "Skip List (ignored usernames)", "chain": "rbh", "enabled": True},
+    {"id": "rbhx_watch",     "category": RBHX, "group": "X Monitor",
+     "label": "Watch List (followed usernames)", "chain": "rbh", "enabled": True},
     # Off today: every account is recorded and Min Followers does the filtering.
     # Here so the rule can be tightened later without a code change.
-    {"id": "rbhx_verified_only", "category": RBHX, "label": "Verified accounts only",
-     "chain": "rbh", "enabled": False},
+    {"id": "rbhx_verified_only", "category": RBHX, "group": "X Monitor",
+     "label": "Verified accounts only", "chain": "rbh", "enabled": False},
+    {"id": "rbhx_v2v3",      "category": RBHX, "group": "X Monitor",
+     "label": "Include V2 / V3 pairs", "chain": "rbh", "enabled": False},
+
     # The launchpad-centric panel. Its own switch: it is much higher volume
-    # than the X one and you may want one without the other. Same worker and
-    # same socket either way.
-    {"id": "launchpad_monitor", "category": RBHX, "label": "Robinhood Launchpad Monitor",
-     "chain": "rbh", "enabled": True},
-    # One switch per launchpad, under the master one above. The id is
-    # "launchpad_" + the adapter's own id, so adding Pools.trade is this one
-    # line and nothing else. Off means its launches are not read at all — the
-    # worker returns before any eth_call, so a launchpad you do not care about
-    # costs nothing.
-    # Its own switch, separate from the X Monitor's: both post to the same
-    # chat and this one is much the louder of the two, so it is the one you
-    # turn off when the group gets busy.
-    {"id": "launchpad_telegram", "category": RBHX, "label": "— Telegram Alerts",
-     "chain": "rbh", "enabled": True},
-    {"id": "launchpad_pons",   "category": RBHX, "label": "— Pons launches",
-     "chain": "rbh", "enabled": True},
-    {"id": "launchpad_flap",   "category": RBHX, "label": "— Flap launches",
-     "chain": "rbh", "enabled": True},
+    # than the X one and you may want one without the other.
+    {"id": "launchpad_monitor", "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Section on / off", "chain": "rbh", "enabled": True},
+    # Separate from the X Monitor's: both post to the same chat and this one is
+    # much the louder of the two, so it is the one you turn off when the group
+    # gets busy.
+    {"id": "launchpad_telegram", "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Telegram Alerts", "chain": "rbh", "enabled": True},
+    # One switch per launchpad. The id is "launchpad_" + the adapter's own id,
+    # so adding Pools.trade is this one line and nothing else. Off means its
+    # launches are not read at all — the worker returns before any eth_call, so
+    # a launchpad you do not care about costs nothing.
+    {"id": "launchpad_pons",   "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Pons launches", "chain": "rbh", "enabled": True},
+    {"id": "launchpad_flap",   "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Flap launches", "chain": "rbh", "enabled": True},
+
+    # One socket serves both panels, so this switch is in neither block: it
+    # stops both, and it is the one thing here that is not about what to
+    # record but about whether anything can be read at all.
+    {"id": "rbhx_rpc",       "category": RBHX, "group": "Both sections",
+     "label": "RPC Endpoints", "chain": "rbh", "enabled": True},
 
     # The starred-caller mirror. Its own switch so the filtered feed can be
     # stopped without touching the full one, and the other way round.
@@ -241,6 +244,9 @@ async def seed() -> None:
             changes["category"] = svc["category"]
         if existing.get("label") != svc["label"]:
             changes["label"] = svc["label"]
+        # Same for which block inside the section it sits in.
+        if existing.get("group") != svc.get("group"):
+            changes["group"] = svc.get("group")
         update: dict = {}
         if changes:
             update["$set"] = changes
