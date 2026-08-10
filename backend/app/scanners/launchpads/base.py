@@ -15,8 +15,31 @@ touched.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+def handle_and_kind(link: str) -> tuple[str, str]:
+    """(@name, how it was found) out of an x.com link.
+
+    A post link names its account in the URL, so the handle is there either
+    way — what differs is the strength of the claim. Whether a launchpad
+    accepts that weaker form is its own decision; see `allow_post_handles`.
+
+    It has to be an x.com/twitter.com URL: parse_ref alone would read a bare
+    word as a handle, and these metadata slots are free text — "PEPE" is not
+    an account.
+    """
+    if not link or not re.search(r"(?:x|twitter)\.com/", link, re.I):
+        return "", ""
+    from app import x_client
+    ref = x_client.parse_ref(link)
+    if ref.kind == "profile":
+        return ref.handle, "profile"
+    if ref.kind == "tweet" and ref.handle:
+        return ref.handle, "post"
+    return "", ""
 
 
 @dataclass
@@ -28,6 +51,14 @@ class Launch:
     name: str = ""
     # The X account behind it, when the launchpad records one.
     handle: str = ""
+    # How that handle was obtained, because the two are not equally trustworthy:
+    #   proof    the launchpad watched the deployer sign in to X
+    #   profile  a link to the account itself
+    #   post     a link to one of its tweets — the account is named in the URL,
+    #            which is weaker: anyone can link anyone's tweet
+    # The X Monitor takes the first two; this panel shows all three and says
+    # which is which.
+    handle_source: str = ""
     # True when the launchpad made the deployer prove they own that account,
     # rather than typing a link anyone could type.
     proved: bool = False
@@ -61,6 +92,16 @@ class Launchpad:
     # Several factories per launchpad is normal: Pons runs an active one and a
     # legacy one, and tokens from both are still Pons.
     factories: list[Factory] = []
+    # Record a launch only when it carries an X account. Per launchpad because
+    # they differ in kind: Pons is a few dozen launches a day and worth seeing
+    # whole, while Flap is a bot minting one every few seconds and only the
+    # ones with an account behind them are worth a row.
+    require_handle: bool = False
+    # Whether a handle taken out of a link to one post counts. Off by default,
+    # which is the strict reading: a tweet link is not a claim about who is
+    # behind the launch. Flap turns it on because its twitter field is a post
+    # link nearly every time, so the strict rule empties the column.
+    allow_post_handles: bool = False
 
     async def read(self, provider, address: str, log_obj: dict) -> Launch:
         """Everything this launchpad can tell us about the launch.
@@ -89,6 +130,13 @@ class Launchpad:
             word = data[i * 64:(i + 1) * 64]
         word = (word or "").replace("0x", "")
         return "0x" + word[-40:] if len(word) >= 40 else ""
+
+    def classify(self, link: str) -> tuple[str, str]:
+        """The handle this launchpad is willing to take from a link."""
+        handle, kind = handle_and_kind(link)
+        if kind == "post" and not self.allow_post_handles:
+            return "", ""
+        return handle, kind
 
     @staticmethod
     async def eth_call(provider, to: str, selector: str) -> str:

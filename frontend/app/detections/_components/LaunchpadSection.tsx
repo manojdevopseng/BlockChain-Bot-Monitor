@@ -175,6 +175,15 @@ export function LaunchpadSection() {
                          className="text-xs text-accent-blue hover:underline">@{r.handle}</a>
                       {r.verified && <span title={r.verified_type || "verified"}> ✅</span>}
                       {r.proved && <span title="Ownership proved to the launchpad at launch"> 🔒</span>}
+                      {/* The handle came out of a link to one of that account's
+                          posts, not a link to the account. Weaker, so it is
+                          marked here and kept out of the X Monitor entirely. */}
+                      {r.handle_source === "post" && (
+                        <span className="ml-1 text-[9px] text-text-dim"
+                              title="From a link to one of this account's posts, not to the account itself">
+                          post
+                        </span>
+                      )}
                     </>
                   ) : <span className="text-xs text-text-dim">—</span>}
                 </td>

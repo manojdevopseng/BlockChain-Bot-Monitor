@@ -461,20 +461,26 @@ class RbhXMonitor:
 
         # ── the account behind it ───────────────────────────────────────────
         proved = False
+        handle_source = ""
         if launch is not None:
-            handle = launch.handle
+            handle, handle_source = launch.handle, launch.handle_source
         else:
             handle = handle_from_proof(fields)
             proved = bool(handle)
+            handle_source = "proof" if handle else ""
             if not handle:
                 link = find_x_link(fields)
                 ref = x_client.parse_ref(link) if link else None
                 if ref is not None and ref.kind != "profile":
-                    # A status link. Dropped on purpose: it identifies a post,
-                    # not the account behind the launch.
+                    # A status link. Dropped here on purpose: this path feeds
+                    # the X Monitor, which answers "whose account is behind
+                    # this launch", and a link to somebody's tweet is not an
+                    # answer to it. A launchpad adapter may decide otherwise
+                    # for its own panel.
                     log.info(f"[RBHX] {symbol or addr[:10]} skipped — link is a post, "
                              "not a profile")
-                handle = ref.handle if (ref is not None and ref.kind == "profile") else ""
+                if ref is not None and ref.kind == "profile":
+                    handle, handle_source = ref.handle, "profile"
 
         # Straight off a launchpad event there is no name/symbol yet — the
         # event carries the address and little else.
@@ -505,6 +511,10 @@ class RbhXMonitor:
             if prof.lookup_failed:
                 log.info(f"[RBHX] {symbol or addr[:10]} — X gave no answer for @{handle}")
 
+        # Some launchpads are only worth a row when an account is named.
+        if pad is not None and getattr(pad, "require_handle", False) and not handle:
+            return
+
         watched = bool(handle and self._on("rbhx_watch")
                        and await _col("rbhx_watch").find_one({"handle": handle.lower()}))
         got_profile = bool(prof is not None and not prof.lookup_failed)
@@ -526,6 +536,10 @@ class RbhXMonitor:
             # Two different claims, kept apart: `verified` is X's own tick,
             # `proved` is the launchpad having watched this deployer sign in.
             "proved": proved,
+            # proof / profile / post — see Launch.handle_source. The X Monitor
+            # below takes the first two only; the Launchpad panel shows all
+            # three and marks which.
+            "handle_source": handle_source or None,
             # The deployer's own wallet, and what it spent buying this token.
             "dev_wallet": dev or None,
             "dev_buy_eth": round(first_buy, 4) if dev else None,
@@ -555,7 +569,13 @@ class RbhXMonitor:
                      + (f" ({prof.followers:,} followers)" if got_profile else ""))
 
         # ── the X Monitor: only launches with an account we could read ───────
-        if handle and got_profile and not skipped:
+        # A handle taken out of a post link does not belong here: that panel
+        # answers "whose account is behind this launch", and a link to somebody
+        # else's tweet is not an answer to it.
+        if handle_source == "post":
+            log.info(f"[RBHX] {shared['symbol']} — @{handle} came from a post link, "
+                     "launchpad panel only")
+        if handle and got_profile and not skipped and handle_source != "post":
             if self._on("rbhx_verified_only", False) and not prof.verified:
                 return
             await _col("rbhx_tokens").update_one({"address": addr},

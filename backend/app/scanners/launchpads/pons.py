@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 
 from app.scanners import scfg as config
-from app.scanners.launchpads.base import Factory, Launch, Launchpad
+from app.scanners.launchpads.base import Factory, Launch, Launchpad, handle_and_kind
 
 # TokenCreated. The same signature on both factories — the legacy one is the
 # same contract at an older address.
@@ -43,22 +43,17 @@ def _url_or_blank(value: str) -> str:
 
 
 def handle_of(link: str) -> str:
-    """@name out of an x.com profile link, "" for a link to one post.
-
-    A post link identifies a tweet, not the account behind the launch, which
-    is the only thing worth recording — so it is dropped here rather than
-    stored and filtered later.
-    """
-    if not link:
-        return ""
-    from app import x_client
-    ref = x_client.parse_ref(link)
-    return ref.handle if ref.kind == "profile" else ""
+    """Just the profile case, for callers that want the strict rule."""
+    handle, kind = handle_and_kind(link)
+    return handle if kind == "profile" else ""
 
 
 class Pons(Launchpad):
     id = "pons"
     label = "Pons"
+    # Profile links only, unchanged: Pons was checked end to end and left
+    # alone.
+    allow_post_handles = False
 
     def __init__(self) -> None:
         self.factories = [
@@ -78,7 +73,7 @@ class Pons(Launchpad):
         if fields:
             # Read by shape, not by position: the documented order is X first
             # and website fourth, but one token carried the website in slot 1.
-            out.handle = handle_of(find_x_link(fields))
+            out.handle, out.handle_source = self.classify(find_x_link(fields))
             out.website = next((u for u in (_url_or_blank(f) for f in fields)
                                 if u and "x.com" not in u and "twitter.com" not in u), "")
         text = decode_string_tuple(await self.eth_call(provider, address, _SEL_DESC))

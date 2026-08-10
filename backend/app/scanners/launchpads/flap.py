@@ -46,6 +46,15 @@ _TIMEOUT = aiohttp.ClientTimeout(total=12)
 class Flap(Launchpad):
     id = "flap"
     label = "Flap"
+    # Flap mints constantly — one wallet was seen calling newTokenV6 every few
+    # minutes — so a row per launch is mostly noise. Only the ones naming an X
+    # account are kept.
+    require_handle = True
+    # Its twitter field is a post link nearly every time — four of four live
+    # launches sampled — so the strict rule leaves the Account column empty on
+    # almost every row. The handle is in that URL and is recorded as coming
+    # from a post, which keeps it out of the X Monitor.
+    allow_post_handles = True
 
     def __init__(self) -> None:
         self.factories = [
@@ -55,7 +64,6 @@ class Flap(Launchpad):
         ]
 
     async def read(self, provider, address: str, log_obj: dict) -> Launch:
-        from app.scanners.launchpads.pons import handle_of
         from app.scanners.rbhx_monitor import find_x_link
 
         out = Launch(address=address)
@@ -70,8 +78,14 @@ class Flap(Launchpad):
         meta = await self._metadata(provider, tx, info)
         if not meta:
             return out
-        out.handle = handle_of(find_x_link([str(meta.get("twitter") or ""),
-                                            str(meta.get("x") or "")]))
+        out.handle, out.handle_source = self.classify(
+            find_x_link([str(meta.get("twitter") or ""), str(meta.get("x") or "")]))
+        # The launch transaction is sent by Flap's own minting bot — the same
+        # wallet mints every few minutes — so its sender is not the deployer
+        # and its zero value is not a dev buy. The metadata names the real one.
+        creator = str(meta.get("creator") or "").strip().lower()
+        if re.match(r"^0x[0-9a-fA-F]{40}$", creator):
+            out.dev_wallet = creator
         out.description = str(meta.get("description") or "")
         out.website = str(meta.get("website") or "")
         out.image = str(meta.get("image") or "")
