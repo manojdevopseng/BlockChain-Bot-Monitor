@@ -74,6 +74,12 @@ _TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df52
 # quiet unless that exact wallet receives that exact token, but a socket has
 # to hold them all — the same reason the gas monitor caps its own.
 _MAX_DEV_WATCHES = 120
+# How often the Settings switches are re-read. They were captured once at start
+# and never again, so flipping the skip list, the watch list, Telegram alerts,
+# verified-only or the Launchpad Monitor changed nothing until the worker was
+# restarted — and only three of those restart it. One tiny query a minute buys
+# a switch that means what it says.
+_TOGGLE_REFRESH_SECONDS = 60
 
 # X's own mirrors are free and rate-limited; the same handle turns up across a
 # burst of copycat launches, so the lookups are serialised behind this.
@@ -257,15 +263,39 @@ class RbhXMonitor:
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def apply_toggles(self, enabled: dict[str, bool]) -> None:
-        """Mirror the Settings switches. Called before start and on change.
+        """Mirror the Settings switches. Called before start, on a toggle, and
+        by the refresher below.
 
-        Every switch but V2/V3 is read per message, so flipping one takes
-        effect immediately. V2/V3 changes which subscriptions exist, so it
-        takes effect when the worker is restarted — which the supervisor does
-        on a toggle anyway.
+        Every switch but V2/V3 is read per message, so a change lands on the
+        next launch. V2/V3 decides which subscriptions exist, so that one takes
+        effect when the worker restarts — which the supervisor does for it.
         """
         self._enabled = dict(enabled)
         self._v2v3 = bool(enabled.get("rbhx_v2v3"))
+
+    async def _toggle_refresher(self) -> None:
+        """Keep the switches current without a restart.
+
+        Only rbhx_monitor / rbhx_rpc / rbhx_v2v3 restart this worker, so the
+        rest — both username lists, Telegram alerts, verified-only, the
+        Launchpad Monitor — would otherwise stay at whatever they were when the
+        process started.
+        """
+        from app import registry
+        while True:
+            try:
+                await asyncio.sleep(_TOGGLE_REFRESH_SECONDS)
+                fresh = await registry.enabled_map()
+                # V2/V3 is left alone: changing it here would not add or remove
+                # a subscription, and pretending otherwise is worse than
+                # waiting for the restart the supervisor already does.
+                v2v3 = self._v2v3
+                self.apply_toggles(fresh)
+                self._v2v3 = v2v3
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.debug(f"[RBHX] toggle refresh failed: {exc}")
 
     def _on(self, service: str, default: bool = True) -> bool:
         return bool(self._enabled.get(service, default))
@@ -299,9 +329,12 @@ class RbhXMonitor:
         named = ", ".join(f"{p.label}({len(p.factories)})" for p in pads) or "none"
         log.info(f"[RBHX] started — {pairs} pools, launchpads: {named}, "
                  f"on {which} endpoints ({len(config.RBHX_WSS_ENDPOINTS)} slot(s))")
+        refresher = asyncio.create_task(self._toggle_refresher(),
+                                        name="rbhx-toggles")
         try:
             await self._detector.run()
         finally:
+            refresher.cancel()
             if self._session and not self._session.closed:
                 await self._session.close()
 
