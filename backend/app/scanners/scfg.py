@@ -244,6 +244,8 @@ PONS_FACTORIES = _addr_list(settings.pons_factories)
 # v2 is a separate deployment, not another address for v1 — its own factory,
 # its own event, its own filter tab.
 PONS_V2_FACTORIES = _addr_list(settings.pons_v2_factories)
+# Uniswap's own LiquidityLauncher, which pools.trade launches through.
+POOLS_FACTORIES = _addr_list(settings.pools_factories)
 FLAP_PORTALS   = _addr_list(settings.flap_portals)
 LAUNCHPAD_RETENTION_DAYS = settings.launchpad_retention_days
 RBHX_DEV_BUY_MAX_ETH = settings.rbhx_dev_buy_max_eth

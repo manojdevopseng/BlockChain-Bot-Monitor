@@ -118,6 +118,8 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "Pons V2 launches", "chain": "rbh", "enabled": True},
     {"id": "launchpad_flap",   "category": RBHX, "group": "Launchpad Monitor",
      "label": "Flap launches", "chain": "rbh", "enabled": True},
+    {"id": "launchpad_pools",  "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Pools.trade launches", "chain": "rbh", "enabled": True},
 
     # One socket serves both panels, so this switch is in neither block: it
     # stops both, and it is the one thing here that is not about what to
