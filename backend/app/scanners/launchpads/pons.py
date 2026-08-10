@@ -16,6 +16,8 @@ the metadata to read.
 
 from __future__ import annotations
 
+import re
+
 from app.scanners import scfg as config
 from app.scanners.launchpads.base import Factory, Launch, Launchpad
 
@@ -26,6 +28,18 @@ _TOPIC_CREATED = "0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4
 _SEL_SOCIALS = "0x53cd512a"   # socials() -> (string,string,string,string,string)
 _SEL_LOGO    = "0xfb7f21eb"   # logo()    -> string  (a plain URL, not IPFS)
 _SEL_DESC    = "0x7284e416"   # description() -> string
+
+
+# Pons hands the deployer five free-text slots and does not check them, so
+# whatever ends up in one is whatever they typed. Seen on live launches: a
+# token with "PEPE" in the socials slot, and another with an x.com link in the
+# logo slot. A field is only used as a link when it looks like one.
+_URL = re.compile(r"^(?:https?://|ipfs://|www\.)\S+$", re.I)
+
+
+def _url_or_blank(value: str) -> str:
+    value = (value or "").strip()
+    return value if _URL.match(value) else ""
 
 
 def handle_of(link: str) -> str:
@@ -65,10 +79,13 @@ class Pons(Launchpad):
             # Read by shape, not by position: the documented order is X first
             # and website fourth, but one token carried the website in slot 1.
             out.handle = handle_of(find_x_link(fields))
-            out.website = next((f for f in fields if f.strip()
-                                and "x.com" not in f and "twitter.com" not in f), "")
-        for selector, attr in ((_SEL_DESC, "description"), (_SEL_LOGO, "image")):
-            text = decode_string_tuple(await self.eth_call(provider, address, selector))
-            if text and text[0].strip():
-                setattr(out, attr, text[0].strip())
+            out.website = next((u for u in (_url_or_blank(f) for f in fields)
+                                if u and "x.com" not in u and "twitter.com" not in u), "")
+        text = decode_string_tuple(await self.eth_call(provider, address, _SEL_DESC))
+        if text and text[0].strip():
+            out.description = text[0].strip()
+        logo = decode_string_tuple(await self.eth_call(provider, address, _SEL_LOGO))
+        # Same reason: one launch had its X link in the logo slot, which would
+        # otherwise be handed to the panel as an image source.
+        out.image = _url_or_blank(logo[0] if logo else "")
         return out
