@@ -341,10 +341,11 @@ class Settings(BaseSettings):
     #
     # 0 disables the check and every launch is kept.
     rbhx_dev_buy_max_eth: float = 3.0
-    # How long after a launch the deployer's buying is watched. The first
-    # trades on a measured launch came at +30s, so this has to be long enough
-    # to see them and short enough that the Telegram alert is still news.
-    rbhx_dev_buy_window: int = 120
+    # A ceiling on how long the deployer is watched after a launch, not a
+    # wait: the watch stops the moment a buy lands. The first trades on a
+    # measured launch came at +30s, so this has to outlast that; three minutes
+    # is where it stops being worth a held subscription.
+    rbhx_dev_buy_window: int = 180
 
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"

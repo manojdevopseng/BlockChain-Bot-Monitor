@@ -607,7 +607,8 @@ class RbhXMonitor:
 
         The launch transaction is already counted by the caller — this covers
         what comes after it, like the deployer buying from a second call
-        seconds later.
+        seconds later. It stops the moment such a buy lands, and otherwise
+        gives up after RBHX_DEV_BUY_WINDOW.
 
         One subscription, filtered to Transfer(*, dev) on this token alone, so
         it costs nothing until that exact wallet receives that exact token. The
@@ -623,6 +624,7 @@ class RbhXMonitor:
         # that buys a little at launch and more a minute later is added up.
         spent = already
         seen_tx: set[str] = set()
+        found = asyncio.Event()
 
         async def on_transfer(log_obj: dict) -> None:
             nonlocal spent
@@ -638,7 +640,12 @@ class RbhXMonitor:
                 return
             if not info or (info.get("from") or "").lower() != dev:
                 return      # tokens arriving from elsewhere are not a dev buy
-            spent += int(info.get("value") or "0x0", 16) / 1e18
+            paid = int(info.get("value") or "0x0", 16) / 1e18
+            spent += paid
+            if paid > 0:
+                # A buy, not a free allocation — that is the thing we were
+                # waiting for, so stop waiting.
+                found.set()
 
         sub = None
         self._dev_watches += 1
@@ -647,7 +654,13 @@ class RbhXMonitor:
                 ["logs", {"address": addr,
                           "topics": [_TRANSFER_TOPIC, None, "0x" + "0" * 24 + dev[2:]]}],
                 on_transfer, label=f"RBHX-DEV-{addr[:8]}")
-            await asyncio.sleep(config.RBHX_DEV_BUY_WINDOW)
+            # The window is a ceiling, not a wait: the moment the deployer is
+            # seen buying, the answer is in and holding the subscription open
+            # for another two minutes buys nothing.
+            try:
+                await asyncio.wait_for(found.wait(), timeout=config.RBHX_DEV_BUY_WINDOW)
+            except asyncio.TimeoutError:
+                pass
         except Exception as exc:  # noqa: BLE001
             log.warning(f"[RBHX] dev-buy watch failed for {symbol}: {type(exc).__name__}: {exc}")
             return
