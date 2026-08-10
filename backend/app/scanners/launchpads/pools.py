@@ -34,6 +34,18 @@ from app.scanners.launchpads.pons import _url_or_blank
 
 _TOPIC_CREATED = "0x2e2b3f61b70d2d131b2a807371103cc98d51adcaa5e9a8f9c32658ad8426e74e"
 
+# The token factory every launcher mints through, and the reason it is watched
+# as well: there is more than one LiquidityLauncher. A token launched through
+# 0x0000FffF… was missed while only 0x00004c4c… was configured, and both were
+# live at the time. Watching the factory means a launcher we have never heard
+# of still gets caught, because the token has to be minted somewhere.
+#
+#   TokenCreated(address tokenAddress, (string,string,string,bytes) metadata)
+#
+# Nothing is indexed, so the token is data word 0. Both events fire in the same
+# transaction and the worker's own dedupe keeps that to one row.
+_TOPIC_TOKEN_CREATED = "0x4ef8284ecf42d4cd19686572ffd87f630858c82398911e776cb831de35eddbf4"
+
 _SEL_METADATA = "0x392f37e9"   # metadata() -> (string,string,string,string)
 
 
@@ -50,6 +62,10 @@ class Pools(Launchpad):
             Factory(address=a.lower(), topic0=_TOPIC_CREATED,
                     token_at="t1", label="LiquidityLauncher")
             for a in config.POOLS_FACTORIES if a
+        ] + [
+            Factory(address=a.lower(), topic0=_TOPIC_TOKEN_CREATED,
+                    token_at="d0", label="UERC20Factory")
+            for a in config.POOLS_TOKEN_FACTORIES if a
         ]
 
     async def read(self, provider, address: str, log_obj: dict) -> Launch:

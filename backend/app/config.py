@@ -332,6 +332,7 @@ class Settings(BaseSettings):
     pons_factories: str = ""
     pons_v2_factories: str = ""
     pools_factories: str = ""
+    pools_token_factories: str = ""
     # Flap — docs.flap.sh: the Portal that mints both token implementations.
     flap_portals: str = ""
     # Rows are dropped this many days after they land.
