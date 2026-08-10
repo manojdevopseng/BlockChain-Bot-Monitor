@@ -121,7 +121,7 @@ export function LaunchpadSection() {
               <th className="px-3 py-2.5 font-medium">Account</th>
               <th className="px-3 py-2.5 font-medium">Followers</th>
               <th className="px-3 py-2.5 font-medium">Dev Buy</th>
-              <th className="px-3 py-2.5 font-medium">Text</th>
+              <th className="px-3 py-2.5 font-medium" title="The X account's bio">Text</th>
               <th className="px-3 py-2.5 font-medium">Timestamp</th>
               <th className="px-3 py-2.5 font-medium"></th>
             </tr>

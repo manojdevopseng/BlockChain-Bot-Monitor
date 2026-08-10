@@ -81,8 +81,11 @@ DEFAULT_SERVICES: list[dict] = [
     # keeps them readable: the Settings page draws a block per group in this
     # order, so which switch belongs to which panel is visible instead of
     # remembered. The first switch in each block is that panel's own on/off.
+    # Named in full rather than "Section on / off": both blocks have a master
+    # switch, and two rows reading the same thing is how they got mistaken for
+    # each other.
     {"id": "rbhx_monitor",   "category": RBHX, "group": "X Monitor",
-     "label": "Section on / off", "chain": "rbh", "enabled": True},
+     "label": "Robinhood — X — Token Monitor", "chain": "rbh", "enabled": True},
     {"id": "rbhx_telegram",  "category": RBHX, "group": "X Monitor",
      "label": "Telegram Alerts", "chain": "rbh", "enabled": True},
     {"id": "rbhx_skip",      "category": RBHX, "group": "X Monitor",
@@ -99,7 +102,7 @@ DEFAULT_SERVICES: list[dict] = [
     # The launchpad-centric panel. Its own switch: it is much higher volume
     # than the X one and you may want one without the other.
     {"id": "launchpad_monitor", "category": RBHX, "group": "Launchpad Monitor",
-     "label": "Section on / off", "chain": "rbh", "enabled": True},
+     "label": "Robinhood Launchpad Monitor", "chain": "rbh", "enabled": True},
     # Separate from the X Monitor's: both post to the same chat and this one is
     # much the louder of the two, so it is the one you turn off when the group
     # gets busy.

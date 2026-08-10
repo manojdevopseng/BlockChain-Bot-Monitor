@@ -578,6 +578,15 @@ class RbhXMonitor:
         pad_row = None
         if pad is not None and self._on("launchpad_monitor"):
             row = {**shared, "launchpad": pad.id, "launchpad_label": pad.label,
+                   # Text here is the account's own bio, not the token's
+                   # description. The description is whatever the deployer typed
+                   # about their own coin — "The Family", "the best dog coin" —
+                   # and says nothing you did not already know from the symbol.
+                   # The bio is about the account behind it, which is the
+                   # question this panel exists to answer. It costs no extra
+                   # request: the profile was already fetched for the follower
+                   # count. The description is still stored, just not shown.
+                   "excerpt": ((prof.bio if got_profile else "") or "")[:200],
                    "website": (launch.website if launch is not None else ""),
                    "image": (launch.image if launch is not None else "")}
             await _col("launchpad_tokens").update_one({"address": addr},
