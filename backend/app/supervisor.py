@@ -148,7 +148,13 @@ async def reconcile() -> None:
         want.add("rbh")
     # Its own worker, its own endpoints: it runs whether or not the Robinhood
     # cross-chain scanner does, and stopping one must not stop the other.
-    if bool(enabled.get("rbhx_monitor")) and bool(enabled.get("rbhx_rpc", True)):
+    #
+    # One worker, two panels, either of which is reason enough to run it: the
+    # X Monitor and the Launchpad Monitor share this socket, so switching the
+    # X one off used to take the Launchpad one down with it. Each panel decides
+    # for itself whether to write, in _handle.
+    if ((bool(enabled.get("rbhx_monitor")) or bool(enabled.get("launchpad_monitor")))
+            and bool(enabled.get("rbhx_rpc", True))):
         want.add("rbhx")
     if want_fwd:
         want.add("fwd")
@@ -193,6 +199,14 @@ async def reconcile() -> None:
     fwd = _instances.get("fwd")
     if fwd is not None:
         fwd.set_enabled_map(enabled)
+
+    # Same for the Robinhood monitor, which now serves two panels off one
+    # worker: switching one panel off leaves the worker running for the other,
+    # so the switch has to reach it. It re-reads them itself once a minute
+    # anyway — this is what makes the change land on the next launch instead.
+    rbhx = _instances.get("rbhx")
+    if rbhx is not None:
+        rbhx.apply_toggles(enabled)
 
 
 async def _set_standalone(attr: str, want: bool, factory, name: str) -> None:
@@ -409,6 +423,10 @@ _DEPENDS_ON = {
     "rpc_sol":                "sol",
     # Every switch the monitor reads at start rather than per message.
     "rbhx_monitor":           "rbhx",
+    # Here because it can now be the only reason the worker is running: with
+    # the X Monitor off, switching this on has to start it rather than wait for
+    # the next restart.
+    "launchpad_monitor":      "rbhx",
     "rbhx_rpc":               "rbhx",
     "rbhx_v2v3":              "rbhx",
     "bot_commands":           "cmd",

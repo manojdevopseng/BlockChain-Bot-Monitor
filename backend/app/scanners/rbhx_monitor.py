@@ -291,10 +291,10 @@ class RbhXMonitor:
     async def _toggle_refresher(self) -> None:
         """Keep the switches current without a restart.
 
-        Only rbhx_monitor / rbhx_rpc / rbhx_v2v3 restart this worker, so the
-        rest — both username lists, Telegram alerts, verified-only, the
-        Launchpad Monitor — would otherwise stay at whatever they were when the
-        process started.
+        Only rbhx_monitor / launchpad_monitor / rbhx_rpc / rbhx_v2v3 restart
+        this worker, so the rest — both username lists, Telegram alerts,
+        verified-only, the individual launchpads — would otherwise stay at
+        whatever they were when the process started.
         """
         from app import registry
         while True:
@@ -365,6 +365,11 @@ class RbhXMonitor:
         """A pool was created. Late for a launchpad token — the curve may have
         been running for hours — but it is the only signal for a launchpad we
         do not watch, and it costs nothing when the launch already came in."""
+        # Pools feed the X Monitor only — a token found this way has no
+        # launchpad behind it, so with that panel off there is nothing to do
+        # with it. Checked here so it costs no eth_call and no X lookup.
+        if not self._on("rbhx_monitor"):
+            return
         await self._process((tok.address or "").lower(), tok.symbol or "", tok.name or "",
                             tok.dex or "v4", source="pool", tx=tok.tx_hash or "")
 
@@ -593,7 +598,8 @@ class RbhXMonitor:
             log.info(f"[RBHX] {shared['symbol']} — @{handle} came from a post link, "
                      "launchpad panel only")
         x_alerted = False
-        if (handle and got_profile and not skipped and handle_source != "post"
+        if (self._on("rbhx_monitor") and handle and got_profile and not skipped
+                and handle_source != "post"
                 and not (self._on("rbhx_verified_only", False) and not prof.verified)):
             await _col("rbhx_tokens").update_one({"address": addr},
                                                  {"$set": shared}, upsert=True)
