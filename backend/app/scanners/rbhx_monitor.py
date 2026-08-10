@@ -36,6 +36,7 @@ import aiohttp
 
 from app import notifier, x_client
 from app.scanners import scfg as config
+from app.scanners import launchpads
 from app.scanners.onchain_detector import ChainSpec, DetectedToken, OnChainDetector, NATIVE_ZERO
 from app.scanners.ws_provider import SubscriptionSpec
 from app.scanners.slog import get_logger
@@ -276,14 +277,27 @@ class RbhXMonitor:
         # is what makes a launch visible in seconds instead of whenever its
         # bonding curve happens to end — measured at 1h 04m and 3h 33m on two
         # real tokens, and never at all for one that has not graduated.
+        # The legacy address:topic:where list, still honoured so a launchpad can
+        # be watched from .env before it has an adapter.
         for factory, topic, _kind, _idx in config.RBHX_LAUNCHPADS:
             self._detector.provider.add_persistent_spec(SubscriptionSpec(
                 params=["logs", {"address": factory, "topics": [topic]}],
                 callback=self._on_launch, label=f"RBHX-LAUNCH-{factory[:8]}",
             ))
+        # And every launchpad that has one. Same socket, same callback: both
+        # panels are fed by one subscription per factory, not one each.
+        for pad in launchpads.all_launchpads():
+            for fac in pad.factories:
+                self._detector.provider.add_persistent_spec(SubscriptionSpec(
+                    params=["logs", {"address": fac.address, "topics": [fac.topic0]}],
+                    callback=self._on_launch,
+                    label=f"PAD-{pad.id.upper()}-{fac.address[:8]}",
+                ))
         which = "its own" if config.RBHX_OWN_ENDPOINTS else "Robinhood Chain's (none set yet)"
         pairs = "V2/V3/V4" if self._v2v3 else "V4 only"
-        log.info(f"[RBHX] started — {pairs} pools + {len(config.RBHX_LAUNCHPADS)} launchpad(s), "
+        pads = launchpads.all_launchpads()
+        named = ", ".join(f"{p.label}({len(p.factories)})" for p in pads) or "none"
+        log.info(f"[RBHX] started — {pairs} pools, launchpads: {named}, "
                  f"on {which} endpoints ({len(config.RBHX_WSS_ENDPOINTS)} slot(s))")
         try:
             await self._detector.run()
@@ -309,12 +323,18 @@ class RbhXMonitor:
     async def _on_launch(self, log_obj: dict) -> None:
         """A launchpad minted a token. This is the moment the X profile goes on
         chain, so it is the moment worth reading it."""
-        addr = self._token_from_log(log_obj)
+        source_addr = (log_obj.get("address") or "").lower()
+        topic0 = ((log_obj.get("topics") or [""])[0] or "").lower()
+        pad = launchpads.by_factory().get((source_addr, topic0))
+        addr = (pad.address_from_log(log_obj, next(
+                    f.token_at for f in pad.factories if f.address == source_addr))
+                if pad else self._token_from_log(log_obj))
         if addr:
             # The event's own transaction IS the launch — the deployer, and
             # whatever it paid to buy in, are both in it.
             await self._process(addr, "", "", "launch", source="launch",
-                                tx=log_obj.get("transactionHash") or "")
+                                tx=log_obj.get("transactionHash") or "",
+                                pad=pad, log_obj=log_obj)
 
     def _token_from_log(self, log_obj: dict) -> str:
         """Pull the new token's address out of whichever slot this launchpad
@@ -335,7 +355,7 @@ class RbhXMonitor:
         return ""
 
     async def _process(self, addr: str, symbol: str, name: str, dex: str,
-                       source: str, tx: str = "") -> None:
+                       source: str, tx: str = "", pad=None, log_obj=None) -> None:
         if not addr or addr in self._seen:
             return          # already handled — a launch, then its pool, is one token
         self._seen.add(addr)
@@ -343,7 +363,7 @@ class RbhXMonitor:
         if len(self._seen) > 50_000:
             self._seen = set(list(self._seen)[-25_000:])
         try:
-            await self._handle(addr, symbol, name, dex, source, tx)
+            await self._handle(addr, symbol, name, dex, source, tx, pad, log_obj)
         except Exception as exc:  # noqa: BLE001
             # Warning, not debug: a launch lost here is indistinguishable from
             # one that never had a link, and the two want opposite fixes.
@@ -351,83 +371,109 @@ class RbhXMonitor:
                         f"{type(exc).__name__}: {exc}")
 
     async def _handle(self, addr: str, symbol: str, name: str, dex: str,
-                      source: str, tx: str = "") -> None:
-        fields: list[str] = []
-        for _name, selector in _METADATA_SELECTORS:
-            try:
-                raw = await self._detector.provider.rpc(
-                    "eth_call", [{"to": addr, "data": selector}, "latest"], timeout=8.0)
-            except RuntimeError as exc:
-                # "I do not have that function" comes back as a revert, and for
-                # most tokens every one of these does — that is the answer, not
-                # a failure. Logging it as one buried the real errors under a
-                # warning per launch.
-                if _is_revert(exc):
-                    continue
-                raise
-            fields = decode_string_tuple(raw or "")
-            if any(fields):
-                break
-        if not any(fields):
-            return          # no launchpad metadata on this token
+                      source: str, tx: str = "", pad=None, log_obj=None) -> None:
+        """One launch, read once, written to whichever panels it belongs in.
 
-        # Straight off a launchpad event there is no name/symbol yet — the
-        # event carries the address and little else.
-        if not symbol:
-            symbol, name = await self._name_symbol(addr)
-        # A proven handle first: that is the deployer's own account,
-        # established by the launchpad, not a link they typed.
-        handle = handle_from_proof(fields)
-        proved = bool(handle)
+        Two panels come out of this single pass, deliberately: the Launchpad
+        Monitor wants every launch from a launchpad it watches, and the X
+        Monitor wants only the ones with an account behind them. Reading twice
+        would mean two subscriptions and two sets of eth_calls for one token.
+        """
+        # ── who launched it, and what they paid to buy in ────────────────────
+        # First, because it is the cheapest reason to throw the launch away and
+        # nothing below is worth doing for one we are dropping.
         dev, first_buy = await self._launch_buy(tx)
-        # The signed proof names the same wallet where both exist; it is the
-        # better source, so it wins when it is there.
-        dev = dev_wallet_from_proof(fields) or dev
 
-        # Decided here, not two minutes later: on this chain the deployer
-        # usually buys inside the launch transaction itself (`launchAndBuy`),
-        # which is already mined before any subscription of ours could see it.
-        # A launch that takes this much of its own supply is never recorded.
+        # ── read the launch, through its own launchpad where we know it ──────
+        launch, fields = None, []
+        if pad is not None:
+            launch = await pad.read(self._detector.provider, addr, log_obj or {})
+            dev = launch.dev_wallet or dev
+        else:
+            # No adapter: the generic contract getters, which is how a pool-
+            # created token or an unrecognised factory still gets read.
+            for _name, selector in _METADATA_SELECTORS:
+                try:
+                    raw = await self._detector.provider.rpc(
+                        "eth_call", [{"to": addr, "data": selector}, "latest"], timeout=8.0)
+                except RuntimeError as exc:
+                    # "I do not have that function" comes back as a revert, and
+                    # for most tokens every one of these does — that is the
+                    # answer, not a failure. Logging it as one buried the real
+                    # errors under a warning per launch.
+                    if _is_revert(exc):
+                        continue
+                    raise
+                fields = decode_string_tuple(raw or "")
+                if any(fields):
+                    break
+            if not any(fields):
+                return          # nothing to read and no launchpad to ask
+            dev = dev_wallet_from_proof(fields) or dev
+
+        # A launch that takes this much of its own supply is never recorded, in
+        # either panel. Decided here rather than two minutes later because on
+        # this chain the deployer usually buys inside the launch transaction
+        # itself (`launchAndBuy`), which is mined before any subscription of
+        # ours could see it.
         if config.RBHX_DEV_BUY_MAX_ETH > 0 and first_buy > config.RBHX_DEV_BUY_MAX_ETH:
             log.info(f"[RBHX] {symbol or addr[:10]} skipped — its deployer bought "
                      f"{first_buy:.4f} ETH of it in the launch itself "
                      f"(limit {config.RBHX_DEV_BUY_MAX_ETH})")
             return
-        if not handle:
-            link = find_x_link(fields)
-            if not link:
-                return
-            ref = x_client.parse_ref(link)
-            if ref.kind != "profile":
-                # A status link. Dropped on purpose: it identifies a post, not
-                # the account behind the launch.
-                log.info(f"[RBHX] {symbol or addr[:10]} skipped — link is a post, not a profile")
-                return
-            handle = ref.handle
-        if self._on("rbhx_skip") and await _col("rbhx_skip").find_one(
-                {"handle": handle.lower()}):
+
+        # ── the account behind it ───────────────────────────────────────────
+        proved = False
+        if launch is not None:
+            handle = launch.handle
+        else:
+            handle = handle_from_proof(fields)
+            proved = bool(handle)
+            if not handle:
+                link = find_x_link(fields)
+                ref = x_client.parse_ref(link) if link else None
+                if ref is not None and ref.kind != "profile":
+                    # A status link. Dropped on purpose: it identifies a post,
+                    # not the account behind the launch.
+                    log.info(f"[RBHX] {symbol or addr[:10]} skipped — link is a post, "
+                             "not a profile")
+                handle = ref.handle if (ref is not None and ref.kind == "profile") else ""
+
+        # Straight off a launchpad event there is no name/symbol yet — the
+        # event carries the address and little else.
+        if not symbol:
+            symbol, name = await self._name_symbol(addr)
+            if launch is not None:
+                symbol = symbol or launch.symbol
+                name = name or launch.name
+
+        skipped = bool(handle and self._on("rbhx_skip")
+                       and await _col("rbhx_skip").find_one({"handle": handle.lower()}))
+        if skipped:
             log.info(f"[RBHX] {symbol or addr[:10]} skipped — @{handle} is on the skip list")
-            return
 
-        async with _LOOKUP_GATE:
-            prof = await x_client.fetch_profile(self._session, handle)
-            for _ in range(_X_RETRIES):
-                if not prof.lookup_failed:
-                    break
-                # Silence from a free mirror is not "unverified" — asking again
-                # is the difference between a real row and a missing one.
-                await asyncio.sleep(_X_RETRY_DELAY)
+        # ── who that account is, from the free X mirrors ────────────────────
+        prof = None
+        if handle and not skipped:
+            async with _LOOKUP_GATE:
                 prof = await x_client.fetch_profile(self._session, handle)
-        if prof.lookup_failed:
-            log.info(f"[RBHX] {symbol or addr[:10]} dropped — X gave no answer for @{handle}")
-            return
-        if self._on("rbhx_verified_only", False) and not prof.verified:
-            return
+                for _ in range(_X_RETRIES):
+                    if not prof.lookup_failed:
+                        break
+                    # Silence from a free mirror is not "unverified" — asking
+                    # again is the difference between a real row and a missing
+                    # one.
+                    await asyncio.sleep(_X_RETRY_DELAY)
+                    prof = await x_client.fetch_profile(self._session, handle)
+            if prof.lookup_failed:
+                log.info(f"[RBHX] {symbol or addr[:10]} — X gave no answer for @{handle}")
 
-        watched = bool(self._on("rbhx_watch") and await _col("rbhx_watch").find_one(
-            {"handle": handle.lower()}))
+        watched = bool(handle and self._on("rbhx_watch")
+                       and await _col("rbhx_watch").find_one({"handle": handle.lower()}))
+        got_profile = bool(prof is not None and not prof.lookup_failed)
         now = time.time()
-        row = {
+        described = (launch.description if launch is not None else _description(fields)) or ""
+        shared = {
             "address": addr,
             "symbol": symbol or "?",
             "name": name or "",
@@ -435,47 +481,64 @@ class RbhXMonitor:
             # How we found it: "launch" is the launchpad's own mint event,
             # "pool" is graduation. The gap between them is the curve.
             "source": source,
-            "link": f"https://x.com/{handle}",
-            "handle": handle,
+            "handle": handle or None,
+            "link": f"https://x.com/{handle}" if handle else None,
+            "verified": bool(prof.verified) if got_profile else False,
+            "verified_type": prof.verified_type if got_profile else "",
+            "followers": prof.followers if got_profile else 0,
             # Two different claims, kept apart: `verified` is X's own tick,
             # `proved` is the launchpad having watched this deployer sign in.
             "proved": proved,
-            # The deployer's own wallet, and what it spent buying this token
-            # inside the window. None = there was no proof to read it from, so
-            # the question cannot be asked of this launch.
+            # The deployer's own wallet, and what it spent buying this token.
             "dev_wallet": dev or None,
             "dev_buy_eth": round(first_buy, 4) if dev else None,
-            "verified": prof.verified,
-            "verified_type": prof.verified_type,
-            "followers": prof.followers,
+            "excerpt": (described or (prof.bio if got_profile else "") or "")[:200],
+            "description": described[:400],
+            "watched": watched,
             # Same field the AI page's X Links uses, so the shared <Age> cell
             # and the timestamp column read the same thing in both places.
-            # The first field that is not itself a URL: Trendor puts the
-            # description first, Pons puts the X link there and has none.
-            "excerpt": (_description(fields) or prof.bio or "")[:200],
-            "description": _description(fields)[:400],
-            "watched": watched,
             "open_timestamp": now,
             "found_at": now,
             "day": ist_date_str(now),
             "dt": _utc_now(),
         }
-        await _col("rbhx_tokens").update_one({"address": addr}, {"$set": row}, upsert=True)
 
-        from app.ws_hub import hub
-        await hub.broadcast("rbhx_token", {k: v for k, v in row.items() if k != "dt"})
-        log.info(f"[RBHX] {row['symbol']} — @{handle} [{source}] "
-                 f"({prof.followers:,} followers{', verified' if prof.verified else ''}"
-                 f"{', proved' if proved else ''})"
-                 f"{' · WATCHED' if watched else ''}")
-        # Published now, judged over the next window: the launch is on the
-        # page in about a second, and a deployer that buys its own supply is
-        # taken off it when that becomes visible.
+        # ── the Launchpad Monitor: every launch, account or not ──────────────
+        if pad is not None and self._on("launchpad_monitor"):
+            row = {**shared, "launchpad": pad.id, "launchpad_label": pad.label,
+                   "website": (launch.website if launch is not None else ""),
+                   "image": (launch.image if launch is not None else "")}
+            await _col("launchpad_tokens").update_one({"address": addr},
+                                                      {"$set": row}, upsert=True)
+            from app.ws_hub import hub
+            await hub.broadcast("launchpad_token",
+                                {k: v for k, v in row.items() if k != "dt"})
+            log.info(f"[PAD-{pad.id.upper()}] {row['symbol']}"
+                     + (f" — @{handle}" if handle else " — no X account")
+                     + (f" ({prof.followers:,} followers)" if got_profile else ""))
+
+        # ── the X Monitor: only launches with an account we could read ───────
+        if handle and got_profile and not skipped:
+            if self._on("rbhx_verified_only", False) and not prof.verified:
+                return
+            await _col("rbhx_tokens").update_one({"address": addr},
+                                                 {"$set": shared}, upsert=True)
+            from app.ws_hub import hub
+            await hub.broadcast("rbhx_token",
+                                {k: v for k, v in shared.items() if k != "dt"})
+            log.info(f"[RBHX] {shared['symbol']} — @{handle} [{source}] "
+                     f"({prof.followers:,} followers{', verified' if prof.verified else ''}"
+                     f"{', proved' if proved else ''})"
+                     f"{' · WATCHED' if watched else ''}")
+            await self._notify(shared)
+
+        # Published now, judged over the next window: the launch is on the page
+        # in about a second, and a deployer that buys more of its own supply
+        # later is taken off it when that becomes visible.
         if dev and config.RBHX_DEV_BUY_MAX_ETH > 0:
             asyncio.create_task(
-                self._watch_dev_buy(addr, dev, row["symbol"], first_buy),
+                self._watch_dev_buy(addr, dev, shared["symbol"], first_buy),
                 name=f"rbhx-devbuy-{addr[:10]}")
-        await self._notify(row)
 
     async def _launch_buy(self, tx: str) -> tuple[str, float]:
         """(deployer, ETH it paid) from the launch transaction.

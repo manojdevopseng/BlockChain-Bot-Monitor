@@ -97,6 +97,11 @@ DEFAULT_SERVICES: list[dict] = [
     # Here so the rule can be tightened later without a code change.
     {"id": "rbhx_verified_only", "category": RBHX, "label": "Verified accounts only",
      "chain": "rbh", "enabled": False},
+    # The launchpad-centric panel. Its own switch: it is much higher volume
+    # than the X one and you may want one without the other. Same worker and
+    # same socket either way.
+    {"id": "launchpad_monitor", "category": RBHX, "label": "Robinhood Launchpad Monitor",
+     "chain": "rbh", "enabled": True},
 
     # The starred-caller mirror. Its own switch so the filtered feed can be
     # stopped without touching the full one, and the other way round.

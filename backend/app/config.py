@@ -316,6 +316,24 @@ class Settings(BaseSettings):
     # differently; all three below were read off real creation receipts.
     # Blank = fall back to watching pool creation only.
     rbhx_launchpads: str = ""
+
+    # ── Robinhood Launchpad Monitor ─────────────────────────
+    # Every launch from the launchpads below, whether or not it carries an X
+    # profile — the launchpad-centric view, where the X monitor is the
+    # profile-centric one. Both are fed by the same worker over the same
+    # socket, so this costs no extra RPC.
+    #
+    # One key per launchpad, comma-separated where it runs more than one
+    # factory. Addresses come from each launchpad's own docs; the event shape
+    # and how to read its socials live in app/scanners/launchpads/<name>.py,
+    # because every launchpad does that differently.
+    #
+    # Pons — docs.ponsfamily.com: active factory first, then legacy.
+    pons_factories: str = ""
+    # Flap — docs.flap.sh: the Portal that mints both token implementations.
+    flap_portals: str = ""
+    # Rows are dropped this many days after they land.
+    launchpad_retention_days: int = 15
     # Skip a launch whose own deployer buys more than this much of it, in the
     # chain's native ETH. The dev wallet comes from the same signed blob the
     # handle does, so this only applies to launches that carry one — and only

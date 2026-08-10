@@ -222,6 +222,27 @@ def _parse_launchpads(raw: str) -> list[tuple[str, str, str, int]]:
 
 
 RBHX_LAUNCHPADS = _parse_launchpads(settings.rbhx_launchpads)
+
+
+def _addr_list(raw: str) -> list[str]:
+    """Comma-separated addresses -> a clean lowercase list."""
+    out = []
+    for chunk in (raw or "").split(","):
+        a = chunk.strip().lower()
+        if a.startswith("0x") and len(a) == 42:
+            out.append(a)
+        elif chunk.strip():
+            print(f"[scfg] not an address, skipped: {chunk.strip()!r}")
+    return out
+
+
+# ── Robinhood Launchpad Monitor ─────────────────────────────────
+# Which factories each launchpad mints through. The adapters in
+# scanners/launchpads/ carry the event topics and the reading logic; only the
+# addresses live in .env, so a redeployed factory is a config change.
+PONS_FACTORIES = _addr_list(settings.pons_factories)
+FLAP_PORTALS   = _addr_list(settings.flap_portals)
+LAUNCHPAD_RETENTION_DAYS = settings.launchpad_retention_days
 RBHX_DEV_BUY_MAX_ETH = settings.rbhx_dev_buy_max_eth
 RBHX_DEV_BUY_WINDOW  = settings.rbhx_dev_buy_window
 RBHX_RETENTION_DAYS = settings.rbhx_retention_days

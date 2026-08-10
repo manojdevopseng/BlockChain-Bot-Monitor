@@ -222,6 +222,9 @@ _TTL_COLLECTIONS = {
     "rbhx_tokens": "rbhx_retention_days",
     "rbhx_skip": "rbhx_retention_days",
     "rbhx_watch": "rbhx_retention_days",
+    # Robinhood Launchpad Monitor: every launch from a watched launchpad,
+    # whether or not it carries an X account.
+    "launchpad_tokens": "launchpad_retention_days",
 }
 
 
@@ -308,6 +311,11 @@ async def ensure_indexes() -> None:
         # Read once per detection, so it has to be a lookup not a scan.
         ("rbhx_skip",          "handle"),
         ("rbhx_watch",         "handle"),
+        ("launchpad_tokens",   "address"),
+        ("launchpad_tokens",   [("open_timestamp", -1)]),            # newest-first panel
+        ("launchpad_tokens",   [("launchpad", 1), ("open_timestamp", -1)]),  # per-pad tab
+        ("launchpad_tokens",   [("day", -1)]),                       # History filter
+        ("launchpad_tokens",   [("followers", -1)]),                 # Min Followers
     ]
     for coll, keys in plan:
         try:
@@ -336,6 +344,7 @@ _TS_FIELD = {
     "rbhx_tokens": "open_timestamp",
     "rbhx_skip": "added_at",
     "rbhx_watch": "added_at",
+    "launchpad_tokens": "open_timestamp",
 }
 
 

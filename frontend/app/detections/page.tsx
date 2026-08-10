@@ -17,6 +17,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { fmtDateTime, fmtEth, shortAddr, rowKey } from "@/lib/utils";
 import { Age, TickProvider } from "@/components/Age";
 import { RbhXSection } from "./_components/RbhXSection";
+import { LaunchpadSection } from "./_components/LaunchpadSection";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
 
@@ -259,10 +260,11 @@ export default function DetectionsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Detections"
-        subtitle="Premium-caller addresses, Robinhood launches on X, cross-chain matches and ETH gas fees"
+        subtitle="Premium-caller addresses, Robinhood launches, cross-chain matches and ETH gas fees"
       />
       <PremiumSection />
       <RbhXSection />
+      <LaunchpadSection />
       <CrossChainSection />
       <GasSection />
     </div>
