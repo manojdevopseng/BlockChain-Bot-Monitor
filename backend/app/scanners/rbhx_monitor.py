@@ -760,6 +760,13 @@ class RbhXMonitor:
         """
         if not self._on("launchpad_telegram") or not config.DEST_RBH_X_MONITOR:
             return
+        # A launch that names no account is not worth a message. Most of them
+        # name none — pools.trade sent nine in ten minutes carrying nothing but
+        # "This is $UNIPIX, which has been launched." — and a chat full of
+        # those buries the ones that do. The row is still written either way,
+        # so the panel keeps every launch and only the alerts are filtered.
+        if not row.get("handle"):
+            return
         if self._pad_pump is None or self._pad_pump.done():
             self._pad_pump = asyncio.create_task(self._pad_alert_pump(),
                                                  name="rbhx-pad-alerts")
