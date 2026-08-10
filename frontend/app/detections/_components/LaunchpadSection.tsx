@@ -26,7 +26,9 @@ import { fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 // One colour per launchpad, so the merged view reads at a glance. Theme tokens,
 // not hex: both themes stay legible without a second palette.
 const PAD_TONE: Record<string, Variant> = {
-  pons: "purple", flap: "cyan", pools: "green",
+  // Pons and Pons V2 are two deployments of one launchpad, so they are two
+  // shades of the same idea rather than two unrelated colours.
+  pons: "purple", pons_v2: "blue", flap: "cyan", pools: "green",
 };
 
 type Pad = { id: string; label: string; factories: number; enabled: boolean };

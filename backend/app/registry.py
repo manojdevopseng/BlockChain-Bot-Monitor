@@ -114,6 +114,8 @@ DEFAULT_SERVICES: list[dict] = [
     # a launchpad you do not care about costs nothing.
     {"id": "launchpad_pons",   "category": RBHX, "group": "Launchpad Monitor",
      "label": "Pons launches", "chain": "rbh", "enabled": True},
+    {"id": "launchpad_pons_v2", "category": RBHX, "group": "Launchpad Monitor",
+     "label": "Pons V2 launches", "chain": "rbh", "enabled": True},
     {"id": "launchpad_flap",   "category": RBHX, "group": "Launchpad Monitor",
      "label": "Flap launches", "chain": "rbh", "enabled": True},
 

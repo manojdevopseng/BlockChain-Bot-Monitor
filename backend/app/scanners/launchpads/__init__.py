@@ -12,8 +12,9 @@ from __future__ import annotations
 from app.scanners.launchpads.base import Factory, Launch, Launchpad
 from app.scanners.launchpads.flap import Flap
 from app.scanners.launchpads.pons import Pons
+from app.scanners.launchpads.pons_v2 import PonsV2
 
-__all__ = ["Factory", "Launch", "Launchpad", "Pons", "Flap",
+__all__ = ["Factory", "Launch", "Launchpad", "Pons", "PonsV2", "Flap",
            "all_launchpads", "by_id", "by_factory"]
 
 
@@ -21,7 +22,8 @@ def all_launchpads() -> list[Launchpad]:
     """Built on demand rather than at import: each reads its factory addresses
     from scfg, and Settings can rewrite those while the app is running. A
     launchpad with no address configured is left out entirely."""
-    return [pad for pad in (Pons(), Flap()) if pad.factories]
+    # This order is the order of the filter tabs: All, Pons, Pons V2, Flap.
+    return [pad for pad in (Pons(), PonsV2(), Flap()) if pad.factories]
 
 
 def by_id() -> dict[str, Launchpad]:

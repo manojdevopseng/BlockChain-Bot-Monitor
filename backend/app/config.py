@@ -330,6 +330,7 @@ class Settings(BaseSettings):
     #
     # Pons — docs.ponsfamily.com: active factory first, then legacy.
     pons_factories: str = ""
+    pons_v2_factories: str = ""
     # Flap — docs.flap.sh: the Portal that mints both token implementations.
     flap_portals: str = ""
     # Rows are dropped this many days after they land.
