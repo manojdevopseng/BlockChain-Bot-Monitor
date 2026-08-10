@@ -27,6 +27,8 @@ does it as a swap afterwards, which is what the watcher's window is for.
 
 from __future__ import annotations
 
+import json
+
 from app.scanners import scfg as config
 from app.scanners.launchpads.base import Factory, Launch, Launchpad
 # Same free-text problem, same guard — imported rather than copied.
@@ -78,14 +80,45 @@ class Pools(Launchpad):
             await self.eth_call(provider, address, _SEL_METADATA))
         if not fields:
             return out
-        # By shape rather than position, as everywhere else here.
-        out.handle, out.handle_source = self.classify(find_x_link(fields))
+        # By shape rather than position, as everywhere else here — and then the
+        # JSON slot, because some launches put their socials in there instead:
+        #
+        #   ['', 'https://thestartupcoin.xyz/', 'ipfs://Qma…',
+        #    '{"twitter":"https://x.com/startuponrhc"}']
+        #
+        # find_x_link cannot see that one: it asks for a field that is nothing
+        # but the link, which is what keeps a launchpad's own handle out of a
+        # token's prose.
+        out.handle, out.handle_source = self.classify(
+            find_x_link(fields) or _x_from_json(fields))
         out.website = next((u for u in (_url_or_blank(f) for f in fields)
                             if u and "x.com" not in u and "twitter.com" not in u
                             and not _looks_like_image(u)), "")
         out.image = next((u for u in (_url_or_blank(f) for f in fields)
                           if _looks_like_image(u)), "")
+        # Whatever prose is in there — slot 1 on most of these launches.
+        out.description = next((f.strip() for f in fields
+                                if f.strip() and not f.strip().startswith(("{", "http", "ipfs://"))), "")
         return out
+
+
+def _x_from_json(fields: list[str]) -> str:
+    """The X link out of a JSON socials blob in one of the slots, or ""."""
+    for raw in fields:
+        raw = (raw or "").strip()
+        if not raw.startswith("{"):
+            continue
+        try:
+            blob = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(blob, dict):
+            continue
+        for key in ("twitter", "x", "twitter_url", "x_url"):
+            val = str(blob.get(key) or "").strip()
+            if val:
+                return val
+    return ""
 
 
 def _looks_like_image(url: str) -> bool:
