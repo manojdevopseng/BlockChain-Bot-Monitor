@@ -641,7 +641,13 @@ class RbhXMonitor:
         # would otherwise arrive twice. The X Monitor's alert is the one that
         # goes out; this covers everything it does not take — no account, an
         # account taken from a post link, or the panel switched off.
-        if pad_row is not None and not x_alerted:
+        if pad_row is not None and pad_row.get("watched"):
+            # Always, even when the X Monitor has already said something: this
+            # is the message the watch list exists to produce, and it says
+            # something that one does not.
+            asyncio.create_task(self._watch_alert(pad_row),
+                                name=f"rbhx-watch-{addr[:10]}")
+        elif pad_row is not None and not x_alerted:
             self._notify_pad(pad_row)
 
         # Published now, judged over the next window: the launch is on the page
@@ -790,6 +796,36 @@ class RbhXMonitor:
         except asyncio.QueueFull:
             log.warning(f"[PAD] alert backlog full — {row['symbol']} not sent")
 
+    async def _watch_alert(self, row: dict) -> None:
+        """A launch by an account on the watch list.
+
+        Two messages, and which one depends on whether the account itself says
+        this is their token: the address in their bio, or in one of their last
+        three posts. A watched account launching something is worth knowing
+        either way — that is what the list is for — but an account that has
+        published the address has confirmed it, and an account that has not may
+        be someone else naming them.
+
+        A task rather than inline: the row is already on the page and the posts
+        are two mirrors away.
+        """
+        handle = row.get("handle") or ""
+        address = (row.get("address") or "").lower()
+        texts: list[str] = [row.get("excerpt") or "", row.get("description") or ""]
+        try:
+            texts += await x_client.fetch_recent(self._session, handle, 3)
+        except Exception as exc:  # noqa: BLE001
+            # Silence from a free mirror is not "they never posted it" — it is
+            # not knowing, and the unconfirmed message is the honest one.
+            log.debug(f"[PAD] could not read @{handle}'s posts: {exc}")
+        confirmed = _mentions_address(texts, address)
+        headline = (f"🔭 <b>Watch Account Found with '@{handle}' "
+                    "with Original Token Address</b>" if confirmed
+                    else f"🔭 <b>Watch Account Found with '@{handle}'</b>")
+        log.info(f"[PAD] watch hit — @{handle} {row.get('symbol')}"
+                 f"{' · address published by the account' if confirmed else ''}")
+        self._notify_pad({**row, "_headline": headline})
+
     async def _pad_alert_pump(self) -> None:
         """One queued launchpad alert every _PAD_ALERT_INTERVAL seconds."""
         while True:
@@ -831,6 +867,20 @@ class RbhXMonitor:
             log.warning(f"[RBHX] alert not delivered for {row['symbol']}")
 
 
+# 0x + 40 hex, and the bare form some accounts post. Case-insensitive: an EVM
+# address is, and half of X posts it checksummed.
+_ADDRESS_RE = re.compile(r"(?:0x)?([0-9a-fA-F]{40})(?![0-9a-fA-F])")
+
+
+def _mentions_address(texts: list[str], address: str) -> bool:
+    """Does the account itself name this token anywhere we can read?"""
+    want = (address or "").lower().removeprefix("0x")
+    if len(want) != 40:
+        return False
+    return any(m.group(1).lower() == want
+               for text in texts for m in _ADDRESS_RE.finditer(text or ""))
+
+
 def _pad_alert_text(row: dict) -> str:
     """A Launchpad Monitor alert, shaped like the X Monitor's.
 
@@ -840,6 +890,9 @@ def _pad_alert_text(row: dict) -> str:
     """
     import html
     pad = html.escape(row.get("launchpad_label") or row.get("launchpad") or "?")
+    # A watch hit says so on the first line — that is the message the watch
+    # list was asked for — and the launchpad is still named under it.
+    headline = row.get("_headline") or ""
     handle, source = row.get("handle"), row.get("handle_source")
     if handle:
         who = (f"👤 @{html.escape(handle)}"
@@ -852,7 +905,8 @@ def _pad_alert_text(row: dict) -> str:
         who = "👤 no X account named\n"
     dev = row.get("dev_buy_eth")
     return (
-        ("👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
+        (headline + "\n" if headline
+         else "👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
         + f"🚀 <b>{pad.upper()} LAUNCH</b>\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🪙 <b>{html.escape(row.get('symbol') or '?')}</b>"

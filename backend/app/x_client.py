@@ -255,6 +255,46 @@ async def _nitter_latest(session: aiohttp.ClientSession,
     return "", None
 
 
+async def fetch_recent(session: aiohttp.ClientSession, handle: str,
+                       limit: int = 3) -> list[str]:
+    """An account's latest posts as plain text, newest first. [] when nothing
+    answers.
+
+    The same RSS feed `_nitter_latest` reads, taken more than one item deep —
+    that one answers "what did they just post", this answers "have they
+    mentioned this anywhere recently", which needs a few.
+    """
+    global _nitter_down_until
+    now = time.time()
+    instances = (NITTER_INSTANCES if now >= _nitter_down_until
+                 else NITTER_INSTANCES[:1])
+    for instance in instances:
+        try:
+            async with session.get(f"{instance}/{handle}/rss", headers=_UA,
+                                   timeout=aiohttp.ClientTimeout(total=6)) as r:
+                if r.status != 200:
+                    continue
+                items = ET.fromstring((await r.text()).strip()).findall(".//item")
+        except Exception:  # noqa: BLE001
+            continue
+        out: list[str] = []
+        for item in items[:limit]:
+            desc = item.findtext("description") or ""
+            title = item.findtext("title") or ""
+            raw = desc if len(desc) > len(title) else title
+            # Tags out, entities out, whitespace collapsed — an address in a
+            # post is what we are after and markup only hides it.
+            clean = re.sub(r"<[^>]+>", " ", raw)
+            clean = re.sub(r"&(amp|lt|gt|#\d+);", " ", clean)
+            clean = re.sub(r"\s+", " ", clean).strip()
+            if clean:
+                out.append(clean)
+        if out:
+            _nitter_down_until = 0.0
+            return out
+    return []
+
+
 def _age_minutes(created) -> Optional[float]:
     """Minutes since a timestamp, from a Unix number, ISO 8601, or RFC 2822."""
     now = datetime.now(timezone.utc)
