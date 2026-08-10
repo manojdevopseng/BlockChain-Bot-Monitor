@@ -29,7 +29,7 @@ const PAD_TONE: Record<string, Variant> = {
   pons: "purple", flap: "cyan", pools: "green",
 };
 
-type Pad = { id: string; label: string; factories: number };
+type Pad = { id: string; label: string; factories: number; enabled: boolean };
 
 export function LaunchpadSection() {
   const [pad, setPad] = useState("all");
@@ -44,8 +44,12 @@ export function LaunchpadSection() {
   // configured does not offer a tab that can only ever be empty.
   const { data: padData } = useApi<any>("/api/launchpad/pads");
   const pads: Pad[] = padData?.items ?? [];
+  // A launchpad switched off in Settings keeps its tab and its history — it
+  // just takes no new launches, and the tab says so rather than looking broken.
   const tabs = [{ id: "all", label: "All" },
-                ...pads.map((p) => ({ id: p.id, label: p.label }))];
+                ...pads.map((p) => ({ id: p.id,
+                                      label: p.enabled ? p.label : `${p.label} (off)` }))];
+  const offPads = pads.filter((p) => !p.enabled);
 
   const params = new URLSearchParams();
   if (pad !== "all") params.set("pad", pad);
@@ -94,6 +98,12 @@ export function LaunchpadSection() {
           <> {" "}A launch whose deployer buys more than{" "}
             <b>{stats.dev_buy_max_eth} Ξ</b> of it is not recorded at all.</>
         ) : null}
+        {offPads.length > 0 && (
+          <> {" "}<span className="text-accent-amber">
+            {offPads.map((p) => p.label).join(" and ")} switched off in Settings —
+            no new launches from {offPads.length > 1 ? "them" : "it"}.
+          </span></>
+        )}
         {stats?.with_x != null && stats?.total ? (
           <> {" "}<span className="text-text-muted">
             {fmtNum(stats.with_x)} of {fmtNum(stats.total)} carry an X account.

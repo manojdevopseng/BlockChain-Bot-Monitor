@@ -359,6 +359,10 @@ class RbhXMonitor:
         source_addr = (log_obj.get("address") or "").lower()
         topic0 = ((log_obj.get("topics") or [""])[0] or "").lower()
         pad = launchpads.by_factory().get((source_addr, topic0))
+        # Per-launchpad switch, checked before anything is read: a launchpad
+        # that is off costs no eth_call, no IPFS fetch and no X lookup.
+        if pad is not None and not self._on(f"launchpad_{pad.id}"):
+            return
         addr = (pad.address_from_log(log_obj, next(
                     f.token_at for f in pad.factories if f.address == source_addr))
                 if pad else self._token_from_log(log_obj))

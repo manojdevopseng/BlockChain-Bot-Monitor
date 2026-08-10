@@ -102,6 +102,15 @@ DEFAULT_SERVICES: list[dict] = [
     # same socket either way.
     {"id": "launchpad_monitor", "category": RBHX, "label": "Robinhood Launchpad Monitor",
      "chain": "rbh", "enabled": True},
+    # One switch per launchpad, under the master one above. The id is
+    # "launchpad_" + the adapter's own id, so adding Pools.trade is this one
+    # line and nothing else. Off means its launches are not read at all — the
+    # worker returns before any eth_call, so a launchpad you do not care about
+    # costs nothing.
+    {"id": "launchpad_pons",   "category": RBHX, "label": "— Pons launches",
+     "chain": "rbh", "enabled": True},
+    {"id": "launchpad_flap",   "category": RBHX, "label": "— Flap launches",
+     "chain": "rbh", "enabled": True},
 
     # The starred-caller mirror. Its own switch so the filtered feed can be
     # stopped without touching the full one, and the other way round.

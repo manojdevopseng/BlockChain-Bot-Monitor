@@ -39,9 +39,15 @@ def _matches(row: dict, q: str) -> bool:
 async def pads():
     """The filter tabs, built from the launchpads that are actually configured
     rather than a list typed into the frontend — a new adapter shows up here
-    the moment its address is set."""
+    the moment its address is set.
+
+    `enabled` is its own switch in Settings; a launchpad that is off keeps its
+    tab and its history, it just stops taking new launches.
+    """
+    enabled = await registry.enabled_map()
     return {"items": [{"id": pad.id, "label": pad.label,
-                       "factories": len(pad.factories)}
+                       "factories": len(pad.factories),
+                       "enabled": bool(enabled.get(f"launchpad_{pad.id}", True))}
                       for pad in launchpads.all_launchpads()]}
 
 
