@@ -788,6 +788,15 @@ class RbhXMonitor:
         # so the panel keeps every launch and only the alerts are filtered.
         if not row.get("handle"):
             return
+        # Nor is one whose account has no bio at all. An account that has not
+        # written a line about itself gives nothing to judge the launch by —
+        # the alert would be a name and a follower count. The row is still
+        # written; only the message is dropped.
+        #
+        # A watched account is exempt: that list is a standing instruction to
+        # be told, and an empty bio does not override it.
+        if not row.get("watched") and not str(row.get("excerpt") or "").strip():
+            return
         if self._pad_pump is None or self._pad_pump.done():
             self._pad_pump = asyncio.create_task(self._pad_alert_pump(),
                                                  name="rbhx-pad-alerts")
