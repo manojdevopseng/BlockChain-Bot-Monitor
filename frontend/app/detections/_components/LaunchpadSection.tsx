@@ -34,31 +34,49 @@ const PAD_TONE: Record<string, Variant> = {
 
 type Pad = { id: string; label: string; factories: number; enabled: boolean };
 
-/* The account's bio, with this token's address picked out of it.
+/* The account's bio, with two things picked out of it.
  *
- * An account that has the contract in its own bio has said the token is
- * theirs — which is the difference between the account behind a launch and an
- * account somebody else named. The same match the watch alert makes on the
- * server, drawn here rather than stored: it costs nothing, and it applies to
- * every row already on the page instead of only the next one.
+ * The token's own address, when the account has it in their bio — an account
+ * carrying the contract has said the token is theirs. And any of the keywords
+ * from Settings, whole-word, which is the same rule and the same list the
+ * Telegram alert uses.
  *
- * Case-insensitive and with or without the 0x, because bios carry both. A
- * shortened "0x5fb2…95fa5" is deliberately not matched — it is not the
- * address, and guessing at one is how the wrong token gets highlighted. */
-function BioText({ text, address }: { text: string; address: string }) {
-  const bare = (address || "").toLowerCase().replace(/^0x/, "");
-  if (!/^[0-9a-f]{40}$/.test(bare)) return <>{text}</>;
+ * Drawn rather than stored: it costs nothing here, it applies to every row
+ * already on the page, and a keyword added in Settings lights up the rows that
+ * were caught before it existed.
+ *
+ * The address is matched case-insensitively with or without the 0x, because
+ * bios carry both. A shortened "0x5fb2…95fa5" is deliberately not matched — it
+ * is not the address, and guessing at one is how the wrong token lights up. */
+function escapeRe(v: string) {
+  return v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-  // Not part of a longer hex run — the same guard the server's matcher uses.
-  const re = new RegExp(`(?:0x)?${bare}(?![0-9a-f])`, "gi");
+function BioText({ text, address, keywords }: {
+  text: string; address: string; keywords: string[];
+}) {
+  const bare = (address || "").toLowerCase().replace(/^0x/, "");
+  const alts: string[] = [];
+  if (/^[0-9a-f]{40}$/.test(bare)) alts.push(`(?:0x)?${bare}(?![0-9a-f])`);
+  // Longest first, so "Buybacks" wins over "Buyback" on the same word.
+  const words = [...keywords].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (words.length) alts.push(`\\b(?:${words.map(escapeRe).join("|")})\\b`);
+  if (!alts.length) return <>{text}</>;
+
+  const re = new RegExp(alts.join("|"), "gi");
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(re)) {
     const at = m.index ?? 0;
     if (at > last) parts.push(text.slice(last, at));
+    const isAddress = m[0].toLowerCase().replace(/^0x/, "") === bare;
     parts.push(
-      <span key={at} title="This account's bio names this token's address"
-            className="rounded bg-accent-green/15 px-0.5 font-medium text-accent-green">
+      <span key={at}
+            title={isAddress ? "This account's bio names this token's address"
+                             : "Matches a keyword from Settings"}
+            className={isAddress
+              ? "rounded bg-accent-green/15 px-0.5 font-medium text-accent-green"
+              : "rounded bg-accent-amber/15 px-0.5 font-medium text-accent-amber"}>
         {m[0]}
       </span>
     );
@@ -104,6 +122,9 @@ export function LaunchpadSection() {
   const { data } = useApi<any>(key);
   const { data: datesData } = useApi<any>(`/api/launchpad/dates?pad=${pad}`);
   const { data: stats } = useApi<any>("/api/launchpad/stats");
+  // The same list the worker matches on, so the column and the alert agree.
+  const { data: kwData } = useApi<any>("/api/launchpad/keywords");
+  const keywords: string[] = kwData?.items ?? [];
   const items = data?.items ?? [];
 
   return (
@@ -266,7 +287,9 @@ export function LaunchpadSection() {
                     which would otherwise widen the column on their own. */}
                 <td className="px-3 py-3">
                   <span className="block max-w-[300px] whitespace-normal break-words text-xs text-text-muted">
-                    {r.excerpt ? <BioText text={r.excerpt} address={r.address} /> : "—"}
+                    {r.excerpt
+                      ? <BioText text={r.excerpt} address={r.address} keywords={keywords} />
+                      : "—"}
                   </span>
                 </td>
                 <td className="px-3 py-3">

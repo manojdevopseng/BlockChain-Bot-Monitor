@@ -109,27 +109,33 @@ function ServiceGroup({ cat, items }: { cat: keyof typeof CAT; items: Svc[] }) {
   );
 }
 
-function KeywordManager() {
-  const { data } = useApi<any>("/api/settings/keywords");
+/* One editable keyword list. Two of them exist — the forwarder's detection
+ * keywords and the Robinhood Launchpad ones — over different collections but
+ * the same add/remove/whole-word rule, so `path` is the only difference. */
+function KeywordManager({ path = "/api/settings/keywords", title = "Detection Keywords",
+                          hint }: { path?: string; title?: string; hint?: React.ReactNode }) {
+  const { data } = useApi<any>(path);
   const [val, setVal] = useState("");
   const items: string[] = data?.items ?? [];
 
   async function add() {
     if (!val.trim()) return;
-    await apiSend("/api/settings/keywords", "POST", { action: "add", value: val.trim() });
-    setVal(""); mutate("/api/settings/keywords");
+    await apiSend(path, "POST", { action: "add", value: val.trim() });
+    setVal(""); mutate(path);
   }
   async function remove(w: string) {
-    await apiSend("/api/settings/keywords", "POST", { action: "remove", value: w });
-    mutate("/api/settings/keywords");
+    await apiSend(path, "POST", { action: "remove", value: w });
+    mutate(path);
   }
 
   return (
     <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><Tag size={14} /> Detection Keywords</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2"><Tag size={14} /> {title}</CardTitle>
+        <span className="text-[11px] text-text-dim">{items.length}</span>
+      </CardHeader>
       <CardContent>
         <p className="mb-3 text-xs text-text-dim">
-          Whole-word match only — <span className="text-text-muted">“ai”</span> matches “new <b>ai</b> agent”, not “m<b>ai</b>n”.
+          {hint ?? <>Whole-word match only — <span className="text-text-muted">“ai”</span> matches “new <b>ai</b> agent”, not “m<b>ai</b>n”.</>}
         </p>
         <div className="flex gap-2">
           <Input value={val} onChange={(e) => setVal(e.target.value)}
@@ -363,6 +369,15 @@ export default function SettingsPage() {
           {/* The endpoint URLs themselves live on the RPC Monitor page, next to
               the live connection status they actually affect. */}
           <KeywordManager />
+          {/* The Launchpad Monitor's own list, matched against the account's
+              bio. Its own collection, so editing one never touches the other. */}
+          <KeywordManager
+            path="/api/launchpad/keywords"
+            title="Robinhood Keywords Match"
+            hint={<>Matched against the X account&rsquo;s bio on every Robinhood launch.
+                    A hit is highlighted in the Launchpad Monitor&rsquo;s Text column and
+                    leads its Telegram alert. Whole-word only — “AI” matches “AI agent”,
+                    not “said”.</>} />
           <ChatIdFinder />
           <CredentialsManager exclude={["AI", "RPC Endpoints"]} />
         </div>

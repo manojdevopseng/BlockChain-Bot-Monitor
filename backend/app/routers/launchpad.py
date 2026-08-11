@@ -17,6 +17,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from .. import db, registry
 from ..scanners import launchpads, scfg
+from ..keywords import compile_keyword
 from ..util import clean_list, gmgn_url, ist_date_str
 
 router = APIRouter(prefix="/api/launchpad", tags=["launchpad"])
@@ -123,6 +124,41 @@ async def delete_token(address: str):
     if not res.deleted_count:
         raise HTTPException(404, f"no row for {address}")
     return {"address": address, "removed": True}
+
+
+# ── Keywords matched against the account's bio ─────────────────────────────────
+#
+# Whole-word and case-insensitive, the same rule the forwarder's own keywords
+# use — "AI" matches "AI agent", not "said". Seeded once and edited here after
+# that: a keyword deleted stays deleted, and the worker re-reads the list a
+# minute later, so nothing restarts.
+#
+# Declared above the /{kind} list routes below, which would otherwise swallow
+# "keywords" as a list name.
+
+@router.get("/keywords")
+async def get_keywords():
+    docs = await db.get_collection("rbhx_keywords").find({}).to_list(500)
+    return {"items": [d["word"] for d in docs]}
+
+
+@router.post("/keywords")
+async def set_keyword(payload: dict = Body(...)):
+    action = payload.get("action")
+    word = str(payload.get("value") or "").strip()
+    if action not in ("add", "remove") or not word:
+        raise HTTPException(400, "action must be add/remove with a non-empty value")
+    col = db.get_collection("rbhx_keywords")
+    if action == "add":
+        if await col.find_one({"word": {"$regex": f"^{re.escape(word)}$", "$options": "i"}}):
+            docs = await col.find({}).to_list(500)
+            return {"items": [d["word"] for d in docs], "note": "already exists"}
+        await col.insert_one({"word": word, "regex": compile_keyword(word),
+                              "added_at": time.time()})
+    else:
+        await col.delete_many({"word": {"$regex": f"^{re.escape(word)}$", "$options": "i"}})
+    docs = await col.find({}).to_list(500)
+    return {"items": [d["word"] for d in docs]}
 
 
 # ── The two username lists ─────────────────────────────────────────────────────

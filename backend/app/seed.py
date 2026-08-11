@@ -166,6 +166,21 @@ async def seed_narratives() -> None:
     await ai_agent.load_narratives(seed=True)
 
 
+# The Launchpad Monitor's own keyword list, matched whole-word against the
+# account's bio. Seeded from here rather than the JSON file because it is the
+# starting point for a list the user edits on the Settings page — deleting one
+# has to stick, so it is only ever written when the collection is empty.
+RBHX_KEYWORDS = ["Launchpad", "Launcher", "AI", "Agent", "Layer", "Cashcat",
+                 "Buybacks", "Buyback", "Earn", "Rewards", "Marketplace",
+                 "Prediction", "Game", "Gamified", "MMORPG", "MMO", "fun"]
+
+
+async def seed_rbhx_keywords() -> None:
+    if await _empty("rbhx_keywords"):
+        await db.get_collection("rbhx_keywords").insert_many(
+            [{"word": w} for w in RBHX_KEYWORDS])
+
+
 async def seed_all() -> None:
     await seed_keywords()
     await seed_narratives()
@@ -174,3 +189,4 @@ async def seed_all() -> None:
     await seed_otto_rules()
     await seed_filter_keywords()
     await seed_commands()
+    await seed_rbhx_keywords()

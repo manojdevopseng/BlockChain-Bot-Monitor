@@ -40,6 +40,7 @@ from app.scanners import launchpads
 from app.scanners.onchain_detector import ChainSpec, DetectedToken, OnChainDetector, NATIVE_ZERO
 from app.scanners.ws_provider import SubscriptionSpec
 from app.scanners.slog import get_logger
+from app.keywords import match_any as keyword_match
 from app.util import gmgn_url, ist_date_str
 
 log = get_logger(__name__)
@@ -241,6 +242,10 @@ class RbhXMonitor:
         # one rather than at boot, so a run with the panel off never has it.
         self._pad_alerts: asyncio.Queue = asyncio.Queue(maxsize=_PAD_ALERT_BACKLOG)
         self._pad_pump: Optional[asyncio.Task] = None
+        # The Launchpad keyword list, re-read on the same minute the toggles
+        # are: a keyword added on the Settings page applies to the next launch
+        # without a restart.
+        self._keywords: list[str] = []
         # Built in run(), not here: OnChainDetector registers its subscriptions
         # in __init__, so which of V2/V3/V4 it watches has to be decided before
         # it exists — and that comes from a switch read at start.
@@ -301,6 +306,7 @@ class RbhXMonitor:
             try:
                 await asyncio.sleep(_TOGGLE_REFRESH_SECONDS)
                 fresh = await registry.enabled_map()
+                await self._reload_keywords()
                 # V2/V3 is left alone: changing it here would not add or remove
                 # a subscription, and pretending otherwise is worse than
                 # waiting for the restart the supervisor already does.
@@ -312,11 +318,19 @@ class RbhXMonitor:
             except Exception as exc:  # noqa: BLE001
                 log.debug(f"[RBHX] toggle refresh failed: {exc}")
 
+    async def _reload_keywords(self) -> None:
+        try:
+            docs = await _col("rbhx_keywords").find({}).to_list(500)
+            self._keywords = [str(d.get("word") or "") for d in docs if d.get("word")]
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[PAD] keyword list not read: {exc}")
+
     def _on(self, service: str, default: bool = True) -> bool:
         return bool(self._enabled.get(service, default))
 
     async def run(self) -> None:
         self._session = self._session_factory()
+        await self._reload_keywords()
         self._detector = self._build()
         # Watch each launchpad's own mint event as well as pool creation. This
         # is what makes a launch visible in seconds instead of whenever its
@@ -600,6 +614,12 @@ class RbhXMonitor:
                    # request: the profile was already fetched for the follower
                    # count. The description is still stored, just not shown.
                    "excerpt": ((prof.bio if got_profile else "") or "")[:200],
+                   # Which of the Settings keywords the bio mentions, whole-word
+                   # — kept on the row so the alert and the panel say the same
+                   # thing, and so filtering on it later is a query rather than
+                   # a rescan.
+                   "matched_keywords": keyword_match(
+                       self._keywords, (prof.bio if got_profile else "") or ""),
                    "website": (launch.website if launch is not None else ""),
                    "image": (launch.image if launch is not None else "")}
             if not pad_skipped:
@@ -902,6 +922,9 @@ def _pad_alert_text(row: dict) -> str:
     # A watch hit says so on the first line — that is the message the watch
     # list was asked for — and the launchpad is still named under it.
     headline = row.get("_headline") or ""
+    # A keyword hit leads, above everything else — it is the reason to read the
+    # rest of the message.
+    matched = str(row.get("matched_keywords") or "")
     handle, source = row.get("handle"), row.get("handle_source")
     if handle:
         who = (f"👤 @{html.escape(handle)}"
@@ -914,8 +937,9 @@ def _pad_alert_text(row: dict) -> str:
         who = "👤 no X account named\n"
     dev = row.get("dev_buy_eth")
     return (
-        (headline + "\n" if headline
-         else "👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
+        ("🟢 <b>Keyword Matched</b>\n" if matched else "")
+        + (headline + "\n" if headline
+           else "👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
         + f"🚀 <b>{pad.upper()} LAUNCH</b>\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🪙 <b>{html.escape(row.get('symbol') or '?')}</b>"
@@ -924,6 +948,7 @@ def _pad_alert_text(row: dict) -> str:
         + (f"💰 dev bought {dev:.3f} Ξ\n" if dev else "")
         + (f"\n<blockquote>{html.escape(row['excerpt'][:300])}</blockquote>\n"
            if row.get("excerpt") else "")
+        + (f"<b>Text Matched KW:</b> {html.escape(matched)}\n" if matched else "")
         + f"\n<code>{html.escape(row.get('address') or '')}</code>"
     )
 
