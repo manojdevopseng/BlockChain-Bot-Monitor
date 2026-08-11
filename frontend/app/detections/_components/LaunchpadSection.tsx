@@ -223,9 +223,16 @@ export function LaunchpadSection() {
                     </span>
                   )}
                 </td>
+                {/* Wrapped rather than cut off at one line: the bio is stored
+                    capped at 200 characters, so it costs about four lines at
+                    this width and nothing is hidden. No title either — a
+                    tooltip that repeats what is already on screen is just a
+                    box in the way. break-words is for the links bios carry,
+                    which would otherwise widen the column on their own. */}
                 <td className="px-3 py-3">
-                  <span className="block max-w-[300px] truncate text-xs text-text-muted"
-                        title={r.excerpt}>{r.excerpt || "—"}</span>
+                  <span className="block max-w-[300px] whitespace-normal break-words text-xs text-text-muted">
+                    {r.excerpt || "—"}
+                  </span>
                 </td>
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">
