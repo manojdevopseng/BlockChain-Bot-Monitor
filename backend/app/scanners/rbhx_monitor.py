@@ -799,7 +799,9 @@ class RbhXMonitor:
         Queued rather than sent: see _PAD_ALERT_INTERVAL. Nothing here awaits,
         so a launch is never held up by Telegram.
         """
-        if not self._on("launchpad_telegram") or not config.DEST_RBH_X_MONITOR:
+        # Either chat is reason enough to build the message — _pad_alert_chat
+        # decides which one it goes to.
+        if not self._on("launchpad_telegram") or not _pad_alert_chat(row):
             return
         # A launch that names no account is not worth a message. Most of them
         # name none — pools.trade sent nine in ten minutes carrying nothing but
@@ -860,7 +862,7 @@ class RbhXMonitor:
         while True:
             row = await self._pad_alerts.get()
             try:
-                if not await notifier.send_to(config.DEST_RBH_X_MONITOR,
+                if not await notifier.send_to(_pad_alert_chat(row),
                                               _pad_alert_text(row),
                                               buttons=_pad_alert_buttons(row)):
                     log.warning(f"[PAD] alert not delivered for {row['symbol']}")
@@ -951,6 +953,19 @@ def _pad_alert_text(row: dict) -> str:
         + (f"<b>Text Matched KW:</b> {html.escape(matched)}\n" if matched else "")
         + f"\n<code>{html.escape(row.get('address') or '')}</code>"
     )
+
+
+def _pad_alert_chat(row: dict):
+    """Where this launchpad alert goes.
+
+    A launch whose bio matched a keyword goes to its own chat when one is set:
+    that feed is a handful a day where the general one is hundreds, and mixing
+    them is how the interesting ones get scrolled past. Everything else goes
+    where launchpad alerts have always gone.
+    """
+    if row.get("matched_keywords") and config.DEST_RBH_KEYWORD_MATCH:
+        return config.DEST_RBH_KEYWORD_MATCH
+    return config.DEST_RBH_X_MONITOR
 
 
 def _pad_alert_buttons(row: dict) -> list[tuple[str, str]]:

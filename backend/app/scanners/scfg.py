@@ -173,6 +173,7 @@ DEST_PREMIUM_ALL        = _int_or_none(settings.dest_premium_all)
 # branching anywhere else.
 DEST_IMPORTANT_CALLER   = _int_or_none(settings.dest_important_caller)
 DEST_RBH_X_MONITOR      = _int_or_none(settings.dest_rbh_x_monitor)
+DEST_RBH_KEYWORD_MATCH  = _int_or_none(settings.dest_rbh_keyword_match)
 
 DEST_PREMIUM_BY_CHAIN = {
     "eth": _int_or_none(settings.dest_premium_eth),

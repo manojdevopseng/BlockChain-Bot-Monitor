@@ -300,6 +300,7 @@ class Settings(BaseSettings):
     rbhx_rpc_wss_fallback2: str = ""
     # Where detections are posted. Blank = recorded in the panel, not sent.
     dest_rbh_x_monitor: str = ""
+    dest_rbh_keyword_match: str = ""
     # Where "all its endpoints are refusing" goes. Its own chat, not the
     # general alert group, so this feed's health is readable on its own.
     rbhx_alert_chat_id: str = ""
