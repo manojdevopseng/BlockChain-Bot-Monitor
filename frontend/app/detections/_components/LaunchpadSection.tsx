@@ -34,6 +34,41 @@ const PAD_TONE: Record<string, Variant> = {
 
 type Pad = { id: string; label: string; factories: number; enabled: boolean };
 
+/* The account's bio, with this token's address picked out of it.
+ *
+ * An account that has the contract in its own bio has said the token is
+ * theirs — which is the difference between the account behind a launch and an
+ * account somebody else named. The same match the watch alert makes on the
+ * server, drawn here rather than stored: it costs nothing, and it applies to
+ * every row already on the page instead of only the next one.
+ *
+ * Case-insensitive and with or without the 0x, because bios carry both. A
+ * shortened "0x5fb2…95fa5" is deliberately not matched — it is not the
+ * address, and guessing at one is how the wrong token gets highlighted. */
+function BioText({ text, address }: { text: string; address: string }) {
+  const bare = (address || "").toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{40}$/.test(bare)) return <>{text}</>;
+
+  // Not part of a longer hex run — the same guard the server's matcher uses.
+  const re = new RegExp(`(?:0x)?${bare}(?![0-9a-f])`, "gi");
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    const at = m.index ?? 0;
+    if (at > last) parts.push(text.slice(last, at));
+    parts.push(
+      <span key={at} title="This account's bio names this token's address"
+            className="rounded bg-accent-green/15 px-0.5 font-medium text-accent-green">
+        {m[0]}
+      </span>
+    );
+    last = at + m[0].length;
+  }
+  if (!parts.length) return <>{text}</>;
+  parts.push(text.slice(last));
+  return <>{parts}</>;
+}
+
 export function LaunchpadSection() {
   const [pad, setPad] = useState("all");
   const [q, setQ] = useState("");
@@ -231,7 +266,7 @@ export function LaunchpadSection() {
                     which would otherwise widen the column on their own. */}
                 <td className="px-3 py-3">
                   <span className="block max-w-[300px] whitespace-normal break-words text-xs text-text-muted">
-                    {r.excerpt || "—"}
+                    {r.excerpt ? <BioText text={r.excerpt} address={r.address} /> : "—"}
                   </span>
                 </td>
                 <td className="px-3 py-3">
