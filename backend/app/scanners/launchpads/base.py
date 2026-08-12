@@ -102,6 +102,12 @@ class Launchpad:
     # behind the launch. Flap turns it on because its twitter field is a post
     # link nearly every time, so the strict rule empties the column.
     allow_post_handles: bool = False
+    # Whether this launchpad's socials can arrive after the launch does. Every
+    # on-chain one is readable the moment the event fires; Virtuals keeps its
+    # off chain and the record lands a minute or five later. When this is on,
+    # a launch that came in without an account is read again on a schedule,
+    # and the row is filled in — and alerted — if one appears.
+    late_socials: bool = False
 
     async def read(self, provider, address: str, log_obj: dict) -> Launch:
         """Everything this launchpad can tell us about the launch.

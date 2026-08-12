@@ -59,6 +59,11 @@ class Virtuals(Launchpad):
     # A handle Virtuals verified is an account, not a link to a post, so the
     # post rule never comes up here.
     allow_post_handles = False
+    # The agent record is written after the launch, not with it — measured at
+    # five minutes on one live launch and still missing at two on another. The
+    # row goes up immediately either way and the account is filled in when it
+    # appears.
+    late_socials = True
 
     def __init__(self) -> None:
         self.factories = [

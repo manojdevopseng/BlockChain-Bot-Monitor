@@ -87,6 +87,11 @@ _TOGGLE_REFRESH_SECONDS = 60
 _LOOKUP_GATE = asyncio.Semaphore(2)
 _X_RETRIES = 2
 _X_RETRY_DELAY = 3.0
+# When a launchpad publishes its socials after the launch, this is when we
+# ask again: a minute, five, then a quarter of an hour. Measured on Virtuals,
+# where one launch had its account five minutes later and another still did
+# not at two.
+_LATE_SOCIAL_DELAYS = (60.0, 240.0, 600.0)
 
 # Launchpad alerts are paced; the X Monitor's are not. That panel takes a
 # handful of launches a day, this one took 23 in four minutes — and Telegram
@@ -638,6 +643,12 @@ class RbhXMonitor:
                          + (f" ({prof.followers:,} followers)" if got_profile else "")
                          + (" · WATCHED" if pad_watched else ""))
                 pad_row = row
+                # Some launchpads publish the account after the launch, not
+                # with it. The row is already up; this fills it in when it
+                # appears, and alerts then rather than never.
+                if not handle and getattr(pad, "late_socials", False):
+                    asyncio.create_task(self._late_socials(pad, addr),
+                                        name=f"rbhx-late-{addr[:10]}")
 
         # ── the X Monitor: only launches with an account we could read ───────
         # A handle taken out of a post link does not belong here: that panel
@@ -705,6 +716,63 @@ class RbhXMonitor:
             return "", 0.0
         return ((info.get("from") or "").lower(),
                 int(info.get("value") or "0x0", 16) / 1e18)
+
+    async def _late_socials(self, pad, addr: str) -> None:
+        """Ask a launchpad again, later, for an account it had not published.
+
+        Three tries over a quarter of an hour, stopping at the first answer.
+        The launch is already on the page; what this adds is the account, the
+        follower count and the alert that could not be sent without them.
+        """
+        for delay in _LATE_SOCIAL_DELAYS:
+            await asyncio.sleep(delay)
+            row = await _col("launchpad_tokens").find_one({"address": addr})
+            if not row:
+                return                      # dropped from the panel meanwhile
+            if row.get("handle"):
+                return                      # something else filled it in
+            try:
+                launch = await pad.read(self._detector.provider, addr, {})
+            except Exception as exc:  # noqa: BLE001
+                log.debug(f"[PAD-{pad.id.upper()}] late read failed for {addr[:10]}: {exc}")
+                continue
+            if not launch.handle:
+                continue
+
+            async with _LOOKUP_GATE:
+                prof = await x_client.fetch_profile(self._session, launch.handle)
+            got_profile = prof is not None and not prof.lookup_failed
+            update = {
+                "handle": launch.handle,
+                "handle_source": launch.handle_source or "verified",
+                "proved": bool(getattr(launch, "proved", False)),
+                "link": f"https://x.com/{launch.handle}",
+                "followers": prof.followers if got_profile else 0,
+                "verified": bool(got_profile and prof.verified),
+                "verified_type": (prof.verified_type if got_profile else ""),
+                "excerpt": ((prof.bio if got_profile else "") or "")[:200],
+            }
+            update["matched_keywords"] = keyword_match(
+                self._keywords, update["excerpt"])
+            await _col("launchpad_tokens").update_one({"address": addr},
+                                                      {"$set": update})
+            merged = {**row, **update}
+            from app.ws_hub import hub
+            await hub.broadcast("launchpad_token",
+                                {k: v for k, v in merged.items() if k != "dt"})
+            log.info(f"[PAD-{pad.id.upper()}] {row.get('symbol')} — @{launch.handle} "
+                     f"arrived {int(delay)}s later"
+                     + (f" ({prof.followers:,} followers)" if got_profile else ""))
+            # The X Monitor wants it too, on the same terms as at launch time.
+            if got_profile and update["handle_source"] != "post" and self._on("rbhx_monitor"):
+                await _col("rbhx_tokens").update_one(
+                    {"address": addr}, {"$set": {k: v for k, v in merged.items()
+                                                 if k not in ("launchpad", "launchpad_label")}},
+                    upsert=True)
+                await hub.broadcast("rbhx_token",
+                                    {k: v for k, v in merged.items() if k != "dt"})
+            self._notify_pad(merged)
+            return
 
     async def _watch_dev_buy(self, addr: str, dev: str, symbol: str,
                              already: float = 0.0) -> None:
