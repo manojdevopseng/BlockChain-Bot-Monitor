@@ -48,8 +48,11 @@ DEFAULT_INTERVAL = "5m"
 CADENCES: dict[str, int] = {"10s": 10, "20s": 20, "30s": 30, "1m": 60}
 DEFAULT_CADENCE = "30s"
 
-# How often the token list and the switches are re-read.
-_REFRESH_SECONDS = 60
+# How often the token list and the switches are re-read. Fifteen rather than a
+# minute because this is also how long a token you just added sits there doing
+# nothing — the query is two small collections and the wait was the only thing
+# anyone would notice.
+_REFRESH_SECONDS = 15
 # One token's alert cannot repeat inside this window even if it leaves the zone
 # and comes back — a price bouncing on the 30 line would otherwise ring twice a
 # minute.
