@@ -39,6 +39,9 @@ RPC = "rpc"
 # Its own category so the Settings page can give the feature a section of its
 # own rather than scattering six switches through Bots.
 RBHX = "rbhx"
+# Its own section again: the tracker, its chains and its endpoints only make
+# sense read together.
+RSI = "rsi"
 
 # Registry ids that were renamed, old -> new. `seed` carries the user's on/off
 # state across so a rename never silently re-enables something they had turned
@@ -132,6 +135,32 @@ DEFAULT_SERVICES: list[dict] = [
     # record but about whether anything can be read at all.
     {"id": "rbhx_rpc",       "category": RBHX, "group": "Both sections",
      "label": "RPC Endpoints", "chain": "rbh", "enabled": True},
+
+    # ── RSI Tracker ────────────────────────────────────────────────────────
+    # Three blocks: is it running, which chains it prices, and which of its own
+    # endpoints are in use. A chain needs both its switches on to be sampled.
+    {"id": "rsi_tracker",  "category": RSI, "group": "Tracker",
+     "label": "RSI Tracker", "chain": "eth", "enabled": True},
+    {"id": "rsi_telegram", "category": RSI, "group": "Tracker",
+     "label": "Telegram Alerts", "chain": "eth", "enabled": True},
+    {"id": "rsi_chain_rbh", "category": RSI, "group": "Chains",
+     "label": "RBH", "chain": "rbh", "enabled": True},
+    {"id": "rsi_chain_eth", "category": RSI, "group": "Chains",
+     "label": "ETH", "chain": "eth", "enabled": True},
+    {"id": "rsi_chain_bsc", "category": RSI, "group": "Chains",
+     "label": "BSC", "chain": "bnb", "enabled": True},
+    # Off until its price source exists — a V4-only chain has no pool address
+    # to read, and Solana is a different job again.
+    {"id": "rsi_chain_sol", "category": RSI, "group": "Chains",
+     "label": "SOL (not priced yet)", "chain": "sol", "enabled": False},
+    {"id": "rsi_rpc_rbh",  "category": RSI, "group": "RPC Endpoints",
+     "label": "RBH endpoints", "chain": "rbh", "enabled": True},
+    {"id": "rsi_rpc_eth",  "category": RSI, "group": "RPC Endpoints",
+     "label": "ETH endpoints", "chain": "eth", "enabled": True},
+    {"id": "rsi_rpc_bsc",  "category": RSI, "group": "RPC Endpoints",
+     "label": "BSC endpoints", "chain": "bnb", "enabled": True},
+    {"id": "rsi_rpc_sol",  "category": RSI, "group": "RPC Endpoints",
+     "label": "SOL endpoints", "chain": "sol", "enabled": False},
 
     # The starred-caller mirror. Its own switch so the filtered feed can be
     # stopped without touching the full one, and the other way round.
@@ -294,7 +323,7 @@ async def grouped() -> dict[str, list[dict]]:
     `data?.ai ?? []` rather than checking, so a whole section would vanish
     instead of rendering empty.
     """
-    out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: []}
+    out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: [], RSI: []}
     for svc in await list_services():
         out.setdefault(svc["category"], []).append(svc)
     return out

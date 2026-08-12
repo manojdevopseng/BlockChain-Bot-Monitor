@@ -301,6 +301,24 @@ class Settings(BaseSettings):
     # Where detections are posted. Blank = recorded in the panel, not sent.
     dest_rbh_x_monitor: str = ""
     dest_rbh_keyword_match: str = ""
+
+    # ── RSI Tracker ──────────────────────────────────────────────────────────
+    # Its own endpoints per chain, two each; blank borrows that chain's own.
+    rsi_eth_rpc_http: str = ""
+    rsi_eth_rpc_http_fallback: str = ""
+    rsi_bsc_rpc_http: str = ""
+    rsi_bsc_rpc_http_fallback: str = ""
+    rsi_rbh_rpc_http: str = ""
+    rsi_rbh_rpc_http_fallback: str = ""
+    rsi_sol_rpc_http: str = ""
+    rsi_sol_rpc_http_fallback: str = ""
+    # Where RSI alerts go.
+    rsi_alert_chat_id: str = ""
+    # PancakeSwap's factories — the BSC equivalents of the ETH ones above.
+    bnb_v2_factory: str = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+    bnb_v3_factory: str = "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
+    # How long candles and readings are kept, like every other panel.
+    rsi_retention_days: int = 15
     # Where "all its endpoints are refusing" goes. Its own chat, not the
     # general alert group, so this feed's health is readable on its own.
     rbhx_alert_chat_id: str = ""

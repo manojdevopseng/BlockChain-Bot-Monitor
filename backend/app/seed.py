@@ -181,6 +181,15 @@ async def seed_rbhx_keywords() -> None:
             [{"word": w} for w in RBHX_KEYWORDS])
 
 
+async def seed_rsi_settings() -> None:
+    """Bounds, period and check cadence. One row, edited from the panel, the
+    Settings page or Telegram — all three write here."""
+    col = db.get_collection("rsi_settings")
+    if not await col.find_one({"_id": "rsi"}):
+        await col.insert_one({"_id": "rsi", "low": 30.0, "high": 70.0,
+                              "period": 14, "cadence": "30s"})
+
+
 async def seed_all() -> None:
     await seed_keywords()
     await seed_narratives()
@@ -190,3 +199,4 @@ async def seed_all() -> None:
     await seed_filter_keywords()
     await seed_commands()
     await seed_rbhx_keywords()
+    await seed_rsi_settings()

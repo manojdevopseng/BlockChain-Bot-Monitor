@@ -175,6 +175,22 @@ DEST_IMPORTANT_CALLER   = _int_or_none(settings.dest_important_caller)
 DEST_RBH_X_MONITOR      = _int_or_none(settings.dest_rbh_x_monitor)
 DEST_RBH_KEYWORD_MATCH  = _int_or_none(settings.dest_rbh_keyword_match)
 
+# ── RSI Tracker ─────────────────────────────────────────────────
+RSI_ETH_RPC_HTTP = settings.rsi_eth_rpc_http
+RSI_BSC_RPC_HTTP = settings.rsi_bsc_rpc_http
+RSI_RBH_RPC_HTTP = settings.rsi_rbh_rpc_http
+RSI_SOL_RPC_HTTP = settings.rsi_sol_rpc_http
+RSI_ENDPOINTS = {
+    "eth": [u for u in (settings.rsi_eth_rpc_http, settings.rsi_eth_rpc_http_fallback) if u],
+    "bsc": [u for u in (settings.rsi_bsc_rpc_http, settings.rsi_bsc_rpc_http_fallback) if u],
+    "rbh": [u for u in (settings.rsi_rbh_rpc_http, settings.rsi_rbh_rpc_http_fallback) if u],
+    "sol": [u for u in (settings.rsi_sol_rpc_http, settings.rsi_sol_rpc_http_fallback) if u],
+}
+RSI_ALERT_CHAT_ID = _int_or_none(settings.rsi_alert_chat_id)
+BNB_V2_FACTORY = settings.bnb_v2_factory
+BNB_V3_FACTORY = settings.bnb_v3_factory
+RSI_RETENTION_DAYS = settings.rsi_retention_days
+
 DEST_PREMIUM_BY_CHAIN = {
     "eth": _int_or_none(settings.dest_premium_eth),
     "rbh": _int_or_none(settings.dest_premium_rbh),

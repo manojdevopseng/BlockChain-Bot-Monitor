@@ -227,6 +227,10 @@ _TTL_COLLECTIONS = {
     # separate from the X Monitor's so one panel's list never edits the other's.
     "launchpad_tokens": "launchpad_retention_days",
     "launchpad_skip": "launchpad_retention_days",
+    # RSI Tracker: candles and readings age out like every other panel. The
+    # token list does not — that is the user's own list, not data.
+    "rsi_candles": "rsi_retention_days",
+    "rsi_state": "rsi_retention_days",
     "launchpad_watch": "launchpad_retention_days",
 }
 
@@ -320,6 +324,11 @@ async def ensure_indexes() -> None:
         ("launchpad_tokens",   [("day", -1)]),                       # History filter
         ("launchpad_tokens",   [("followers", -1)]),                 # Min Followers
         # Read once per launch, so a lookup rather than a scan.
+        # Read once per second by the sampler and once per cadence by the
+        # evaluator, so both have to be lookups.
+        ("rsi_tokens",         [("chain", 1), ("address", 1)]),
+        ("rsi_state",          [("chain", 1), ("address", 1)]),
+        ("rsi_candles",        [("chain", 1), ("address", 1), ("interval", 1), ("ts", -1)]),
         ("launchpad_skip",     "handle"),
         ("launchpad_watch",    "handle"),
     ]
@@ -351,6 +360,8 @@ _TS_FIELD = {
     "rbhx_skip": "added_at",
     "rbhx_watch": "added_at",
     "launchpad_tokens": "open_timestamp",
+    "rsi_candles": "ts",
+    "rsi_state": "updated_at",
     "launchpad_skip": "added_at",
     "launchpad_watch": "added_at",
 }
