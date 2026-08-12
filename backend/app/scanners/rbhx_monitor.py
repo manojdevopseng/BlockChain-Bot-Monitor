@@ -92,6 +92,10 @@ _X_RETRY_DELAY = 3.0
 # where one launch had its account five minutes later and another still did
 # not at two.
 _LATE_SOCIAL_DELAYS = (60.0, 240.0, 600.0)
+# How far back a restart looks for launches still missing an account. An
+# hour covers a restart and a deploy; past that the launch is old news and
+# the panel has it either way.
+_LATE_SOCIAL_CATCH_UP = 3600.0
 
 # Launchpad alerts are paced; the X Monitor's are not. That panel takes a
 # handful of launches a day, this one took 23 in four minutes — and Telegram
@@ -336,6 +340,7 @@ class RbhXMonitor:
     async def run(self) -> None:
         self._session = self._session_factory()
         await self._reload_keywords()
+        asyncio.create_task(self._catch_up_late_socials(), name="rbhx-late-catchup")
         self._detector = self._build()
         # Watch each launchpad's own mint event as well as pool creation. This
         # is what makes a launch visible in seconds instead of whenever its
@@ -717,14 +722,43 @@ class RbhXMonitor:
         return ((info.get("from") or "").lower(),
                 int(info.get("value") or "0x0", 16) / 1e18)
 
-    async def _late_socials(self, pad, addr: str) -> None:
+    async def _catch_up_late_socials(self) -> None:
+        """Pick up where a restart left off.
+
+        The fill-in is an in-memory task, so a restart loses whichever were
+        still waiting — and the launch it was waiting on keeps its empty
+        account column forever. This re-schedules them for anything recent
+        enough to still be worth asking about.
+        """
+        cutoff = time.time() - _LATE_SOCIAL_CATCH_UP
+        for pad in launchpads.all_launchpads():
+            if not getattr(pad, "late_socials", False):
+                continue
+            try:
+                rows = await _col("launchpad_tokens").find(
+                    {"launchpad": pad.id, "open_timestamp": {"$gt": cutoff},
+                     "handle": None}).to_list(200)
+            except Exception as exc:  # noqa: BLE001
+                log.debug(f"[PAD-{pad.id.upper()}] catch-up query failed: {exc}")
+                continue
+            for row in rows:
+                asyncio.create_task(
+                    self._late_socials(pad, row["address"], immediate=True),
+                    name=f"rbhx-late-{row['address'][:10]}")
+            if rows:
+                log.info(f"[PAD-{pad.id.upper()}] asking again for {len(rows)} launch(es) "
+                         "that had no account yet")
+
+    async def _late_socials(self, pad, addr: str, immediate: bool = False) -> None:
         """Ask a launchpad again, later, for an account it had not published.
 
         Three tries over a quarter of an hour, stopping at the first answer.
         The launch is already on the page; what this adds is the account, the
         follower count and the alert that could not be sent without them.
         """
-        for delay in _LATE_SOCIAL_DELAYS:
+        # A catch-up asks straight away first: the launch is already minutes
+        # old, so the first wait has been served by the restart itself.
+        for delay in ((0.0,) + _LATE_SOCIAL_DELAYS if immediate else _LATE_SOCIAL_DELAYS):
             await asyncio.sleep(delay)
             row = await _col("launchpad_tokens").find_one({"address": addr})
             if not row:
