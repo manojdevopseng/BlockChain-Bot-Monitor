@@ -850,9 +850,13 @@ class RbhXMonitor:
             # not knowing, and the unconfirmed message is the honest one.
             log.debug(f"[PAD] could not read @{handle}'s posts: {exc}")
         confirmed = _mentions_address(texts, address)
-        headline = (f"🔭 <b>Watch Account Found with '@{handle}' "
-                    "with Original Token Address</b>" if confirmed
-                    else f"🔭 <b>Watch Account Found with '@{handle}'</b>")
+        # Two lines: what happened, then which account and whether they own up
+        # to the token. The heading is what you scan a chat for; the line under
+        # it is what you read once it has your attention.
+        headline = ("🔭 <b>Matched Watch X Account</b>\n"
+                    + (f"Watch Account Found with '@{handle}' "
+                       "with Original Token Address" if confirmed
+                       else f"Watch Account Found with '@{handle}'"))
         log.info(f"[PAD] watch hit — @{handle} {row.get('symbol')}"
                  f"{' · address published by the account' if confirmed else ''}")
         self._notify_pad({**row, "_headline": headline})
@@ -958,12 +962,14 @@ def _pad_alert_text(row: dict) -> str:
 def _pad_alert_chat(row: dict):
     """Where this launchpad alert goes.
 
-    A launch whose bio matched a keyword goes to its own chat when one is set:
-    that feed is a handful a day where the general one is hundreds, and mixing
-    them is how the interesting ones get scrolled past. Everything else goes
-    where launchpad alerts have always gone.
+    Two things go to the second chat when one is set: a launch whose bio
+    matched a keyword, and a launch by an account on the watch list. Both are a
+    handful a day where the general feed is hundreds, and mixing them is how
+    the interesting ones get scrolled past. Everything else goes where
+    launchpad alerts have always gone.
     """
-    if row.get("matched_keywords") and config.DEST_RBH_KEYWORD_MATCH:
+    if ((row.get("matched_keywords") or row.get("watched"))
+            and config.DEST_RBH_KEYWORD_MATCH):
         return config.DEST_RBH_KEYWORD_MATCH
     return config.DEST_RBH_X_MONITOR
 
