@@ -173,6 +173,21 @@ class PriceReader:
                      f"{spec.wnative[:8]}… — nothing to price it from yet")
         return ref
 
+    async def find_chains(self, token: str) -> list[str]:
+        """Which chains actually have a pool for this address.
+
+        The same 0x… exists on ETH, BSC and Robinhood and means a different
+        token on each, so "which chain" cannot be guessed from the string. It
+        can be asked, though: the chain that has a pool for it is the chain it
+        trades on. Usually exactly one answers.
+        """
+        found = []
+        for key in chains():
+            ref = await self.resolve(key, token)
+            if ref.kind:
+                found.append(key)
+        return found
+
     async def price(self, chain: str, token: str) -> Optional[float]:
         """Native per token, or None when it cannot be read right now.
 

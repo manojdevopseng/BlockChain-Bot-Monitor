@@ -23,6 +23,9 @@ from app.scanners.rsi_tracker import (CADENCES, DEFAULT_CADENCE, DEFAULT_INTERVA
 from app.util import ist_date_str
 
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+# Base58, no 0 O I l — a Solana mint. Recognised only to say it is not priced
+# yet, rather than rejecting it as gibberish.
+_SOL_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 def _col(name: str):
@@ -116,16 +119,30 @@ async def _list() -> str:
 
 
 async def _add(args: list[str]) -> str:
-    if len(args) < 2:
-        raise ValueError("usage: /rsi_add &lt;chain&gt; &lt;address&gt; [interval]")
-    chain = args[0].lower()
-    if chain not in chains() and chain != "sol":
-        raise ValueError(f"unknown chain '{chain}' — have "
-                         f"{', '.join(list(chains()) + ['sol'])}")
-    address = args[1]
+    """/rsi_add [chain] <address> [timeframe].
+
+    The chain is optional because the same 0x… exists on ETH, BSC and
+    Robinhood: rather than making someone remember which one they are looking
+    at, the chains are asked which of them has a pool for it. Naming the chain
+    still works and skips the lookup.
+    """
+    if not args:
+        raise ValueError("usage: /rsi_add &lt;address&gt;  — or "
+                         "/rsi_add &lt;chain&gt; &lt;address&gt; [timeframe]")
+    chain, rest = "", list(args)
+    if rest[0].lower() in chains() or rest[0].lower() == "sol":
+        chain, rest = rest.pop(0).lower(), rest
+    if not rest:
+        raise ValueError("that is a chain, not an address")
+    address = rest[0]
+    if _SOL_ADDRESS_RE.match(address) and not _ADDRESS_RE.match(address):
+        raise ValueError("that looks like a Solana address — SOL is not priced "
+                         "yet, so nothing could be read for it")
     if not _ADDRESS_RE.match(address):
         raise ValueError(f"'{address}' is not a contract address")
-    interval = (args[2].lower() if len(args) > 2
+    if not chain:
+        chain = await _detect_chain(address)
+    interval = (rest[1].lower() if len(rest) > 1
                 else str((await _settings()).get("default_interval", DEFAULT_INTERVAL)))
     if interval not in INTERVALS:
         raise ValueError(f"unknown interval '{interval}' — have {', '.join(INTERVALS)}")
@@ -133,13 +150,31 @@ async def _add(args: list[str]) -> str:
     await _col("rsi_tokens").update_one(
         {"chain": chain, "address": address.lower()},
         {"$set": {"chain": chain, "address": address.lower(), "interval": interval,
-                  "symbol": args[3][:32] if len(args) > 3 else "",
+                  "symbol": rest[2][:32] if len(rest) > 2 else "",
                   "enabled": True, "added_at": now, "day": ist_date_str(now)}},
         upsert=True)
-    return (f"✅ tracking <code>{address}</code> on {chain.upper()} · "
+    return (f"✅ tracking <code>{address}</code> on <b>{chain.upper()}</b> · "
             f"{INTERVAL_LABELS[interval]}\nIt needs "
             f"{int((await _settings()).get('period', DEFAULT_PERIOD)) + 1} candles "
             f"before it reports an RSI.")
+
+
+async def _detect_chain(address: str) -> str:
+    """Which chain this address trades on, asked rather than guessed."""
+    import aiohttp
+    from app.scanners.rsi_price import PriceReader
+    async with aiohttp.ClientSession() as session:
+        found = await PriceReader(session).find_chains(address)
+    if not found:
+        raise ValueError("no pool found for that address on ETH, BSC or RBH — "
+                         "name the chain to add it anyway: "
+                         "/rsi_add &lt;chain&gt; &lt;address&gt;")
+    if len(found) > 1:
+        raise ValueError("that address has a pool on "
+                         + " and ".join(c.upper() for c in found)
+                         + " — say which: /rsi_add "
+                         + f"{found[0]} {address}")
+    return found[0]
 
 
 async def _remove(args: list[str]) -> str:

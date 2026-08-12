@@ -41,6 +41,12 @@ _BOUND_STEP = 5.0
 # Tokens shown per screen. Telegram stops laying keyboards out sensibly well
 # before this, and the page is there for a long list.
 _TOKEN_LIMIT = 20
+# "➕ Add token" cannot be one press: Telegram has no text field on a keyboard,
+# so the chain is chosen with buttons and the address arrives as the next
+# message. This remembers which chat is mid-add, and for how long — an
+# abandoned one must not swallow an unrelated message an hour later.
+_PENDING: dict[int, tuple[str, float]] = {}
+_PENDING_SECONDS = 300.0
 
 
 def _col(name: str):
@@ -113,7 +119,8 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
     # The clock marks these as the other thing: how often, not how long.
     rows.append([{"text": f"⏱ {c}{' •' if c == cadence else ''}",
                   "callback_data": f"rsi:cad:{c}"} for c in CADENCES])
-    rows.append([{"text": f"🪙 Tokens ({tokens})", "callback_data": "rsi:tokens"},
+    rows.append([{"text": "➕ Add token", "callback_data": "rsi:add"},
+                 {"text": f"🪙 Tokens ({tokens})", "callback_data": "rsi:tokens"},
                  {"text": "🔄 Refresh", "callback_data": "rsi:home"}])
     return text, rows
 
@@ -183,6 +190,52 @@ async def token_panel(address: str) -> tuple[str, list[list[dict]]]:
     return text, keyboard
 
 
+async def add_panel() -> tuple[str, list[list[dict]]]:
+    """Which chain the address about to be sent belongs to.
+
+    Asked rather than guessed, because the same 0x… exists on ETH, BSC and
+    Robinhood and means a different token on each. "Work it out" is there too:
+    it asks each chain whether it has a pool for the address.
+    """
+    text = ("➕ <b>Add a token</b>\n"
+            "➖➖➖➖➖➖➖➖➖➖\n"
+            "Pick the chain, then send me the contract address as a message.\n\n"
+            "<i>Not sure which chain? Pick “Work it out” and I will ask each "
+            "one whether it has a pool for that address.</i>")
+    row = [{"text": spec.label, "callback_data": f"rsi:addc:{key}"}
+           for key, spec in chains().items()]
+    return text, [row,
+                  [{"text": "🔎 Work it out", "callback_data": "rsi:addc:auto"}],
+                  [{"text": "⬅ Back", "callback_data": "rsi:home"}]]
+
+
+async def pending_address(chat_id, text: str) -> bool:
+    """A plain message in the RSI chat, when a chain has just been chosen.
+
+    Returns True when it was consumed as an address, so the caller knows to
+    stay quiet about it otherwise.
+    """
+    import time as _time
+    from app.scanners.rsi_commands import reply as command_reply
+    entry = _PENDING.get(chat_id)
+    if not entry:
+        return False
+    chain, at = entry
+    if _time.time() - at > _PENDING_SECONDS:
+        _PENDING.pop(chat_id, None)
+        return False
+    address = text.strip().split()[0] if text.strip() else ""
+    _PENDING.pop(chat_id, None)
+    # Straight through the command, so there is one implementation of adding a
+    # token and one set of error messages.
+    said = await command_reply("rsi_add",
+                               f"/rsi_add {'' if chain == 'auto' else chain} {address}")
+    await notifier.send_to(chat_id, said or "Could not add that")
+    if said.startswith("✅"):
+        await open_panel(chat_id)
+    return True
+
+
 # ── presses ───────────────────────────────────────────────────────────────────
 
 async def handle(data: str, cb: dict) -> tuple[str, bool]:
@@ -250,6 +303,22 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
                                               {"$set": {"cadence": arg}}, upsert=True)
         toast = f"Checking every {arg}"
 
+    elif what == "add":
+        screen = "add"
+
+    elif what == "addc":
+        import time as _time
+        _PENDING[chat_id] = (arg, _time.time())
+        screen = "add"
+        toast = ("Send me the address" if arg == "auto"
+                 else f"Send me the {arg.upper()} address")
+        await notifier.send_to(
+            chat_id,
+            f"➕ Send the contract address"
+            + ("" if arg == "auto" else f" for <b>{arg.upper()}</b>")
+            + " as your next message.\n"
+            + f"<i>Expires in {int(_PENDING_SECONDS // 60)} minutes.</i>")
+
     elif what == "tokens":
         screen = "tokens"
 
@@ -282,7 +351,9 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
     elif what == "home":
         screen = "home"
 
-    if screen == "tokens":
+    if screen == "add":
+        text, keyboard = await add_panel()
+    elif screen == "tokens":
         text, keyboard = await token_list_panel()
     elif screen == "token":
         text, keyboard = await token_panel(arg)

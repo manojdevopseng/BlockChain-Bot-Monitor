@@ -373,10 +373,15 @@ class TelegramCommands:
     async def _handle(self, update: dict) -> None:
         msg = update.get("message") or {}
         text = (msg.get("text") or "").strip()
-        if not text.startswith("/"):
-            return
         chat_id = (msg.get("chat") or {}).get("id")
         if chat_id is None:
+            return
+        if not text.startswith("/"):
+            # Not a command — but the RSI settings screen asks for an address
+            # as an ordinary message after a chain is chosen, and that is the
+            # only time a plain message means anything to this bot.
+            from app import rsi_panel
+            await rsi_panel.pending_address(chat_id, text)
             return
 
         # Commands are answered in one group only, with one exception: the RSI
