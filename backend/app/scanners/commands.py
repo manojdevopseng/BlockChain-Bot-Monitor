@@ -56,7 +56,7 @@ COMMAND_SPEC = [
                  "(group admins only)",                "System"),
     # The RSI tracker, controlled from here as well as the page — same
     # collections behind both, so neither can be out of date.
-    ("rsi",          "RSI tracker status",                    "RSI Controller"),
+    ("rsi",          "RSI settings screen (buttons)",          "RSI Controller"),
     ("rsi_list",     "Tracked tokens and their RSI",          "RSI Controller"),
     ("rsi_add",      "Track a token: /rsi_add <chain> <address> [interval]",
                                                               "RSI Controller"),
@@ -355,10 +355,14 @@ class TelegramCommands:
         if chat_id is None:
             return
 
-        # Commands are answered in one group only. Everywhere else the bot says
-        # nothing at all — no reply, no error, and the usage counter is not
-        # touched, so the dashboard shows only real use.
-        if not self.allowed(chat_id):
+        # Commands are answered in one group only, with one exception: the RSI
+        # commands also answer in the RSI alert chat, because that is where its
+        # alerts land and its settings screen belongs beside them.
+        cmd_word = text.split()[0].lstrip("/").split("@")[0].lower()
+        rsi_chat = (cmd_word.startswith("rsi")
+                    and config.RSI_ALERT_CHAT_ID
+                    and str(chat_id) == str(config.RSI_ALERT_CHAT_ID))
+        if not rsi_chat and not self.allowed(chat_id):
             log.debug(f"[CMD] ignored '{text.split()[0]}' from chat {chat_id} "
                       f"(only {self._chat_id} is allowed)")
             return
@@ -400,6 +404,13 @@ class TelegramCommands:
     async def _reply_for(self, cmd: str, chat_id, user_id, text: str = "") -> str:
         # The only commands that take arguments so far, and they take several.
         if cmd.startswith("rsi"):
+            # /rsi is the settings screen — buttons, edited in place. The rest
+            # stay as commands, which is what a phone keyboard is good for
+            # when you already know the address you want to add.
+            if cmd == "rsi":
+                from app import rsi_panel
+                await rsi_panel.open_panel(chat_id)
+                return ""
             from app.scanners.rsi_commands import reply as rsi_reply
             return await rsi_reply(cmd, text)
         if cmd in ("start", "help"):

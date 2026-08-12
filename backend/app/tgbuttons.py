@@ -120,6 +120,11 @@ async def unmute(kind: str, key: str) -> bool:
 async def handle_callback(cb: dict) -> tuple[str, bool]:
     """Act on a button press. Returns (text for the toast, show_alert)."""
     data = str(cb.get("data") or "")
+    # The RSI settings screen: its own module, because it is a screen with
+    # state rather than a one-shot action like muting.
+    if data.startswith("rsi:"):
+        from . import rsi_panel
+        return await rsi_panel.handle(data, cb)
     if data.startswith("mt:"):
         key = data[3:]
         until = await mute("token", key)

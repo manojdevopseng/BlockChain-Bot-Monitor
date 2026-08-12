@@ -109,6 +109,61 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
         return False
 
 
+async def send_panel(chat_id, text: str, keyboard: list[list[dict]]) -> Optional[int]:
+    """Send a message carrying callback buttons, and return its message id.
+
+    `send_to`'s buttons are links, which Telegram opens itself. These are
+    buttons that come back to us — a settings screen rather than a shortcut —
+    so the id matters: the panel is edited in place afterwards rather than
+    posting a new copy on every press.
+    """
+    if not chat_id or not settings.telegram_bot_token:
+        return None
+    try:
+        session = await _session_get()
+        async with session.post(
+            f"{TELEGRAM_API}/bot{settings.telegram_bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                  "disable_web_page_preview": True,
+                  "reply_markup": {"inline_keyboard": keyboard}},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            body = await resp.json()
+    except Exception as exc:  # noqa: BLE001
+        _safe_print(f"[notifier] panel to {chat_id} failed: {exc}")
+        return None
+    if not body.get("ok"):
+        _safe_print(f"[notifier] panel rejected: {str(body)[:200]}")
+        return None
+    return (body.get("result") or {}).get("message_id")
+
+
+async def edit_panel(chat_id, message_id, text: str,
+                     keyboard: list[list[dict]]) -> bool:
+    """Redraw a panel in place. A screen, not a stream of messages."""
+    if not chat_id or not message_id or not settings.telegram_bot_token:
+        return False
+    try:
+        session = await _session_get()
+        async with session.post(
+            f"{TELEGRAM_API}/bot{settings.telegram_bot_token}/editMessageText",
+            json={"chat_id": chat_id, "message_id": message_id, "text": text,
+                  "parse_mode": "HTML", "disable_web_page_preview": True,
+                  "reply_markup": {"inline_keyboard": keyboard}},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            body = await resp.json()
+    except Exception as exc:  # noqa: BLE001
+        _safe_print(f"[notifier] panel edit failed: {exc}")
+        return False
+    # "message is not modified" is Telegram objecting that nothing changed,
+    # which happens when a button is pressed twice. Not a failure.
+    if not body.get("ok") and "not modified" not in str(body).lower():
+        _safe_print(f"[notifier] panel edit rejected: {str(body)[:200]}")
+        return False
+    return True
+
+
 async def send(text: str, *, silent: bool = False) -> bool:
     """Send an HTML message to the alert group. Never raises."""
     if not enabled():

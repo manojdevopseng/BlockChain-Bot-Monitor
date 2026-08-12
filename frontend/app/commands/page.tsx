@@ -25,6 +25,16 @@ export default function CommandsPage() {
     mutate("/api/commands/stats");
   }
 
+  // Grouped by the category each command declares, in first-seen order so the
+  // General/System ones stay at the top where they have always been.
+  const sections: [string, any[]][] = [];
+  for (const row of (data?.items ?? [])) {
+    const key = row.category || "Other";
+    const found = sections.find(([c]) => c === key);
+    if (found) found[1].push(row);
+    else sections.push([key, [row]]);
+  }
+
   const cols: Column<any>[] = [
     { key: "command", header: "Command", render: (r) => (
       <span className="font-mono text-xs text-brand-soft">{r.command}</span>
@@ -32,7 +42,6 @@ export default function CommandsPage() {
     { key: "description", header: "Description", render: (r) => (
       <span className="text-text-muted">{r.description}</span>
     )},
-    { key: "category", header: "Category", render: (r) => <Badge variant="purple">{r.category}</Badge> },
     { key: "permission", header: "Permission", render: (r) => (
       r.permission === "Group admins"
         ? <Badge variant="amber">group admins</Badge>
@@ -114,17 +123,30 @@ export default function CommandsPage() {
         />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Command List</CardTitle>
-          <span className="text-[11px] text-text-dim">
-            switching one off also drops it from Telegram&apos;s &ldquo;/&rdquo; menu
-          </span>
-        </CardHeader>
-        <CardContent>
-          <DataTable columns={cols} rows={data?.items ?? []} empty="No commands registered" />
-        </CardContent>
-      </Card>
+      {/* One card per category rather than one long table. The categories
+          come from COMMAND_SPEC, so a new group of commands gets its own
+          section the day it is written — RSI Controller is nine of them and
+          would otherwise be scattered through everything else alphabetically. */}
+      {sections.map(([category, rows]) => (
+        <Card key={category}>
+          <CardHeader>
+            <CardTitle>{category}</CardTitle>
+            <span className="text-[11px] text-text-dim">
+              {rows.filter((r: any) => r.enabled).length}/{rows.length} enabled
+              {category === sections[0]?.[0] && " — switching one off also drops it "
+                + "from Telegram's “/” menu"}
+            </span>
+          </CardHeader>
+          <CardContent>
+            <DataTable columns={cols} rows={rows} empty="No commands here" />
+          </CardContent>
+        </Card>
+      ))}
+      {sections.length === 0 && (
+        <Card><CardContent className="pt-4 text-sm text-text-dim">
+          No commands registered
+        </CardContent></Card>
+      )}
     </div>
   );
 }
