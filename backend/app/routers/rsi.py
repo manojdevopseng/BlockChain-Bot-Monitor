@@ -162,12 +162,18 @@ async def add_token(payload: dict = Body(...)):
     doc = await db.get_collection("rsi_settings").find_one({"_id": "rsi"}) or {}
     interval = _clean_interval(payload.get("interval")
                                or doc.get("default_interval") or DEFAULT_INTERVAL)
+    symbol = str(payload.get("symbol") or "")[:32]
+    name = str(payload.get("name") or "")[:64]
+    if not symbol:
+        # Read off the contract rather than left blank: a row that says "?" is
+        # one you cannot recognise in the panel or in an alert.
+        symbol, name = await _name_symbol(chain, address, name)
     now = time.time()
     await db.get_collection("rsi_tokens").update_one(
         {"chain": chain, "address": address},
         {"$set": {"chain": chain, "address": address, "interval": interval,
-                  "symbol": str(payload.get("symbol") or "")[:32],
-                  "name": str(payload.get("name") or "")[:64],
+                  "symbol": symbol,
+                  "name": name,
                   "enabled": True, "added_at": now, "day": ist_date_str(now)}},
         upsert=True,
     )
@@ -210,6 +216,18 @@ async def remove_token(address: str):
     await db.get_collection("rsi_candles").delete_many({"address": addr})
     await db.get_collection("rsi_state").delete_many({"address": addr})
     return {"address": addr, "removed": True}
+
+
+async def _name_symbol(chain: str, address: str, name: str = "") -> tuple[str, str]:
+    """The token's ticker and name from the chain, or what we were given."""
+    import aiohttp
+    from ..scanners.rsi_price import PriceReader
+    try:
+        async with aiohttp.ClientSession() as session:
+            got_symbol, got_name = await PriceReader(session).name_symbol(chain, address)
+    except Exception:  # noqa: BLE001
+        return "", name
+    return got_symbol, (name or got_name)
 
 
 @router.get("/dates")

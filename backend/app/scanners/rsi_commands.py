@@ -146,17 +146,33 @@ async def _add(args: list[str]) -> str:
                 else str((await _settings()).get("default_interval", DEFAULT_INTERVAL)))
     if interval not in INTERVALS:
         raise ValueError(f"unknown interval '{interval}' — have {', '.join(INTERVALS)}")
+    symbol = rest[2][:32] if len(rest) > 2 else ""
+    name = ""
+    if not symbol:
+        symbol, name = await _name_symbol(chain, address.lower())
     now = time.time()
     await _col("rsi_tokens").update_one(
         {"chain": chain, "address": address.lower()},
         {"$set": {"chain": chain, "address": address.lower(), "interval": interval,
-                  "symbol": rest[2][:32] if len(rest) > 2 else "",
+                  "symbol": symbol, "name": name,
                   "enabled": True, "added_at": now, "day": ist_date_str(now)}},
         upsert=True)
-    return (f"✅ tracking <code>{address}</code> on <b>{chain.upper()}</b> · "
+    return (f"✅ tracking <b>{symbol or '?'}</b> <code>{address}</code> on "
+            f"<b>{chain.upper()}</b> · "
             f"{INTERVAL_LABELS[interval]}\nIt needs "
             f"{int((await _settings()).get('period', DEFAULT_PERIOD)) + 1} candles "
             f"before it reports an RSI.")
+
+
+async def _name_symbol(chain: str, address: str) -> tuple[str, str]:
+    """Ticker and name off the contract, so neither has to be typed."""
+    import aiohttp
+    from app.scanners.rsi_price import PriceReader
+    try:
+        async with aiohttp.ClientSession() as session:
+            return await PriceReader(session).name_symbol(chain, address)
+    except Exception:  # noqa: BLE001
+        return "", ""
 
 
 async def _detect_chain(address: str) -> str:

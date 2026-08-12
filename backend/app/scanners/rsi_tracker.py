@@ -175,6 +175,18 @@ class RsiTracker:
             price = await self._reader.price(chain, addr)
         if price is None or price <= 0:
             return
+        # A row added before the ticker was read off the chain — or one whose
+        # contract was unreachable at the time — fills itself in on its first
+        # good sample rather than staying "?" forever.
+        if not token.get("symbol"):
+            symbol, name = await self._reader.name_symbol(chain, addr)
+            if symbol:
+                token["symbol"], token["name"] = symbol, name
+                await _col("rsi_tokens").update_one(
+                    {"chain": chain, "address": addr},
+                    {"$set": {"symbol": symbol, "name": name}})
+                log.info(f"[RSI] {addr[:10]}… is {symbol}")
+
         ts = bucket(now, interval)
         # One document per candle: sampling twice inside the same bucket
         # overwrites the close, which is what a close is.

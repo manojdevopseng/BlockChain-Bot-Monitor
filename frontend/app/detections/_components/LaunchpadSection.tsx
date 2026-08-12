@@ -131,7 +131,10 @@ export function LaunchpadSection() {
   return (
     <CollapsibleSection
       id="launchpad"
-      title="Robinhood Launchpad Monitor"
+      // Shortened from "Robinhood Launchpad Monitor": with six filter tabs, a
+      // search box, min followers, With X, History, refresh and Lists on the
+      // same row, the full name pushed the controls off the end.
+      title="RBH Launchpad Monitor"
       icon={<Rocket size={14} />}
       count={data?.total ?? 0}
       controls={<>

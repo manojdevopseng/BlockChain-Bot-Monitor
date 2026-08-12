@@ -173,6 +173,25 @@ class PriceReader:
                      f"{spec.wnative[:8]}… — nothing to price it from yet")
         return ref
 
+    async def name_symbol(self, chain: str, token: str) -> tuple[str, str]:
+        """The token's own ticker and name, off the contract.
+
+        Asked so nobody has to type them. A row that says "?" because the ticker
+        was left blank is a row you cannot recognise in a list or in an alert,
+        and the two ERC-20 getters cost one call each, once, at add time.
+        """
+        from app.scanners.rbhx_monitor import decode_string_tuple
+        spec = chains().get(chain)
+        if spec is None:
+            return "", ""
+
+        async def one(selector: str) -> str:
+            raw = await self._call(spec, token, selector)
+            return (decode_string_tuple(raw or "") or [""])[0].strip()
+
+        symbol, name = await one("0x95d89b41"), await one("0x06fdde03")
+        return symbol[:32].upper(), name[:64]
+
     async def find_chains(self, token: str) -> list[str]:
         """Which chains actually have a pool for this address.
 
