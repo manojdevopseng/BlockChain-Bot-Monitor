@@ -132,6 +132,10 @@ GAS_ALERT_CHAT_ID        = settings.gas_alert_chat_id
 # Dedicated endpoint for the gas feature; falls back to the ETH one so an
 # upgrade with a blank value behaves exactly as before.
 GAS_RPC_WSS  = settings.gas_rpc_wss or settings.eth_rpc_wss
+# Ordered, like ETH and Robinhood already are. One endpoint alone meant that
+# when Alchemy started answering 429 the gas socket retried the same refused
+# URL every 60 seconds while the other feeds rotated past it.
+GAS_WSS_ENDPOINTS = [u for u in (GAS_RPC_WSS, settings.gas_rpc_wss_fallback) if u]
 GAS_RPC_HTTP = settings.gas_rpc_http or settings.eth_rpc_http
 
 # ── Daily digest (from .env) ────────────────────────────────────

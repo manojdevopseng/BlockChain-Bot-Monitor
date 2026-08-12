@@ -86,7 +86,11 @@ class EthTrendingScanner:
         gas_wss = config.GAS_RPC_WSS
         if gas_wss and gas_wss != config.ETH_RPC_WSS:
             from .ws_provider import WSProvider
-            self._gas_provider = WSProvider(gas_wss, name="ETH-GAS")
+            # The callable form, so a fallback pasted into RPC Monitor is
+            # dialled on the next reconnect rather than at the next restart.
+            self._gas_provider = WSProvider(
+                lambda: list(config.GAS_WSS_ENDPOINTS) or [config.GAS_RPC_WSS],
+                name="ETH-GAS")
             self._gas_task = asyncio.create_task(self._gas_provider.run(), name="eth-gas-ws")
             gas_provider = self._gas_provider
             where = "own RPC endpoint"

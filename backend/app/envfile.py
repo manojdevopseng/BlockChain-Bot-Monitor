@@ -128,6 +128,14 @@ EDITABLE: dict[str, dict] = {
                 "eat the compute units new-pair detection needs. Blank = share "
                 "ETH WebSocket #1.",
     },
+    "GAS_RPC_WSS_FALLBACK": {
+        "label": "Gas Fees WebSocket #2", "kind": "wss", "secret": True,
+        "group": "RPC Endpoints — ETH Gas Fees", "applies": "worker:eth",
+        "help": "A second provider for the gas socket. It had none, so when its "
+                "key was rate-limited it retried the one refused URL every 60 "
+                "seconds — use a different provider, not another URL on the "
+                "same account.",
+    },
     "GAS_RPC_HTTP": {
         "label": "Gas Fees HTTP", "kind": "http", "secret": True,
         "group": "RPC Endpoints — ETH Gas Fees", "applies": "live",
@@ -497,6 +505,8 @@ def _refresh_derived(scfg, key: str) -> None:
     setattr(scfg, f"{chain}_WSS_ENDPOINTS", [u for u in slots if u])
     if chain == "ETH":
         scfg.GAS_RPC_WSS = settings.gas_rpc_wss or slots[0]
+        scfg.GAS_WSS_ENDPOINTS = [u for u in (scfg.GAS_RPC_WSS,
+                                              settings.gas_rpc_wss_fallback) if u]
     if chain == "SOL":
         # SOL's WSS applies "live" — no worker restart on save, unlike ETH/RBH
         # (restarting the whole SOL worker would also drop the GMGN feed's

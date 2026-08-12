@@ -192,6 +192,7 @@ class Settings(BaseSettings):
     # Blank = share ETH_RPC_*.
     gas_rpc_http: str = ""
     gas_rpc_wss: str = ""
+    gas_rpc_wss_fallback: str = ""
     # Second endpoint per chain. One provider having a bad hour stopped
     # detection outright before, with nothing to fall back to. Blank = no
     # failover, exactly as before.

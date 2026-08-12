@@ -55,7 +55,7 @@ async def _build() -> list[dict]:
     groups: list[tuple[str, str, str, str, str, list[str]]] = [
         ("Ethereum", "eth", "rpc_eth", "eth", "WSS", list(scfg.ETH_WSS_ENDPOINTS)),
         ("Ethereum", "eth", "rpc_eth", "",    "HTTP", list(scfg.ETH_HTTP_ENDPOINTS)),
-        ("ETH Gas Fees", "eth", "rpc_eth", "", "WSS", [scfg.GAS_RPC_WSS]),
+        ("ETH Gas Fees", "eth", "rpc_eth", "", "WSS", list(scfg.GAS_WSS_ENDPOINTS)),
         ("ETH Gas Fees", "eth", "rpc_eth", "", "HTTP", [scfg.GAS_RPC_HTTP]),
         ("Robinhood Chain", "rbh", "rpc_rbh", "rbh", "WSS", list(scfg.RBH_WSS_ENDPOINTS)),
         ("Robinhood Chain", "rbh", "rpc_rbh", "",    "HTTP", list(scfg.RBH_HTTP_ENDPOINTS)),
