@@ -56,6 +56,9 @@ COMMAND_SPEC = [
                  "(group admins only)",                "System"),
     # The RSI tracker, controlled from here as well as the page — same
     # collections behind both, so neither can be out of date.
+    # The way in on a phone: no arguments, no syntax to remember. /rsi is the
+    # same screen, kept because that is the name someone looking for RSI tries.
+    ("menu",         "Open the settings screen (buttons)",     "RSI Controller"),
     ("rsi",          "RSI settings screen (buttons)",          "RSI Controller"),
     ("rsi_list",     "Tracked tokens and their RSI",          "RSI Controller"),
     ("rsi_add",      "Track a token: /rsi_add <chain> <address> [interval]",
@@ -218,6 +221,25 @@ class TelegramCommands:
                     # Usually "chat not found" — the bot is not in that group yet.
                     log.warning(f"[CMD] menu for chat {self._chat_id} rejected: "
                                 f"{res.get('description')}. Add the bot to that group.")
+                # The RSI chat gets its own short menu: the settings screen and
+                # the commands that answer there. Without this the "/" popup is
+                # empty in that group and /menu looks like it does not exist,
+                # even though it answers.
+                if config.RSI_ALERT_CHAT_ID:
+                    rsi_cmds = [c for c in cmds
+                                if c["command"] == "menu"
+                                or c["command"].startswith("rsi")]
+                    res = await self._api("setMyCommands", {
+                        "commands": json.dumps(rsi_cmds),
+                        "scope": json.dumps({"type": "chat",
+                                             "chat_id": config.RSI_ALERT_CHAT_ID})})
+                    if not res.get("ok"):
+                        log.warning(f"[CMD] menu for the RSI chat rejected: "
+                                    f"{res.get('description')}")
+                    else:
+                        log.info(f"[CMD] RSI chat menu published — "
+                                 f"{len(rsi_cmds)} command(s) in "
+                                 f"{config.RSI_ALERT_CHAT_ID}")
                 # Empty everywhere else, so the "/" popup is blank in other chats.
                 await self._api("setMyCommands",
                                 {"commands": "[]",
@@ -359,7 +381,7 @@ class TelegramCommands:
         # commands also answer in the RSI alert chat, because that is where its
         # alerts land and its settings screen belongs beside them.
         cmd_word = text.split()[0].lstrip("/").split("@")[0].lower()
-        rsi_chat = (cmd_word.startswith("rsi")
+        rsi_chat = ((cmd_word.startswith("rsi") or cmd_word == "menu")
                     and config.RSI_ALERT_CHAT_ID
                     and str(chat_id) == str(config.RSI_ALERT_CHAT_ID))
         if not rsi_chat and not self.allowed(chat_id):
@@ -403,11 +425,11 @@ class TelegramCommands:
 
     async def _reply_for(self, cmd: str, chat_id, user_id, text: str = "") -> str:
         # The only commands that take arguments so far, and they take several.
-        if cmd.startswith("rsi"):
+        if cmd == "menu" or cmd.startswith("rsi"):
             # /rsi is the settings screen — buttons, edited in place. The rest
             # stay as commands, which is what a phone keyboard is good for
             # when you already know the address you want to add.
-            if cmd == "rsi":
+            if cmd in ("rsi", "menu"):
                 from app import rsi_panel
                 await rsi_panel.open_panel(chat_id)
                 return ""
