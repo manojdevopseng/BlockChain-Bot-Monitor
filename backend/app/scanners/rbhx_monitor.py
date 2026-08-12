@@ -498,6 +498,11 @@ class RbhXMonitor:
         handle_source = ""
         if launch is not None:
             handle, handle_source = launch.handle, launch.handle_source
+            # A launchpad that verified the account itself says so on the
+            # Launch. Virtuals is the first: its API returns the handle under
+            # VERIFIED_USERNAMES, which is a stronger claim than a link typed
+            # into a metadata field, and the 🔒 in the panel means exactly that.
+            proved = bool(getattr(launch, "proved", False))
         else:
             handle = handle_from_proof(fields)
             proved = bool(handle)

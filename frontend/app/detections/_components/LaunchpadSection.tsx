@@ -30,6 +30,7 @@ const PAD_TONE: Record<string, Variant> = {
   // Pons and Pons V2 are two deployments of one launchpad, so they are two
   // shades of the same idea rather than two unrelated colours.
   pons: "purple", pons_v2: "blue", flap: "cyan", pools: "green",
+  virtuals: "amber",
 };
 
 type Pad = { id: string; label: string; factories: number; enabled: boolean };

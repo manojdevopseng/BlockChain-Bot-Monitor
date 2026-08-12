@@ -15,8 +15,10 @@ from app.scanners.launchpads.flap import Flap
 from app.scanners.launchpads.pons import Pons
 from app.scanners.launchpads.pons_v2 import PonsV2
 from app.scanners.launchpads.pools import Pools
+from app.scanners.launchpads.virtuals import Virtuals
 
 __all__ = ["Factory", "Launch", "Launchpad", "Pons", "PonsV2", "Flap", "Pools",
+           "Virtuals",
            "all_launchpads", "by_id", "by_factory"]
 
 
@@ -25,8 +27,9 @@ def all_launchpads() -> list[Launchpad]:
     from scfg, and Settings can rewrite those while the app is running. A
     launchpad with no address configured is left out entirely."""
     # This order is the order of the filter tabs:
-    # All, Pons, Pons V2, Flap, Pools.trade.
-    return [pad for pad in (Pons(), PonsV2(), Flap(), Pools()) if pad.factories]
+    # All, Pons, Pons V2, Flap, Pools.trade, Virtuals.
+    return [pad for pad in (Pons(), PonsV2(), Flap(), Pools(), Virtuals())
+            if pad.factories]
 
 
 def by_id() -> dict[str, Launchpad]:
