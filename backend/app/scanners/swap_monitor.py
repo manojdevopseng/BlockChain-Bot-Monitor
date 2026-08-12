@@ -113,7 +113,17 @@ class SwapMonitor:
                 label=f"Swap-{self.token.symbol}-{self.token.dex}",
             )
         except Exception as exc:  # noqa: BLE001
-            log.error(f"[GasMonitor] Subscribe failed for {self.token.symbol}: {exc}")
+            # A socket that is mid-reconnect cannot take a subscription, and
+            # `_on_reconnect` puts this one back the moment it is up — so this
+            # is a wait, not a failure. It was logged as an error, which sent
+            # one Telegram alert per token for as long as the endpoint was
+            # rate-limited: 49 of them in a day, all saying the same thing the
+            # RPC-exhausted alert already says once.
+            if "not connected" in str(exc).lower():
+                log.warning(f"[GasMonitor] {self.token.symbol} will subscribe when "
+                            f"the socket is back: {exc}")
+            else:
+                log.error(f"[GasMonitor] Subscribe failed for {self.token.symbol}: {exc}")
 
     async def _on_reconnect(self) -> None:
         if self._running:
