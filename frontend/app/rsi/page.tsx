@@ -31,15 +31,16 @@ type Chain = { id: string; label: string; enabled: boolean; own_endpoints: boole
 type Interval = { id: string; label: string };
 
 // Adding a token: the chain and the address are the only things that cannot be
-// worked out later, so they are the only things asked for. The interval
-// defaults to 5 Min and every row can be changed afterwards.
-function AddToken({ chains, intervals, onAdded }: {
-  chains: Chain[]; intervals: Interval[]; onAdded: () => void;
+// worked out later. The timeframe starts at whatever the default is set to —
+// 5 Min unless it has been changed — and this row, or the token's own row
+// afterwards, is where it gets moved off it.
+function AddToken({ chains, intervals, fallback, onAdded }: {
+  chains: Chain[]; intervals: Interval[]; fallback: string; onAdded: () => void;
 }) {
   const [chain, setChain] = useState("eth");
   const [address, setAddress] = useState("");
   const [symbol, setSymbol] = useState("");
-  const [interval, setInterval] = useState("5m");
+  const [interval, setInterval] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -48,7 +49,8 @@ function AddToken({ chains, intervals, onAdded }: {
     setBusy(true); setErr("");
     try {
       await apiSend("/api/rsi/tokens", "POST",
-        { chain, address: address.trim(), symbol: symbol.trim(), interval });
+        { chain, address: address.trim(), symbol: symbol.trim(),
+          interval: interval || fallback });
       setAddress(""); setSymbol("");
       onAdded();
     } catch (e: any) {
@@ -70,7 +72,8 @@ function AddToken({ chains, intervals, onAdded }: {
                placeholder="0x… contract address" className="min-w-[280px] flex-1" />
         <Input value={symbol} onChange={(e) => setSymbol(e.target.value)}
                placeholder="ticker (optional)" className="w-40" />
-        <select value={interval} onChange={(e) => setInterval(e.target.value)}
+        <select value={interval || fallback} onChange={(e) => setInterval(e.target.value)}
+                title="This token's RSI timeframe"
                 className="h-9 rounded-lg border border-border bg-bg-soft px-2 text-xs text-text">
           {intervals.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
         </select>
@@ -117,6 +120,12 @@ export default function RsiPage() {
     await apiSend(`/api/rsi/tokens/${address}`, "DELETE");
     reload();
   }
+  // The default only decides what a NEW token starts on — tokens already on
+  // the list keep whatever they were set to, from here or from Telegram.
+  async function setDefaultInterval(value: string) {
+    await apiSend("/api/rsi/settings", "PATCH", { default_interval: value });
+    mutate("/api/rsi/settings");
+  }
   async function setCadence(value: string) {
     await apiSend("/api/rsi/settings", "PATCH", { cadence: value });
     mutate("/api/rsi/settings");
@@ -152,11 +161,13 @@ export default function RsiPage() {
       >
         <p className="mb-3 text-xs text-text-dim">
           Wilder&rsquo;s RSI over {settings?.period ?? 14} candles, read off each
-          token&rsquo;s own pool. A token is only added here by you, and each one is
-          sampled on its own interval — so a token on 1 Sec costs a read a second
-          and one on 5 Min costs twelve an hour. Alerts fire when RSI{" "}
-          <b>crosses</b> {settings?.low ?? 30} or {settings?.high ?? 70}, not while
-          it sits there. Kept {settings?.retention_days ?? 15} days.
+          token&rsquo;s own pool. A token is only added here by you, and each one runs
+          on its own <b>timeframe</b> — the length of one candle. New tokens start
+          on {intervals.find((i) => i.id === (settings?.default_interval ?? "5m"))?.label
+              ?? "5 Min"}; change a row and only that token moves. Alerts fire when
+          the RSI on that timeframe <b>crosses</b> {settings?.low ?? 30} or{" "}
+          {settings?.high ?? 70}, not while it sits there. Kept{" "}
+          {settings?.retention_days ?? 15} days.
           {settings && !settings.alert_chat_set && (
             <> {" "}<span className="text-accent-amber">
               No alert chat set — readings are recorded, nothing is sent.
@@ -164,11 +175,25 @@ export default function RsiPage() {
           )}
         </p>
 
-        {/* The two controls that are not per token: how often RSI is
-            recomputed, and the bounds it is judged against. */}
+        {/* Three controls, and the first two are constantly mistaken for each
+            other: the timeframe is how long one candle is — what RSI is
+            actually computed on — while the cadence is only how often that sum
+            is redone, which is what costs RPC requests. */}
         <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-border-soft px-3 py-2">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-text-dim">Check every</span>
+            <span className="text-[11px] text-text-dim"
+                  title="The candle RSI is read on. New tokens start here; each row can be changed on its own.">
+              Timeframe (RSI candles)
+            </span>
+            <FilterTabs value={settings?.default_interval ?? "5m"}
+                        onChange={setDefaultInterval}
+                        options={intervals.map((i) => ({ id: i.id, label: i.label }))} />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-text-dim"
+                  title="How often RSI is recomputed and the bounds are checked — this is the RPC cost, not the candle length.">
+              Recheck every (RPC)
+            </span>
             <FilterTabs value={settings?.cadence ?? "30s"} onChange={setCadence}
                         options={(settings?.cadences ?? []).map((c: string) => ({ id: c, label: c }))} />
           </div>
@@ -182,7 +207,8 @@ export default function RsiPage() {
           </div>
         </div>
 
-        <AddToken chains={chains} intervals={intervals} onAdded={reload} />
+        <AddToken chains={chains} intervals={intervals}
+                  fallback={settings?.default_interval ?? "5m"} onAdded={reload} />
 
         <TableScroll>
           <table className="w-full min-w-[900px] text-sm">
@@ -190,7 +216,8 @@ export default function RsiPage() {
               <tr className={`${STICKY_HEAD} border-b border-border`}>
                 <th className="px-3 py-2.5 font-medium">Token</th>
                 <th className="px-3 py-2.5 font-medium">Chain</th>
-                <th className="px-3 py-2.5 font-medium">Interval</th>
+                <th className="px-3 py-2.5 font-medium"
+                    title="This token's own RSI timeframe">Timeframe</th>
                 <th className="px-3 py-2.5 font-medium">RSI</th>
                 <th className="px-3 py-2.5 font-medium">Price</th>
                 <th className="px-3 py-2.5 font-medium">Checked</th>

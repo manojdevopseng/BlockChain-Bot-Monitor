@@ -64,6 +64,8 @@ async def _reply(cmd: str, text: str) -> str:
         return await _bounds(args)
     if cmd == "rsi_check":
         return await _cadence(args)
+    if cmd == "rsi_timeframe":
+        return await _timeframe(args)
     if cmd in ("rsi_on", "rsi_off"):
         return await _switch(cmd == "rsi_on", args)
     return ""
@@ -83,8 +85,11 @@ async def _status() -> str:
         f"🪙 {tokens} token(s) · {oversold} oversold · {overbought} overbought\n"
         f"📉 bounds {float(doc.get('low', DEFAULT_LOW)):g} / "
         f"{float(doc.get('high', DEFAULT_HIGH)):g}\n"
-        f"⏱ checking every {doc.get('cadence', DEFAULT_CADENCE)} · "
-        f"period {int(doc.get('period', DEFAULT_PERIOD))}\n"
+        f"📊 timeframe "
+        f"{INTERVAL_LABELS.get(doc.get('default_interval', DEFAULT_INTERVAL), '')}"
+        f" (default for new tokens) · period "
+        f"{int(doc.get('period', DEFAULT_PERIOD))}\n"
+        f"⏱ recomputed every {doc.get('cadence', DEFAULT_CADENCE)}\n"
         f"⛓ chains on: {', '.join(on) or 'none'}\n"
         f"🔔 alerts → {config.RSI_ALERT_CHAT_ID or 'not set'}"
     )
@@ -120,7 +125,8 @@ async def _add(args: list[str]) -> str:
     address = args[1]
     if not _ADDRESS_RE.match(address):
         raise ValueError(f"'{address}' is not a contract address")
-    interval = args[2].lower() if len(args) > 2 else DEFAULT_INTERVAL
+    interval = (args[2].lower() if len(args) > 2
+                else str((await _settings()).get("default_interval", DEFAULT_INTERVAL)))
     if interval not in INTERVALS:
         raise ValueError(f"unknown interval '{interval}' — have {', '.join(INTERVALS)}")
     now = time.time()
@@ -178,6 +184,18 @@ async def _bounds(args: list[str]) -> str:
                                           {"$set": {"low": low, "high": high}},
                                           upsert=True)
     return f"📉 bounds now {low:g} / {high:g} — applies from the next check"
+
+
+async def _timeframe(args: list[str]) -> str:
+    """The default RSI timeframe for new tokens. One token's own is
+    /rsi_interval — deliberately a separate command, because changing the
+    default must never move tokens already on the list."""
+    if not args or args[0].lower() not in INTERVALS:
+        raise ValueError(f"usage: /rsi_timeframe &lt;{' | '.join(INTERVALS)}&gt;")
+    await _col("rsi_settings").update_one(
+        {"_id": "rsi"}, {"$set": {"default_interval": args[0].lower()}}, upsert=True)
+    return (f"📊 new tokens start on {INTERVAL_LABELS[args[0].lower()]} — "
+            "the ones already tracked keep theirs")
 
 
 async def _cadence(args: list[str]) -> str:

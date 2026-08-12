@@ -9,6 +9,7 @@ per change.
     │ [⏸ Tracker on] [🔔 Alerts on]
     │ [ETH ✅] [BSC ✅] [RBH ✅]
     │ bounds  [−] 30 / 70 [+]
+    │ timeframe [1 Sec] … [5 Min•] … [1 Day]
     │ check   [10s] [20s] [30s•] [1m]
     │ [🪙 Tokens (4)]           ← per-token screens live behind this
     └──────────────────────────────
@@ -28,7 +29,8 @@ from . import db, notifier, registry
 from .rsi_math import DEFAULT_HIGH, DEFAULT_LOW
 from .scanners import scfg as config
 from .scanners.rsi_price import chains
-from .scanners.rsi_tracker import CADENCES, DEFAULT_CADENCE, INTERVAL_LABELS, INTERVALS
+from .scanners.rsi_tracker import (CADENCES, DEFAULT_CADENCE, DEFAULT_INTERVAL,
+                                   INTERVAL_LABELS, INTERVALS)
 from .scanners.slog import get_logger
 
 log = get_logger(__name__)
@@ -65,13 +67,22 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
     oversold = await _col("rsi_state").count_documents({"zone": "oversold"})
     overbought = await _col("rsi_state").count_documents({"zone": "overbought"})
 
+    default_tf = str(doc.get("default_interval", DEFAULT_INTERVAL))
+    period = int(doc.get("period", 14))
+    # The timeframe and the cadence are different things and were reading as
+    # one: the timeframe is the candle RSI is computed on, the cadence is only
+    # how often that sum is redone — which is what costs RPC requests.
     text = (
         f"⚙️ <b>RSI Tracker — settings</b>\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🪙 {tokens} token(s) · {oversold} oversold · {overbought} overbought\n"
-        f"📉 alerts when RSI crosses <b>{low:g}</b> or <b>{high:g}</b>\n"
-        f"⏱ checked every <b>{cadence}</b>\n"
-        f"🔔 → {config.RSI_ALERT_CHAT_ID or 'no chat set'}"
+        f"📊 <b>Timeframe {INTERVAL_LABELS.get(default_tf, default_tf)}</b> — "
+        f"RSI({period}) is read on candles this long\n"
+        f"📉 alerts when that RSI crosses <b>{low:g}</b> or <b>{high:g}</b>\n"
+        f"⏱ recomputed every <b>{cadence}</b> — how often the RPC is asked\n"
+        f"🔔 → {config.RSI_ALERT_CHAT_ID or 'no chat set'}\n\n"
+        f"<i>The timeframe below is what a new token starts on. Each token can "
+        f"sit on its own — under 🪙 Tokens.</i>"
     )
 
     rows: list[list[dict]] = [[
@@ -94,7 +105,13 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
         {"text": "reset 30/70", "callback_data": "rsi:bounds:reset"},
         {"text": "high ➖", "callback_data": "rsi:high:-"},
     ])
-    rows.append([{"text": f"{c}{' •' if c == cadence else ''}",
+    # The RSI timeframe, three to a row — nine across is unreadable on a phone.
+    keys = list(INTERVALS)
+    for i in range(0, len(keys), 3):
+        rows.append([{"text": INTERVAL_LABELS[k] + (" •" if k == default_tf else ""),
+                      "callback_data": f"rsi:tf:{k}"} for k in keys[i:i + 3]])
+    # The clock marks these as the other thing: how often, not how long.
+    rows.append([{"text": f"⏱ {c}{' •' if c == cadence else ''}",
                   "callback_data": f"rsi:cad:{c}"} for c in CADENCES])
     rows.append([{"text": f"🪙 Tokens ({tokens})", "callback_data": "rsi:tokens"},
                  {"text": "🔄 Refresh", "callback_data": "rsi:home"}])
@@ -115,7 +132,7 @@ async def token_list_panel() -> tuple[str, list[list[dict]]]:
                 [[{"text": "⬅ Back", "callback_data": "rsi:home"}]])
 
     lines = ["🪙 <b>Tracked tokens</b>", "➖➖➖➖➖➖➖➖➖➖",
-             "Tap one to change its interval or drop it."]
+             "Tap one to change its timeframe or drop it."]
     keyboard: list[list[dict]] = []
     for row in rows_db:
         st = states.get((row.get("chain"), row.get("address")), {})
@@ -147,7 +164,8 @@ async def token_panel(address: str) -> tuple[str, list[list[dict]]]:
         f"🪙 <b>{(row.get('symbol') or '?').upper()}</b> · "
         f"{str(row.get('chain')).upper()}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"⏱ interval <b>{INTERVAL_LABELS.get(current, current)}</b>\n"
+        f"📊 timeframe <b>{INTERVAL_LABELS.get(current, current)}</b> — "
+        f"this token's own\n"
         + (f"📊 RSI <b>{value:.1f}</b>" + (f" · {st.get('zone')}" if st.get("zone") else "")
            if value is not None
            else f"📊 warming up — {st.get('samples', 0)} candle(s) so far") + "\n"
@@ -214,6 +232,16 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
             {"_id": "rsi"}, {"$set": {"low": DEFAULT_LOW, "high": DEFAULT_HIGH}},
             upsert=True)
         toast = f"{DEFAULT_LOW:g} / {DEFAULT_HIGH:g}"
+
+    elif what == "tf":
+        # The default for new tokens. A token already on the list keeps its
+        # own — that is the whole point of it being per token.
+        if arg not in INTERVALS:
+            return ("Unknown timeframe", True)
+        await _col("rsi_settings").update_one({"_id": "rsi"},
+                                              {"$set": {"default_interval": arg}},
+                                              upsert=True)
+        toast = f"New tokens start on {INTERVAL_LABELS[arg]}"
 
     elif what == "cad":
         if arg not in CADENCES:

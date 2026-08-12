@@ -71,9 +71,12 @@ async def get_settings():
         "high": float(doc.get("high", DEFAULT_HIGH)),
         "period": int(doc.get("period", DEFAULT_PERIOD)),
         "cadence": str(doc.get("cadence", DEFAULT_CADENCE)),
+        # The RSI timeframe a new token starts on — the length of one candle.
+        # Not the same thing as `cadence`, which is only how often the reading
+        # is recomputed.
+        "default_interval": str(doc.get("default_interval", DEFAULT_INTERVAL)),
         "cadences": list(CADENCES),
         "intervals": [{"id": k, "label": INTERVAL_LABELS[k]} for k in INTERVALS],
-        "default_interval": DEFAULT_INTERVAL,
         "retention_days": scfg.RSI_RETENTION_DAYS,
         "alert_chat_set": bool(scfg.RSI_ALERT_CHAT_ID),
         "enabled": bool(enabled.get("rsi_tracker", True)),
@@ -98,6 +101,8 @@ async def set_settings(payload: dict = Body(...)):
         if not 2 <= period <= 200:
             raise HTTPException(400, "period must be between 2 and 200")
         update["period"] = period
+    if "default_interval" in payload:
+        update["default_interval"] = _clean_interval(payload["default_interval"])
     if "cadence" in payload:
         cadence = str(payload["cadence"])
         if cadence not in CADENCES:
@@ -154,7 +159,9 @@ async def add_token(payload: dict = Body(...)):
     if chain not in {**chains(), "sol": None}:
         raise HTTPException(400, f"unknown chain '{chain}'")
     address = _clean_address(payload.get("address"))
-    interval = _clean_interval(payload.get("interval"))
+    doc = await db.get_collection("rsi_settings").find_one({"_id": "rsi"}) or {}
+    interval = _clean_interval(payload.get("interval")
+                               or doc.get("default_interval") or DEFAULT_INTERVAL)
     now = time.time()
     await db.get_collection("rsi_tokens").update_one(
         {"chain": chain, "address": address},

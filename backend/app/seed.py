@@ -187,7 +187,10 @@ async def seed_rsi_settings() -> None:
     col = db.get_collection("rsi_settings")
     if not await col.find_one({"_id": "rsi"}):
         await col.insert_one({"_id": "rsi", "low": 30.0, "high": 70.0,
-                              "period": 14, "cadence": "30s"})
+                              "period": 14, "cadence": "30s",
+                              # The timeframe a new token starts on. Each token
+                              # can be moved off it afterwards.
+                              "default_interval": "5m"})
 
 
 async def seed_all() -> None:
