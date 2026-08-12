@@ -60,19 +60,22 @@ def zone(value: Optional[float], low: float = DEFAULT_LOW,
     return "neutral"
 
 
-def crossed(previous: Optional[float], current: Optional[float],
+def crossed(announced: str, current: Optional[float],
             low: float = DEFAULT_LOW, high: float = DEFAULT_HIGH) -> str:
-    """The alert rule: the zone this reading just entered, or "".
+    """The alert rule: the zone worth announcing now, or "".
 
-    A crossing, not a level. RSI sits under 30 for minutes at a time, and
-    alerting on the level would send one message per check for as long as it
-    stays there. Coming back to neutral is what re-arms the next alert.
+    Compared against the zone last *announced*, not the last reading. RSI sits
+    under 30 for minutes at a time, so comparing readings would send one
+    message per check for as long as it stayed there — but comparing against
+    the last reading has the opposite failure: a crossing held back by a
+    cooldown is recorded as seen and then never announced at all. What the
+    caller last said out loud is the only thing that answers both.
+
+    An empty `announced` means nothing has been said about this token yet. A
+    token that is already oversold when you start watching it is exactly what
+    someone adds a token to hear about, so that counts.
     """
     now = zone(current, low, high)
     if now in ("", "neutral"):
         return ""
-    before = zone(previous, low, high)
-    # No previous reading means the token has just finished warming up. Say it
-    # once — a token that is already oversold when we start watching is
-    # exactly what someone adds a token to hear about.
-    return now if before != now else ""
+    return now if now != announced else ""

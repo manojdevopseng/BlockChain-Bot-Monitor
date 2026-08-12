@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2, Twitter } from "lucide-react";
+import { Activity, Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2, Twitter } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -28,6 +28,11 @@ const CAT = {
   // Its own section rather than eleven more switches in Bots: they belong to
   // one feature and are only understandable together. Two panels share it, so
   // it is drawn in blocks — see `group` on Svc.
+  // Its own section for the same reason: the tracker, the chains it prices and
+  // the endpoints it prices them on are only understandable together.
+  rsi: { title: "RSI Controller", icon: Activity,
+         desc: "Relative strength on the tokens you add. A chain needs both its "
+             + "switches — the chain and its endpoints — to be sampled." },
   rbhx: { title: "Robinhood Monitors", icon: Twitter,
           desc: "Who is behind a Robinhood launch, read off the token's own metadata. "
               + "Two panels, one socket — each block is one of them." },
@@ -364,6 +369,7 @@ export default function SettingsPage() {
         </div>
         <div className="space-y-5">
           <ServiceGroup cat="rbhx" items={data?.rbhx ?? []} />
+          <ServiceGroup cat="rsi" items={data?.rsi ?? []} />
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
           <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
           {/* The endpoint URLs themselves live on the RPC Monitor page, next to

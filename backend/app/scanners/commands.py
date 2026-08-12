@@ -54,6 +54,21 @@ COMMAND_SPEC = [
                  "(group admins only)",                "System"),
     ("restart",  "Undo /stop — turns back on exactly what it stopped "
                  "(group admins only)",                "System"),
+    # The RSI tracker, controlled from here as well as the page — same
+    # collections behind both, so neither can be out of date.
+    ("rsi",          "RSI tracker status",                    "RSI Controller"),
+    ("rsi_list",     "Tracked tokens and their RSI",          "RSI Controller"),
+    ("rsi_add",      "Track a token: /rsi_add <chain> <address> [interval]",
+                                                              "RSI Controller"),
+    ("rsi_remove",   "Stop tracking: /rsi_remove <address>",   "RSI Controller"),
+    ("rsi_interval", "Set one token's interval: /rsi_interval <address> <5m>",
+                                                              "RSI Controller"),
+    ("rsi_bounds",   "Set the bounds: /rsi_bounds 30 70",      "RSI Controller"),
+    ("rsi_check",    "How often RSI is checked: /rsi_check 30s", "RSI Controller"),
+    ("rsi_on",       "Turn the tracker or one chain on: /rsi_on [chain]",
+                                                              "RSI Controller"),
+    ("rsi_off",      "Turn the tracker or one chain off: /rsi_off [chain]",
+                                                              "RSI Controller"),
 ]
 
 # Checked against Telegram's own admin list for the chat, not a hardcoded user
@@ -362,7 +377,7 @@ class TelegramCommands:
         heartbeat.beat("command")
         started = time.perf_counter()
         try:
-            reply = await self._reply_for(cmd, chat_id, user_id)
+            reply = await self._reply_for(cmd, chat_id, user_id, text)
             ok = await self._send(chat_id, reply) if reply else False
         except Exception as exc:  # noqa: BLE001
             log.error(f"[CMD] /{cmd} failed: {exc}")
@@ -382,7 +397,11 @@ class TelegramCommands:
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[CMD] could not record use of /{cmd}: {exc}")
 
-    async def _reply_for(self, cmd: str, chat_id, user_id) -> str:
+    async def _reply_for(self, cmd: str, chat_id, user_id, text: str = "") -> str:
+        # The only commands that take arguments so far, and they take several.
+        if cmd.startswith("rsi"):
+            from app.scanners.rsi_commands import reply as rsi_reply
+            return await rsi_reply(cmd, text)
         if cmd in ("start", "help"):
             return await self._msg_help()
         if cmd == "status":

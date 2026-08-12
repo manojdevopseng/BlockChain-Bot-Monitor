@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, Users, X } from "lucide-react";
+import { Activity, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, Users, X } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/tokens", label: "Tokens", icon: Coins },
   { href: "/detections", label: "Detections", icon: Crosshair },
+  { href: "/rsi", label: "RSI", icon: Activity },
   { href: "/ai", label: "AI Narrative", icon: Brain },
   { href: "/forwarder", label: "Forwarder", icon: Send },
   { href: "/commands", label: "Commands", icon: Terminal },

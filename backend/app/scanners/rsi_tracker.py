@@ -218,22 +218,26 @@ class RsiTracker:
         value = rsi_math.rsi(closes, period)
 
         state = await _col("rsi_state").find_one({"chain": chain, "address": addr}) or {}
-        previous = state.get("rsi")
-        turn = rsi_math.crossed(previous, value, self.low, self.high)
+        here = rsi_math.zone(value, self.low, self.high)
+        announced = str(state.get("announced_zone") or "")
+        turn = rsi_math.crossed(announced, value, self.low, self.high)
         now = time.time()
         cooling = now - float(state.get("last_alert_at") or 0) < _ALERT_COOLDOWN
 
+        update = {"rsi": value, "zone": here, "samples": len(closes),
+                  "period": period, "interval": interval, "checked_at": now,
+                  "day": ist_date_str(now), "dt": _utc_now()}
+        # Back to neutral is what re-arms the next alert — recorded even while
+        # a cooldown is running, because it is not an announcement.
+        if here == "neutral":
+            update["announced_zone"] = "neutral"
+        await _col("rsi_state").update_one({"chain": chain, "address": addr},
+                                           {"$set": update}, upsert=True)
+        if not turn or cooling:
+            return          # still due: `announced_zone` is deliberately unchanged
         await _col("rsi_state").update_one(
             {"chain": chain, "address": addr},
-            {"$set": {"rsi": value, "zone": rsi_math.zone(value, self.low, self.high),
-                      "samples": len(closes), "period": period, "interval": interval,
-                      "checked_at": now, "day": ist_date_str(now), "dt": _utc_now()}},
-            upsert=True,
-        )
-        if not turn or cooling:
-            return
-        await _col("rsi_state").update_one({"chain": chain, "address": addr},
-                                           {"$set": {"last_alert_at": now}})
+            {"$set": {"last_alert_at": now, "announced_zone": turn}})
         log.info(f"[RSI] {token.get('symbol') or addr[:10]} ({chain.upper()}) "
                  f"{turn} — RSI {value:.1f} on {INTERVAL_LABELS.get(interval, interval)}")
         await self._alert(token, value, turn, state.get("price"))
