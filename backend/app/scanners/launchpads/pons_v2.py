@@ -69,6 +69,9 @@ class PonsV2(Launchpad):
             out.handle, out.handle_source = self.classify(find_x_link(fields))
             out.website = next((u for u in (_url_or_blank(f) for f in fields)
                                 if u and "x.com" not in u and "twitter.com" not in u), "")
+        # Same last resort as v1: a signed proof in one of the slots, read only
+        # when no link was found.
+        self.apply_proof(out, fields)
         text = decode_string_tuple(await self.eth_call(provider, address, _SEL_DESC))
         if text and text[0].strip():
             out.description = text[0].strip()

@@ -76,6 +76,10 @@ class Pons(Launchpad):
             out.handle, out.handle_source = self.classify(find_x_link(fields))
             out.website = next((u for u in (_url_or_blank(f) for f in fields)
                                 if u and "x.com" not in u and "twitter.com" not in u), "")
+        # A launch that named nobody in the slots may still carry a signed
+        # proof in one of them — consulted only when the links found nothing,
+        # so what already worked is untouched.
+        self.apply_proof(out, fields)
         text = decode_string_tuple(await self.eth_call(provider, address, _SEL_DESC))
         if text and text[0].strip():
             out.description = text[0].strip()

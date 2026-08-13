@@ -75,8 +75,7 @@ class Pools(Launchpad):
         ]
 
     async def read(self, provider, address: str, log_obj: dict) -> Launch:
-        from app.scanners.rbhx_monitor import (decode_string_tuple, find_x_link,
-                                              handle_from_proof)
+        from app.scanners.rbhx_monitor import decode_string_tuple, find_x_link
 
         # dev_wallet is left empty on purpose: the event does not carry it, and
         # the worker falls back to the launch transaction's sender.
@@ -96,18 +95,10 @@ class Pools(Launchpad):
         # token's prose.
         out.handle, out.handle_source = self.classify(
             find_x_link(fields) or _x_from_json(fields))
-        if not out.handle:
-            # No URL anywhere — but some launches carry a signed proof instead:
-            #
-            #   {"v":1,"xVerificationToken":"eyJ4X2hhbmRsZSI6IlBsYXlVbmlNTU8i…"}
-            #
-            # which decodes to the handle, the X user id and the deployer's
-            # wallet. It is the strongest claim on offer and it was being
-            # dropped, because every adapter only looked for links. Three of
-            # sixty recent launches with an empty Account column had one.
-            proved = handle_from_proof(fields)
-            if proved:
-                out.handle, out.handle_source, out.proved = proved, "proof", True
+        # And, when neither found anything, the signed proof — see
+        # Launchpad.apply_proof. Three of sixty recent launches with an empty
+        # Account column had one.
+        self.apply_proof(out, fields)
         out.website = next((u for u in (_url_or_blank(f) for f in fields)
                             if u and "x.com" not in u and "twitter.com" not in u
                             and not _looks_like_image(u)), "")

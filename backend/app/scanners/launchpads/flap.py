@@ -80,6 +80,13 @@ class Flap(Launchpad):
             return out
         out.handle, out.handle_source = self.classify(
             find_x_link([str(meta.get("twitter") or ""), str(meta.get("x") or "")]))
+        # And a signed proof when no link was given. Flap's metadata is a JSON
+        # document rather than a string tuple, so the proof reader is handed
+        # the values — plus the token spelled back out, for a metadata that
+        # carries the field directly instead of nested in one.
+        self.apply_proof(out, [str(v) for v in meta.values()]
+                         + ([json.dumps({"xVerificationToken": meta["xVerificationToken"]})]
+                            if meta.get("xVerificationToken") else []))
         # The launch transaction is sent by Flap's own minting bot — the same
         # wallet mints every few minutes — so its sender is not the deployer
         # and its zero value is not a dev buy. The metadata names the real one.

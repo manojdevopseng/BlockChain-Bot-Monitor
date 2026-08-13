@@ -109,6 +109,30 @@ class Launchpad:
     # and the row is filled in — and alerted — if one appears.
     late_socials: bool = False
 
+    @staticmethod
+    def apply_proof(out: "Launch", fields: list[str]) -> None:
+        """Last resort for the account: a signed proof instead of a link.
+
+        Some launches carry no URL at all and put this in a metadata slot:
+
+            {"v":1,"xVerificationToken":"eyJ4X2hhbmRsZSI6IlBsYXlVbmlNTU8i…"}
+
+        which decodes to the handle, the X user id and the deployer's wallet.
+        It is the strongest claim on offer and every adapter was blind to it,
+        because they all hunted for links — a live pools.trade launch called
+        UNIMMO sat in the panel with an empty Account column while its own
+        contract named @PlayUniMMO.
+
+        Only ever consulted when nothing else found a handle, so it cannot
+        change what a launchpad already reads correctly.
+        """
+        if out.handle:
+            return
+        from app.scanners.rbhx_monitor import handle_from_proof
+        proved = handle_from_proof(fields)
+        if proved:
+            out.handle, out.handle_source, out.proved = proved, "proof", True
+
     async def read(self, provider, address: str, log_obj: dict) -> Launch:
         """Everything this launchpad can tell us about the launch.
 
