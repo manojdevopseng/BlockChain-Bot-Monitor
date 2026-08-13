@@ -487,6 +487,18 @@ def _refresh_derived(scfg, key: str) -> None:
                            getattr(settings, f"{low}_rpc_http_fallback", "") or "")
                 if u])
         return
+    if key.startswith("GAS_RPC"):
+        # The gas feed's own slots. Without this the second endpoint saved in
+        # RPC Monitor landed in .env, reported success, and was never dialled:
+        # the running process kept the one-endpoint list it built at import,
+        # so the socket went on retrying a key that was out of quota and the
+        # alert kept saying "All 1 WebSocket endpoints" while a working URL sat
+        # in the file.
+        scfg.GAS_RPC_HTTP = settings.gas_rpc_http or settings.eth_rpc_http
+        scfg.GAS_RPC_WSS = settings.gas_rpc_wss or settings.eth_rpc_wss
+        scfg.GAS_WSS_ENDPOINTS = [u for u in (scfg.GAS_RPC_WSS,
+                                              settings.gas_rpc_wss_fallback) if u]
+        return
     if key.startswith("RBHX_RPC_WSS"):
         slots = [getattr(settings, f"rbhx_rpc_wss{sfx}", "") or ""
                  for sfx in _WSS_SLOT_SUFFIXES["RBHX"]]
