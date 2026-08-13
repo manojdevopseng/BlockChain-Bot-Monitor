@@ -18,6 +18,10 @@ Read off two live launches:
 The second is why the URL guard is here as well: the slots are free text and
 the first one is not always a link.
 
+A third shape turns up in the last slot, and it is the best one: a signed
+xVerificationToken, which decodes to the handle, the X user id and the wallet
+that launched it. No URL is involved, so link-hunting never saw it.
+
 The event carries no deployer, so it comes from the launch transaction's
 sender. Unlike Flap that is the real one — four sampled launches came from
 three different wallets, not one minting bot — so the dev-buy rule works. The
@@ -71,7 +75,8 @@ class Pools(Launchpad):
         ]
 
     async def read(self, provider, address: str, log_obj: dict) -> Launch:
-        from app.scanners.rbhx_monitor import decode_string_tuple, find_x_link
+        from app.scanners.rbhx_monitor import (decode_string_tuple, find_x_link,
+                                              handle_from_proof)
 
         # dev_wallet is left empty on purpose: the event does not carry it, and
         # the worker falls back to the launch transaction's sender.
@@ -91,6 +96,18 @@ class Pools(Launchpad):
         # token's prose.
         out.handle, out.handle_source = self.classify(
             find_x_link(fields) or _x_from_json(fields))
+        if not out.handle:
+            # No URL anywhere — but some launches carry a signed proof instead:
+            #
+            #   {"v":1,"xVerificationToken":"eyJ4X2hhbmRsZSI6IlBsYXlVbmlNTU8i…"}
+            #
+            # which decodes to the handle, the X user id and the deployer's
+            # wallet. It is the strongest claim on offer and it was being
+            # dropped, because every adapter only looked for links. Three of
+            # sixty recent launches with an empty Account column had one.
+            proved = handle_from_proof(fields)
+            if proved:
+                out.handle, out.handle_source, out.proved = proved, "proof", True
         out.website = next((u for u in (_url_or_blank(f) for f in fields)
                             if u and "x.com" not in u and "twitter.com" not in u
                             and not _looks_like_image(u)), "")
