@@ -10,6 +10,7 @@ import { Badge, DEX_TONE } from "@/components/ui/badge";
 import { DetectionTable } from "@/components/features/DetectionTable";
 import { CrossChainTable } from "@/components/features/CrossChainTable";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { SortableSections } from "@/components/SortableSections";
 import { FilterTabs, HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { DownloadCsv } from "@/components/features/Performance";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
@@ -262,11 +263,18 @@ export default function DetectionsPage() {
         title="Detections"
         subtitle="Premium-caller addresses, Robinhood launches, cross-chain matches and ETH gas fees"
       />
-      <PremiumSection />
-      <RbhXSection />
-      <LaunchpadSection />
-      <CrossChainSection />
-      <GasSection />
+      {/* Drag a section by the grip at its top-left corner. The order is
+          remembered in this browser, like each section's collapsed state. */}
+      <SortableSections
+        storageKey="detections_section_order"
+        sections={[
+          { id: "premium", node: <PremiumSection /> },
+          { id: "rbhx", node: <RbhXSection /> },
+          { id: "launchpad", node: <LaunchpadSection /> },
+          { id: "crosschain", node: <CrossChainSection /> },
+          { id: "gas", node: <GasSection /> },
+        ]}
+      />
     </div>
     </TickProvider>
   );
