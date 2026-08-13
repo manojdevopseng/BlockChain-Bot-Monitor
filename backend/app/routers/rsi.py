@@ -21,8 +21,10 @@ from .. import db, registry
 from ..rsi_math import DEFAULT_HIGH, DEFAULT_LOW, DEFAULT_PERIOD
 from ..scanners import scfg
 from ..scanners.rsi_price import chains
-from ..scanners.rsi_tracker import (CADENCES, DEFAULT_CADENCE, DEFAULT_INTERVAL,
-                                    INTERVAL_LABELS, INTERVALS)
+from ..scanners.rsi_tracker import (CADENCES, CANDLE_CHOICES, DEFAULT_CADENCE,
+                                    DEFAULT_CANDLES, DEFAULT_INTERVAL,
+                                    INTERVAL_LABELS, INTERVALS, candles_of,
+                                    period_of)
 from ..util import clean_list, gmgn_url, ist_date_str
 
 router = APIRouter(prefix="/api/rsi", tags=["rsi"])
@@ -75,6 +77,10 @@ async def get_settings():
         # Not the same thing as `cadence`, which is only how often the reading
         # is recomputed.
         "default_interval": str(doc.get("default_interval", DEFAULT_INTERVAL)),
+        # How many candles one reading is made of. Per token as well — this is
+        # only what a new one starts on.
+        "default_candles": int(doc.get("default_candles", DEFAULT_CANDLES)),
+        "candle_choices": list(CANDLE_CHOICES),
         "cadences": list(CADENCES),
         "intervals": [{"id": k, "label": INTERVAL_LABELS[k]} for k in INTERVALS],
         "retention_days": scfg.RSI_RETENTION_DAYS,
@@ -94,13 +100,14 @@ async def set_settings(payload: dict = Body(...)):
         if not (0 < low < high < 100):
             raise HTTPException(400, "bounds must be 0 < low < high < 100")
         update["low"], update["high"] = low, high
-    if "period" in payload:
-        period = int(payload["period"])
-        # Two is the smallest RSI that means anything; past a few hundred the
-        # series is longer than the retention window can hold.
-        if not 2 <= period <= 200:
-            raise HTTPException(400, "period must be between 2 and 200")
-        update["period"] = period
+    if "default_candles" in payload:
+        candles = int(payload["default_candles"])
+        # Three is the fewest that makes an RSI mean anything; past a few
+        # hundred the series is longer than the retention window can hold.
+        if not 3 <= candles <= 201:
+            raise HTTPException(400, "candles must be between 3 and 201")
+        update["default_candles"] = candles
+        update["period"] = period_of(candles)
     if "default_interval" in payload:
         update["default_interval"] = _clean_interval(payload["default_interval"])
     if "cadence" in payload:
@@ -142,6 +149,8 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
                "checked_at": st.get("checked_at"), "updated_at": st.get("updated_at"),
                "last_alert_at": st.get("last_alert_at"),
                "interval_label": INTERVAL_LABELS.get(row.get("interval"), ""),
+               "candles": candles_of(row.get("period")
+                                     or period_of(DEFAULT_CANDLES)),
                "gmgn_url": gmgn_url(row.get("chain", ""), row.get("address", ""))}
         if q:
             ql = q.lower()
@@ -169,6 +178,12 @@ async def add_token(payload: dict = Body(...)):
         # one you cannot recognise in the panel or in an alert.
         symbol, name = await _name_symbol(chain, address, name)
     now = time.time()
+    # The same address may have been tracked on another chain before; its old
+    # reading would otherwise show against the new row.
+    await db.get_collection("rsi_state").delete_many({"address": address,
+                                                      "chain": {"$ne": chain}})
+    await db.get_collection("rsi_tokens").delete_many({"address": address,
+                                                       "chain": {"$ne": chain}})
     await db.get_collection("rsi_tokens").update_one(
         {"chain": chain, "address": address},
         {"$set": {"chain": chain, "address": address, "interval": interval,
@@ -186,11 +201,11 @@ async def edit_token(address: str, payload: dict = Body(...)):
     update: dict = {}
     if "interval" in payload:
         update["interval"] = _clean_interval(payload["interval"])
-    if "period" in payload:
-        period = int(payload["period"])
-        if not 2 <= period <= 200:
-            raise HTTPException(400, "period must be between 2 and 200")
-        update["period"] = period
+    if "candles" in payload:
+        candles = int(payload["candles"])
+        if not 3 <= candles <= 201:
+            raise HTTPException(400, "candles must be between 3 and 201")
+        update["period"] = period_of(candles)
     if "enabled" in payload:
         update["enabled"] = bool(payload["enabled"])
     if not update:
@@ -201,9 +216,15 @@ async def edit_token(address: str, payload: dict = Body(...)):
         raise HTTPException(404, f"{address} is not being tracked")
     # Its candles belong to the old interval; a new one starts warming up.
     if "interval" in update:
+        addr = _clean_address(address)
         await db.get_collection("rsi_candles").delete_many(
-            {"address": _clean_address(address),
-             "interval": {"$ne": update["interval"]}})
+            {"address": addr, "interval": {"$ne": update["interval"]}})
+        # And the reading built from those candles, which would otherwise sit
+        # on the row looking current.
+        await db.get_collection("rsi_state").update_one(
+            {"address": addr},
+            {"$set": {"rsi": None, "zone": "", "samples": 0,
+                      "announced_zone": ""}})
     return {"address": address, **update}
 
 

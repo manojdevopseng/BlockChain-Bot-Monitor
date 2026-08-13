@@ -116,6 +116,17 @@ export default function RsiPage() {
     await apiSend(`/api/rsi/tokens/${address}`, "PATCH", { interval: value });
     reload();
   }
+  // How many candles this one token's reading is made of. Per token for the
+  // same reason the timeframe is: a fast one and a slow one want different
+  // answers, and the default only decides where a new token starts.
+  async function setCandles(address: string, value: number) {
+    await apiSend(`/api/rsi/tokens/${address}`, "PATCH", { candles: value });
+    reload();
+  }
+  async function setDefaultCandles(value: number) {
+    await apiSend("/api/rsi/settings", "PATCH", { default_candles: value });
+    mutate("/api/rsi/settings");
+  }
   async function remove(address: string) {
     await apiSend(`/api/rsi/tokens/${address}`, "DELETE");
     reload();
@@ -191,6 +202,16 @@ export default function RsiPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-text-dim"
+                  title="How many candles one reading is made of. 15 is the chart default (RSI 14). Fewer turns sooner and jumps about; more is steadier.">
+              Candles
+            </span>
+            <FilterTabs value={String(settings?.default_candles ?? 15)}
+                        onChange={(v) => setDefaultCandles(Number(v))}
+                        options={(settings?.candle_choices ?? [8, 10, 15, 21, 31, 51])
+                          .map((n: number) => ({ id: String(n), label: String(n) }))} />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-text-dim"
                   title="How often RSI is recomputed and the bounds are checked — this is the RPC cost, not the candle length.">
               Recheck every (RPC)
             </span>
@@ -218,6 +239,8 @@ export default function RsiPage() {
                 <th className="px-3 py-2.5 font-medium">Chain</th>
                 <th className="px-3 py-2.5 font-medium"
                     title="This token's own RSI timeframe">Timeframe</th>
+                <th className="px-3 py-2.5 font-medium"
+                    title="How many candles this token's reading is made of">Candles</th>
                 <th className="px-3 py-2.5 font-medium">RSI</th>
                 <th className="px-3 py-2.5 font-medium">Price</th>
                 <th className="px-3 py-2.5 font-medium">Checked</th>
@@ -227,7 +250,7 @@ export default function RsiPage() {
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
                   {query ? "Nothing matches this search"
                     : date ? `Nothing read on ${date}`
                     : "No tokens yet — add one above"}
@@ -257,9 +280,17 @@ export default function RsiPage() {
                     </select>
                   </td>
                   <td className="px-3 py-3">
+                    <select value={r.candles ?? 15}
+                            onChange={(e) => setCandles(r.address, Number(e.target.value))}
+                            className="h-7 rounded border border-border bg-bg-soft px-1.5 text-[11px] text-text">
+                      {(settings?.candle_choices ?? [8, 10, 15, 21, 31, 51])
+                        .map((n: number) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-3 py-3">
                     {r.rsi == null ? (
                       <span className="text-[11px] text-text-dim">
-                        warming up {r.samples ?? 0}/{(settings?.period ?? 14) + 1}
+                        warming up {r.samples ?? 0}/{r.candles ?? 15}
                       </span>
                     ) : (
                       <div className="flex items-center gap-1.5">

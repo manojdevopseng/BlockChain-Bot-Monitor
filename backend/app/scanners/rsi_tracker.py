@@ -45,6 +45,23 @@ INTERVAL_LABELS = {"1s": "1 Sec", "5s": "5 Sec", "1m": "1 Min", "5m": "5 Min",
                    "1h": "1 Hour", "1d": "1 Day"}
 DEFAULT_INTERVAL = "5m"
 
+# How many candles one reading is made of. RSI(14) is the chart default and
+# needs fifteen — fourteen changes between them — so that is what "15 candles"
+# means here and everywhere in the UI. Fewer reacts sooner and jumps about;
+# more is steadier and slower to turn.
+CANDLE_CHOICES: tuple[int, ...] = (8, 10, 15, 21, 31, 51)
+DEFAULT_CANDLES = 15
+
+
+def period_of(candles: int) -> int:
+    """RSI length from a candle count — one change per pair of candles."""
+    return max(2, int(candles) - 1)
+
+
+def candles_of(period: int) -> int:
+    return int(period) + 1
+
+
 CADENCES: dict[str, int] = {"10s": 10, "20s": 20, "30s": 30, "1m": 60}
 DEFAULT_CADENCE = "30s"
 
@@ -53,6 +70,11 @@ DEFAULT_CADENCE = "30s"
 # nothing — the query is two small collections and the wait was the only thing
 # anyone would notice.
 _REFRESH_SECONDS = 15
+# How much history one reading is built from. Long enough that the smoothing
+# has settled — past a few hundred candles the oldest ones no longer move the
+# answer — and bounded so a token on 1 Sec cannot drag a day of rows into every
+# check.
+_HISTORY_CANDLES = 500
 # One token's alert cannot repeat inside this window even if it leaves the zone
 # and comes back — a price bouncing on the 30 line would otherwise ring twice a
 # minute.
@@ -195,6 +217,12 @@ class RsiTracker:
             {"$set": {"close": price, "dt": _utc_now()}},
             upsert=True,
         )
+        # A token that was tracked on another chain first leaves a reading
+        # behind under that chain — the panel then shows an empty RSI while the
+        # worker happily computes one, because state is keyed on chain and
+        # address. BUY did exactly that when it moved from ETH to RBH.
+        await _col("rsi_state").delete_many({"address": addr,
+                                             "chain": {"$ne": chain}})
         await _col("rsi_state").update_one(
             {"chain": chain, "address": addr},
             {"$set": {"price": price, "interval": interval,
@@ -219,13 +247,20 @@ class RsiTracker:
     async def _evaluate(self, token: dict) -> None:
         chain, addr = token.get("chain", ""), (token.get("address") or "").lower()
         interval = token.get("interval") or DEFAULT_INTERVAL
+        # This token's own candle count, else the default for new ones.
         period = int(token.get("period") or self._settings.get("period")
-                     or rsi_math.DEFAULT_PERIOD)
+                     or period_of(int(self._settings.get("default_candles")
+                                      or DEFAULT_CANDLES)))
 
+        # Every candle we have, not just the last period+1. Wilder's RSI smooths
+        # the previous average forward, so a fresh 15-candle window and a long
+        # series give different numbers for the same prices — measured on BUY,
+        # which read 82.1 over the last 15 candles and 49.8 over all 91. The
+        # chart said 49.55. The window was the whole disagreement.
         candles = await _col("rsi_candles").find(
             {"chain": chain, "address": addr, "interval": interval},
             {"_id": 0, "ts": 1, "close": 1},
-        ).sort("ts", -1).limit(period + 1).to_list(period + 1)
+        ).sort("ts", -1).limit(_HISTORY_CANDLES).to_list(_HISTORY_CANDLES)
         closes = [c["close"] for c in reversed(candles)]
         value = rsi_math.rsi(closes, period)
 

@@ -18,8 +18,10 @@ from app import registry
 from app.rsi_math import DEFAULT_HIGH, DEFAULT_LOW, DEFAULT_PERIOD
 from app.scanners import scfg as config
 from app.scanners.rsi_price import chains
-from app.scanners.rsi_tracker import (CADENCES, DEFAULT_CADENCE, DEFAULT_INTERVAL,
-                                      INTERVAL_LABELS, INTERVALS)
+from app.scanners.rsi_tracker import (CADENCES, CANDLE_CHOICES, DEFAULT_CADENCE,
+                                      DEFAULT_CANDLES, DEFAULT_INTERVAL,
+                                      INTERVAL_LABELS, INTERVALS, candles_of,
+                                      period_of)
 from app.util import ist_date_str
 
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -69,6 +71,8 @@ async def _reply(cmd: str, text: str) -> str:
         return await _cadence(args)
     if cmd == "rsi_timeframe":
         return await _timeframe(args)
+    if cmd == "rsi_candles":
+        return await _candles(args)
     if cmd in ("rsi_on", "rsi_off"):
         return await _switch(cmd == "rsi_on", args)
     return ""
@@ -247,6 +251,37 @@ async def _timeframe(args: list[str]) -> str:
         {"_id": "rsi"}, {"$set": {"default_interval": args[0].lower()}}, upsert=True)
     return (f"📊 new tokens start on {INTERVAL_LABELS[args[0].lower()]} — "
             "the ones already tracked keep theirs")
+
+
+async def _candles(args: list[str]) -> str:
+    """How many candles a reading is made of — for one token, or the default.
+
+        /rsi_candles 31                 the default for new tokens
+        /rsi_candles <address> 31       just that one
+    """
+    if not args:
+        raise ValueError("usage: /rsi_candles [address] &lt;"
+                         + " | ".join(str(n) for n in CANDLE_CHOICES) + "&gt;")
+    address = args[0] if _ADDRESS_RE.match(args[0]) else ""
+    count_arg = args[1] if address else args[0]
+    try:
+        count = int(count_arg)
+    except ValueError:
+        raise ValueError("the candle count has to be a number")
+    if not 3 <= count <= 201:
+        raise ValueError("candles must be between 3 and 201")
+    if address:
+        res = await _col("rsi_tokens").update_one(
+            {"address": address.lower()}, {"$set": {"period": period_of(count)}})
+        if not res.matched_count:
+            raise ValueError(f"{address} is not being tracked")
+        return (f"📊 <code>{address}</code> now reads {count} candles — "
+                "the others keep theirs")
+    await _col("rsi_settings").update_one(
+        {"_id": "rsi"}, {"$set": {"default_candles": count,
+                                  "period": period_of(count)}}, upsert=True)
+    return (f"📊 new tokens use {count} candles — the ones already tracked "
+            "keep theirs")
 
 
 async def _cadence(args: list[str]) -> str:

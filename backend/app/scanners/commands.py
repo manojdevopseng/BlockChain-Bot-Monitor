@@ -69,6 +69,8 @@ COMMAND_SPEC = [
     ("rsi_bounds",   "Set the bounds: /rsi_bounds 30 70",      "RSI Controller"),
     ("rsi_timeframe","Default timeframe for new tokens: /rsi_timeframe 5m",
                                                               "RSI Controller"),
+    ("rsi_candles",  "Candles per reading: /rsi_candles [address] 31",
+                                                              "RSI Controller"),
     ("rsi_check",    "How often RSI is recomputed: /rsi_check 30s", "RSI Controller"),
     ("rsi_on",       "Turn the tracker or one chain on: /rsi_on [chain]",
                                                               "RSI Controller"),

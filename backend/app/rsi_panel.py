@@ -29,8 +29,10 @@ from . import db, notifier, registry
 from .rsi_math import DEFAULT_HIGH, DEFAULT_LOW
 from .scanners import scfg as config
 from .scanners.rsi_price import chains
-from .scanners.rsi_tracker import (CADENCES, DEFAULT_CADENCE, DEFAULT_INTERVAL,
-                                   INTERVAL_LABELS, INTERVALS)
+from .scanners.rsi_tracker import (CADENCES, CANDLE_CHOICES, DEFAULT_CADENCE,
+                                   DEFAULT_CANDLES, DEFAULT_INTERVAL,
+                                   INTERVAL_LABELS, INTERVALS, candles_of,
+                                   period_of)
 from .scanners.slog import get_logger
 
 log = get_logger(__name__)
@@ -61,6 +63,24 @@ def _mark(on: bool) -> str:
     return "✅" if on else "⛔"
 
 
+def _span(interval: str, candles: int) -> str:
+    """How far back one reading looks: the timeframe times the candle count.
+
+    The two settings are only meaningful together — 15 candles is a quarter of
+    an hour on 1 Min and fifteen hours on 1 Hour — and this is the number
+    someone actually wants when choosing either.
+    """
+    from .scanners.rsi_tracker import INTERVALS
+    total = INTERVALS.get(interval, 300) * max(1, candles - 1)
+    if total < 90:
+        return f"{total} seconds"
+    if total < 5400:
+        return f"{total / 60:.0f} minutes"
+    if total < 86400 * 2:
+        return f"{total / 3600:.1f} hours"
+    return f"{total / 86400:.0f} days"
+
+
 # ── the main screen ───────────────────────────────────────────────────────────
 
 async def main_panel() -> tuple[str, list[list[dict]]]:
@@ -74,7 +94,8 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
     overbought = await _col("rsi_state").count_documents({"zone": "overbought"})
 
     default_tf = str(doc.get("default_interval", DEFAULT_INTERVAL))
-    period = int(doc.get("period", 14))
+    default_candles = int(doc.get("default_candles", DEFAULT_CANDLES))
+    period = period_of(default_candles)
     # The timeframe and the cadence are different things and were reading as
     # one: the timeframe is the candle RSI is computed on, the cadence is only
     # how often that sum is redone — which is what costs RPC requests.
@@ -82,8 +103,9 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
         f"⚙️ <b>RSI Tracker — settings</b>\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🪙 {tokens} token(s) · {oversold} oversold · {overbought} overbought\n"
-        f"📊 <b>Timeframe {INTERVAL_LABELS.get(default_tf, default_tf)}</b> — "
-        f"RSI({period}) is read on candles this long\n"
+        f"📊 <b>{INTERVAL_LABELS.get(default_tf, default_tf)} × "
+        f"{default_candles} candles</b> — one reading covers "
+        f"{_span(default_tf, default_candles)}\n"
         f"📉 alerts when that RSI crosses <b>{low:g}</b> or <b>{high:g}</b>\n"
         f"⏱ recomputed every <b>{cadence}</b> — how often the RPC is asked\n"
         f"🔔 → {config.RSI_ALERT_CHAT_ID or 'no chat set'}\n\n"
@@ -117,6 +139,10 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
         rows.append([{"text": INTERVAL_LABELS[k] + (" •" if k == default_tf else ""),
                       "callback_data": f"rsi:tf:{k}"} for k in keys[i:i + 3]])
     # The clock marks these as the other thing: how often, not how long.
+    # How many candles a reading is made of — the other half of "how far back
+    # does this look", and per token as well.
+    rows.append([{"text": f"{n}{' •' if n == default_candles else ''}",
+                  "callback_data": f"rsi:cn:{n}"} for n in CANDLE_CHOICES])
     rows.append([{"text": f"⏱ {c}{' •' if c == cadence else ''}",
                   "callback_data": f"rsi:cad:{c}"} for c in CADENCES])
     rows.append([{"text": "➕ Add token", "callback_data": "rsi:add"},
@@ -167,12 +193,13 @@ async def token_panel(address: str) -> tuple[str, list[list[dict]]]:
                                            "address": address.lower()}) or {}
     value = st.get("rsi")
     current = row.get("interval")
+    mine = candles_of(row.get("period") or period_of(DEFAULT_CANDLES))
     text = (
         f"🪙 <b>{(row.get('symbol') or '?').upper()}</b> · "
         f"{str(row.get('chain')).upper()}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"📊 timeframe <b>{INTERVAL_LABELS.get(current, current)}</b> — "
-        f"this token's own\n"
+        f"📊 <b>{INTERVAL_LABELS.get(current, current)} × {mine} candles</b> — "
+        f"its own, covering {_span(current, mine)}\n"
         + (f"📊 RSI <b>{value:.1f}</b>" + (f" · {st.get('zone')}" if st.get("zone") else "")
            if value is not None
            else f"📊 warming up — {st.get('samples', 0)} candle(s) so far") + "\n"
@@ -185,6 +212,12 @@ async def token_panel(address: str) -> tuple[str, list[list[dict]]]:
     keyboard = [[{"text": INTERVAL_LABELS[k] + (" •" if k == current else ""),
                   "callback_data": f"rsi:i:{k}:{address[:10]}"}
                  for k in keys[i:i + 3]] for i in range(0, len(keys), 3)]
+    # And its own candle count, the same way its timeframe is its own. Marked
+    # rather than counted out, so the row reads as one setting.
+    for group in (CANDLE_CHOICES[:3], CANDLE_CHOICES[3:]):
+        keyboard.append([{"text": f"{n} candles •" if n == mine else str(n),
+                          "callback_data": f"rsi:cnt:{n}:{address[:10]}"}
+                         for n in group])
     keyboard.append([{"text": "🗑 Stop tracking", "callback_data": f"rsi:x:{address}"},
                      {"text": "⬅ Back", "callback_data": "rsi:tokens"}])
     return text, keyboard
@@ -295,6 +328,24 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
                                               {"$set": {"default_interval": arg}},
                                               upsert=True)
         toast = f"New tokens start on {INTERVAL_LABELS[arg]}"
+
+    elif what == "cn":
+        if int(arg) not in CANDLE_CHOICES:
+            return ("Unknown candle count", True)
+        await _col("rsi_settings").update_one(
+            {"_id": "rsi"}, {"$set": {"default_candles": int(arg),
+                                      "period": period_of(int(arg))}}, upsert=True)
+        toast = f"New tokens use {arg} candles"
+
+    elif what == "cnt":
+        # rsi:cnt:<count>:<address prefix> — one token's own count.
+        count, prefix = int(arg), (parts[3] if len(parts) > 3 else "")
+        address = await _full_address(prefix)
+        if count not in CANDLE_CHOICES or not address:
+            return ("Unknown candle count", True)
+        await _col("rsi_tokens").update_one({"address": address},
+                                            {"$set": {"period": period_of(count)}})
+        toast, screen, arg = f"Now {count} candles", "token", address
 
     elif what == "cad":
         if arg not in CADENCES:
