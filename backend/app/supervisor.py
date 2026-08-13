@@ -218,6 +218,15 @@ async def reconcile() -> None:
     if rsi is not None:
         rsi.apply_toggles(enabled)
 
+    # SOL's on-chain discovery is a child task of the SOL scanner, not a worker
+    # of its own, so `want` above cannot start or stop it. scfg already carries
+    # the switch (refresh_from_registry); this is what makes it act on it now.
+    # Only while the scanner itself is running: with SOL stopped its task's
+    # own cleanup has already dropped the socket, and starting one under a
+    # scanner that is not scanning would leave discovered mints unenriched.
+    if _sol is not None and "sol" in _tasks:
+        _sol.sync_discovery()
+
 
 async def _set_standalone(attr: str, want: bool, factory, name: str) -> None:
     """Start or stop one of the standalone background tasks to match a toggle.
@@ -440,6 +449,9 @@ _DEPENDS_ON = {
     "rpc_eth":                "eth",
     "rpc_rbh":                "rbh",
     "rpc_sol":                "sol",
+    # Its socket is a child of the SOL scanner: with that stopped, discovery is
+    # stopped too however this switch reads.
+    "sol_onchain_discovery":  "sol",
     # Every switch the monitor reads at start rather than per message.
     "rsi_tracker":            "rsi",
     "rsi_telegram":           "rsi",

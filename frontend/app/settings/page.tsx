@@ -33,6 +33,12 @@ const CAT = {
   rsi: { title: "RSI Controller", icon: Activity,
          desc: "Relative strength on the tokens you add. A chain needs both its "
              + "switches — the chain and its endpoints — to be sampled." },
+  // Its own section rather than a switch inside Chains or RPCs: those answer
+  // "is SOL on" and "is this endpoint used", while this answers "which of the
+  // two sources feeding the SOL panel is running".
+  sol: { title: "Solana Sources", icon: Radio,
+         desc: "The SOL panel is fed by two independent sources. The GMGN feed "
+             + "is always on; the on-chain socket below is the one you can stop." },
   rbhx: { title: "Robinhood Monitors", icon: Twitter,
           desc: "Who is behind a Robinhood launch, read off the token's own metadata. "
               + "Two panels, one socket — each block is one of them." },
@@ -371,6 +377,9 @@ export default function SettingsPage() {
           <ServiceGroup cat="rbhx" items={data?.rbhx ?? []} />
           <ServiceGroup cat="rsi" items={data?.rsi ?? []} />
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
+          {/* Directly under Chains: "SOL is on" and "which SOL source is on"
+              are read one after the other, not hunted for separately. */}
+          <ServiceGroup cat="sol" items={data?.sol ?? []} />
           <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
           {/* The endpoint URLs themselves live on the RPC Monitor page, next to
               the live connection status they actually affect. */}

@@ -72,6 +72,13 @@ async def _build() -> list[dict]:
     out: list[dict] = []
     for name, chain, toggle, worker, kind, slots in groups:
         on = bool(enabled.get(toggle, True)) if toggle else True
+        # Solana's WSS slots exist for on-chain discovery and nothing else, so
+        # with that switched off the socket is deliberately not dialled. That is
+        # "disabled" — the same as any other toggled-off endpoint — and not the
+        # "stopped" an endpoint that should be up but isn't would report.
+        if (name == "Solana" and kind == "WSS"
+                and not enabled.get("sol_onchain_discovery", True)):
+            on = False
         live = supervisor.rpc_connected(worker) if worker else False
         active = supervisor.rpc_active_url(worker) if worker else ""
         # An empty group still gets one row, so a chain with nothing set is

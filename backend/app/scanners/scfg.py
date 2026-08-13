@@ -70,6 +70,11 @@ SOL_PUMP_PROGRAM  = settings.sol_pump_program
 SOL_BONK_PROGRAM  = settings.sol_bonk_program
 SOL_BONKERS_PROGRAM = settings.sol_bonkers_program
 SOL_BAGS_PROGRAM    = settings.sol_bags_program
+# Registry switch `sol_onchain_discovery`, mirrored here so the scanner reads
+# one flag instead of the services collection. True until the first reconcile
+# overwrites it, which keeps behaviour unchanged for anything that starts
+# before the registry is up.
+SOL_DISCOVERY_ENABLED = True
 
 # ── Cross-chain matching (from .env) ────────────────────────────
 CROSS_CHAIN_CHAT_ID = settings.cross_chain_chat_id
@@ -293,6 +298,12 @@ def refresh_from_registry(enabled: dict[str, bool]) -> None:
     handled by the supervisor deciding whether to start the task at all).
     """
     global RBH_NOXA_ENABLED, RBH_V2_ENABLED, RBH_V3_ENABLED, RBH_V4_ENABLED
+    global SOL_DISCOVERY_ENABLED
+    # SOL's on-chain discovery is a child task of a scanner the supervisor keeps
+    # running for other reasons, so it cannot be started/stopped by "should this
+    # worker exist" — it reads this flag instead (see SolanaScanner.sync_discovery).
+    if "sol_onchain_discovery" in enabled:
+        SOL_DISCOVERY_ENABLED = bool(enabled["sol_onchain_discovery"])
     # The registry's sol_to_rbh switch is the master: off means no Robinhood
     # source at all. Which sources run when it is on comes from .env. Applying
     # it to all four keeps them consistent — switching the flow off used to

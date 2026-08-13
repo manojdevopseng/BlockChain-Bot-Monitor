@@ -94,6 +94,9 @@ class SolanaScanner:
         # discovered mint has none until enrichment succeeds.
         self._discovered: dict[str, dict] = {}
         self._discovery = None
+        # Held on the instance, not as a local in run(), so the Settings switch
+        # can stop and restart it while the scanner itself keeps running.
+        self._disc_task: asyncio.Task | None = None
 
     def discovery_connected(self) -> bool:
         """Is the Helius on-chain discovery socket actually subscribed right now?
@@ -139,7 +142,7 @@ class SolanaScanner:
             f"watch window: {config.SOL_WATCH_WINDOW}m"
         )
         await asyncio.sleep(3)
-        disc_task = self._start_discovery()
+        self._start_discovery()
         try:
             while True:
                 try:
@@ -159,23 +162,53 @@ class SolanaScanner:
                     log.error(f"[SOL] Scanner error: {exc}")
                 await asyncio.sleep(config.SOL_SCAN_INTERVAL)
         finally:
-            if disc_task is not None and not disc_task.done():
-                disc_task.cancel()
+            self._stop_discovery()
 
     def _start_discovery(self):
-        """Start on-chain mint discovery, if an RPC WebSocket is configured.
+        """Start on-chain mint discovery, if it is switched on and configured.
 
         It runs as a child of the scanner rather than a supervisor worker of its
         own: discovery only feeds this scanner, so it should live and die with
         it. Without SOL_RPC_WSS nothing starts and behaviour is unchanged.
         """
+        if self._disc_task is not None and not self._disc_task.done():
+            return self._disc_task
+        if not config.SOL_DISCOVERY_ENABLED:
+            log.info("[SOL-RPC] discovery off — switched off in Settings")
+            return None
         if not config.SOL_RPC_WSS:
             return None
         from .sol_discovery import SolDiscovery
         if not SolDiscovery.programs():
             return None
         self._discovery = SolDiscovery(self.on_mint)
-        return asyncio.create_task(self._discovery.run(), name="sol-discovery")
+        self._disc_task = asyncio.create_task(self._discovery.run(), name="sol-discovery")
+        return self._disc_task
+
+    def _stop_discovery(self) -> None:
+        """Drop the socket and forget the client — the GMGN feed is untouched.
+
+        `_discovery = None` matters as much as the cancel: `discovery_connected`
+        and `discovery_endpoint` read it, and a switched-off discovery should
+        report "not connected" rather than the endpoint it was last on.
+        """
+        if self._disc_task is not None and not self._disc_task.done():
+            self._disc_task.cancel()
+        self._disc_task = None
+        self._discovery = None
+
+    def sync_discovery(self) -> None:
+        """Match the running socket to the `sol_onchain_discovery` switch.
+
+        Called on every reconcile, so switching it off in Settings stops the
+        subscription within the same request instead of at the next restart —
+        and switching it back on redials without waiting for one either.
+        """
+        if config.SOL_DISCOVERY_ENABLED:
+            self._start_discovery()
+        elif self._disc_task is not None:
+            log.info("[SOL-RPC] discovery stopping — switched off in Settings")
+            self._stop_discovery()
 
     def on_mint(self, mint: str, launchpad: str) -> None:
         """Called by discovery for every new mint on a watched launchpad.

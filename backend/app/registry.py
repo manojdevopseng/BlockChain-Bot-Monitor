@@ -42,6 +42,11 @@ RBHX = "rbhx"
 # Its own section again: the tracker, its chains and its endpoints only make
 # sense read together.
 RSI = "rsi"
+# Solana's own sources. The SOL panel is fed by two independent things — the
+# GMGN rolling feed and the on-chain WebSocket — and only one of them is
+# switchable here, so it does not belong in Chains (which is "is SOL on at
+# all") or RPCs (which is "is this endpoint used").
+SOL = "sol"
 
 # Registry ids that were renamed, old -> new. `seed` carries the user's on/off
 # state across so a rename never silently re-enables something they had turned
@@ -223,6 +228,17 @@ DEFAULT_SERVICES: list[dict] = [
     {"id": "ai_gate_preview",       "category": AI, "label": "Gate Preview (pending)",
      "chain": "sol", "enabled": True},
 
+    # ── Solana sources ──
+    # The second source behind the SOL panel: a WebSocket subscription to each
+    # launchpad program that reports a mint the moment it is created, ahead of
+    # the GMGN rolling feed. Off, the socket is never dialled — no SOL-RPC
+    # traffic and no endpoint-exhausted alerts — while the GMGN feed, the
+    # market-cap watch and everything downstream carry on unchanged. Until this
+    # switch the only way to stop it was blanking SOL_RPC_WSS, which took the
+    # market-cap trade stream with it.
+    {"id": "sol_onchain_discovery", "category": SOL, "group": "On-Chain Discovery",
+     "label": "SOL On-Chain Discovery (WebSocket)", "chain": "sol", "enabled": True},
+
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth", "enabled": True},
     {"id": "chain_rbh", "category": CHAIN, "label": "RBH", "chain": "rbh", "enabled": True},
@@ -325,7 +341,8 @@ async def grouped() -> dict[str, list[dict]]:
     `data?.ai ?? []` rather than checking, so a whole section would vanish
     instead of rendering empty.
     """
-    out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: [], RSI: []}
+    out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: [],
+                                  RSI: [], SOL: []}
     for svc in await list_services():
         out.setdefault(svc["category"], []).append(svc)
     return out
