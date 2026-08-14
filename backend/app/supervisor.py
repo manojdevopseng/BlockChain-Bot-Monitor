@@ -564,9 +564,16 @@ def service_states(enabled: dict[str, bool]) -> dict[str, dict]:
     return out
 
 
+# Every worker this module can start. Written once, here, because two places
+# read it — the diagnostics attached to a support request, and the public status
+# page — and both of them were quietly reporting False for the four workers that
+# were missing from the old hardcoded list.
+WORKER_NAMES = ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fwd", "cmd")
+
+
 def diagnostics() -> dict:
     return {
         "scanner_deps_available": _available,
         "import_error": _import_error,
-        "workers": {n: _worker_alive(n) for n in ("sol", "eth", "rbh", "fwd", "cmd")},
+        "workers": {n: _worker_alive(n) for n in WORKER_NAMES},
     }
