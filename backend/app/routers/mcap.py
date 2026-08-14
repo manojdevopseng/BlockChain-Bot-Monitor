@@ -94,7 +94,7 @@ async def get_settings(owner: dict = Depends(security.account)):
 
 @router.patch("/settings")
 async def set_settings(payload: dict = Body(...),
-                       owner: dict = Depends(security.require_active)):
+                       owner: dict = Depends(security.require_customer)):
     if "cadence" not in payload:
         raise HTTPException(400, "nothing to change")
     cadence = str(payload["cadence"])
@@ -143,7 +143,7 @@ def _cadence_for(owner: dict) -> int:
 
 @router.post("/check")
 async def check(payload: dict = Body(...),
-                owner: dict = Depends(security.require_active)):
+                owner: dict = Depends(security.require_customer)):
     """One market cap, right now, for an address you paste in.
 
     Nothing is stored and nothing is watched: this is the "what is it worth"
@@ -194,7 +194,7 @@ async def check(payload: dict = Body(...),
 @router.get("/tokens")
 async def tokens(chain: str = Query("all"), q: str | None = None,
                  date: str | None = None, limit: int = Query(200, le=1000),
-                 owner: dict = Depends(security.require_active)):
+                 owner: dict = Depends(security.require_customer)):
     """Every token you added, with its latest market cap and its target."""
     flt: dict = {"user_id": owner["username"]}
     if chain != "all":
@@ -234,7 +234,7 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
 
 @router.post("/tokens")
 async def add_token(payload: dict = Body(...),
-                    owner: dict = Depends(security.require_active)):
+                    owner: dict = Depends(security.require_customer)):
     """Watch a token for a market cap. The target is the whole point, so it is
     required — a row with no target would just be a price ticker."""
     room = await accounts.check_room(owner, "mcap")
@@ -276,7 +276,7 @@ async def add_token(payload: dict = Body(...),
 
 @router.patch("/tokens/{address}")
 async def edit_token(address: str, payload: dict = Body(...),
-                     owner: dict = Depends(security.require_active)):
+                     owner: dict = Depends(security.require_customer)):
     """Change the target, or switch this one off without losing it."""
     row = await db.get_collection("mcap_tokens").find_one(
         {"user_id": owner["username"], "address": address})
@@ -306,7 +306,7 @@ async def edit_token(address: str, payload: dict = Body(...),
 
 @router.delete("/tokens/{address}")
 async def remove_token(address: str,
-                       owner: dict = Depends(security.require_active)):
+                       owner: dict = Depends(security.require_customer)):
     res = await db.get_collection("mcap_tokens").delete_one(
         {"user_id": owner["username"], "address": address})
     if not res.deleted_count:
@@ -327,7 +327,7 @@ async def _arm(chain: str, address: str, target: float) -> str:
 
 @router.get("/dates")
 async def dates(chain: str = Query("all"),
-                owner: dict = Depends(security.require_active)):
+                owner: dict = Depends(security.require_customer)):
     from datetime import datetime
     flt: dict = {} if chain == "all" else {"chain": chain}
     days = [d for d in await db.get_collection("mcap_state").distinct("day", flt) if d]
@@ -336,7 +336,7 @@ async def dates(chain: str = Query("all"),
 
 
 @router.get("/stats")
-async def stats(owner: dict = Depends(security.require_active)):
+async def stats(owner: dict = Depends(security.require_customer)):
     col = db.get_collection("mcap_tokens")
     mine = {"user_id": owner["username"]}
     return {

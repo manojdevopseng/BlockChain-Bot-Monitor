@@ -150,10 +150,47 @@ async def require_write(request: Request,
                         claims: dict = Depends(require_user)) -> dict:
     """Authenticated to read, admin to change anything.
 
-    Mounted on every protected router, so a new endpoint is covered the day it
-    is written rather than the day somebody remembers to add it to a list.
+    For the operator's own surfaces — the panels a customer may look at but
+    nobody except an admin may alter. A customer's OWN data is a different
+    question, and `require_customer` is the one that answers it.
     """
     if request.method not in READ_METHODS and claims["role"] != ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="This account has read-only access")
     return claims
+
+
+async def require_customer(request: Request,
+                           doc: dict = Depends(account)) -> dict:
+    """A live account, reading and writing its own rows.
+
+    This is the rule the product runs on, and it is deliberately not
+    `require_write`: that one was written when "user" meant read-only staff, so
+    it refuses every POST from anyone but an admin — which would mean a paying
+    customer could not add a token to their own list.
+
+    What keeps one customer out of another's data is not the method, it is the
+    `user_id` in every query. This dependency only answers "is this a live
+    account", and the routes answer "whose row is this".
+    """
+    from . import accounts
+    if doc.get("role") == ADMIN:
+        return doc
+    state = accounts.access(doc)
+    if not state.usable:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail=state.reason or "Your access has ended")
+    return doc
+
+
+async def require_customer_read(request: Request,
+                                doc: dict = Depends(require_customer)) -> dict:
+    """The shared panels: a live account may read them, only an admin writes.
+
+    Detections, Alerts, Tokens, Analytics — one set of data, produced by the
+    scanners for everybody. Nobody's to edit but the operator's.
+    """
+    if request.method not in READ_METHODS and doc.get("role") != ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only an admin can change this")
+    return doc

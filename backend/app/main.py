@@ -147,10 +147,19 @@ app.add_middleware(
 # depended on it, so /api/settings/credentials handed out the GMGN API key and
 # the Cloudflare cookie to anyone who asked, and a PATCH could stop a scanner.
 # The auth router itself stays open — the login has to be reachable.
-_PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
-              analytics, logs, rpc, system, settings_router, chat_lookup,
-              outcomes_router, ai_router, users_router, rbhx, launchpad,
-              rsi, mcap)
+# Three kinds of surface, three rules.
+#
+#   product   the customer's own lists. A live account reads and writes its own
+#             rows; which rows are theirs is decided in the query, not here.
+#   shared    what the scanners produce for everybody. A live account reads;
+#             only an admin changes anything.
+#   operator  the controls. Admin only, whatever the method — these are hidden
+#             from a customer rather than greyed out, and the rule is here so
+#             the hiding is a courtesy and not the control.
+_PRODUCT = (rsi, mcap)
+_SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
+           chat_lookup, outcomes_router, ai_router, rbhx, launchpad)
+_OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router)
 
 app.include_router(auth.router)
 # Sign-up, email confirmation and password reset cannot sit behind a login,
@@ -161,8 +170,14 @@ app.include_router(account.router)
 # routers rather than listing endpoints means a new POST is covered the day it
 # is written. What a `user` may not even read — the .env credentials — is
 # guarded at its own endpoint, because it is a GET.
-for r in _PROTECTED:
-    app.include_router(r.router, dependencies=[Depends(security.require_write)])
+for r in _PRODUCT:
+    app.include_router(r.router,
+                       dependencies=[Depends(security.require_customer)])
+for r in _SHARED:
+    app.include_router(r.router,
+                       dependencies=[Depends(security.require_customer_read)])
+for r in _OPERATOR:
+    app.include_router(r.router, dependencies=[Depends(security.require_admin)])
 
 # CSV endpoints live in the outcomes module but mount under their own paths.
 for extra in (outcomes_router.alerts_csv, outcomes_router.detections_csv):

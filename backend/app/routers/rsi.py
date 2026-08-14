@@ -112,7 +112,7 @@ async def get_settings(owner: dict = Depends(security.account)):
 
 @router.patch("/settings")
 async def set_settings(payload: dict = Body(...),
-                       owner: dict = Depends(security.require_active)):
+                       owner: dict = Depends(security.require_customer)):
     """Bounds, period and cadence. Whatever is sent is changed; the rest stays."""
     update: dict = {}
     if "low" in payload or "high" in payload:
@@ -158,7 +158,7 @@ async def _settings_doc(owner: dict) -> dict:
 @router.get("/tokens")
 async def tokens(chain: str = Query("all"), q: str | None = None,
                  date: str | None = None, limit: int = Query(200, le=1000),
-                 owner: dict = Depends(security.require_active)):
+                 owner: dict = Depends(security.require_customer)):
     """The panel: every token you added, with its latest reading."""
     flt: dict = {"user_id": owner["username"]}
     if chain != "all":
@@ -211,7 +211,7 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
 
 @router.post("/tokens")
 async def add_token(payload: dict = Body(...),
-                    owner: dict = Depends(security.require_active)):
+                    owner: dict = Depends(security.require_customer)):
     """Add a token to watch. Yours alone, and nothing is added on its own."""
     room = await accounts.check_room(owner, "rsi")
     if not room.room:
@@ -253,7 +253,7 @@ async def add_token(payload: dict = Body(...),
 
 @router.patch("/tokens/{address}")
 async def edit_token(address: str, payload: dict = Body(...),
-                     owner: dict = Depends(security.require_active)):
+                     owner: dict = Depends(security.require_customer)):
     """Change one token's own interval, its period, or switch it off."""
     update: dict = {}
     if "interval" in payload:
@@ -285,7 +285,7 @@ async def edit_token(address: str, payload: dict = Body(...),
 
 @router.delete("/tokens/{address}")
 async def remove_token(address: str,
-                       owner: dict = Depends(security.require_active)):
+                       owner: dict = Depends(security.require_customer)):
     addr = _clean_address(address)
     res = await db.get_collection("rsi_tokens").delete_one(
         {"user_id": owner["username"], "address": addr})
@@ -311,7 +311,7 @@ async def _name_symbol(chain: str, address: str, name: str = "") -> tuple[str, s
 
 @router.get("/dates")
 async def dates(chain: str = Query("all"),
-                owner: dict = Depends(security.require_active)):
+                owner: dict = Depends(security.require_customer)):
     from datetime import datetime
     flt = {} if chain == "all" else {"chain": chain}
     days = [d for d in await db.get_collection("rsi_readings").distinct("day", flt)
@@ -321,7 +321,7 @@ async def dates(chain: str = Query("all"),
 
 
 @router.get("/stats")
-async def stats(owner: dict = Depends(security.require_active)):
+async def stats(owner: dict = Depends(security.require_customer)):
     """Counted over this account's own list, not the whole database."""
     rows = await db.get_collection("rsi_tokens").find(
         {"user_id": owner["username"]},
