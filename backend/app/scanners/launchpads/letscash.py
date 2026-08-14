@@ -48,9 +48,33 @@ from app.scanners.launchpads.pons import _url_or_blank
 
 _TOPIC_LAUNCHED = "0x17091df68f499cf4e20dcfc5d42f064dd22359e785b77691c4c4ed0322608897"
 
-_SEL_SOCIALS = "0x53cd512a"   # socials()     -> (string,string,string,string,string)
+_SEL_SOCIALS = "0x53cd512a"   # socials()     -> Socials{5 strings}, one struct
 _SEL_DESC    = "0x7284e416"   # description() -> string
 _SEL_LOGO    = "0xfb7f21eb"   # logo()        -> string (ipfs:// on most launches)
+
+
+def _unwrap_struct(raw: str) -> str:
+    """Step past the offset word a struct return is wrapped in.
+
+    The difference between this and Pons, which shares the selector: Pons
+    returns five strings, so their head words start at byte 0 and
+    decode_string_tuple reads them directly. LetsCash returns one `Socials`
+    struct, so word 0 is an offset to it and every head word inside is relative
+    to that. Handed to the decoder unwrapped, word 0 (0x20) is read as the first
+    string's offset and every field comes back as garbage — the account column
+    was empty on a launch whose contract plainly named one.
+
+    Only 0x20 is unwrapped: a plain five-string return opens with 0xa0, so this
+    cannot fire on the shape it must leave alone.
+    """
+    body = (raw or "")[2:] if (raw or "").startswith("0x") else (raw or "")
+    if len(body) <= 64:
+        return raw
+    try:
+        head = int(body[:64], 16)
+    except ValueError:
+        return raw
+    return "0x" + body[64:] if head == 32 else raw
 
 
 class LetsCash(Launchpad):
@@ -73,8 +97,8 @@ class LetsCash(Launchpad):
 
         out = Launch(address=address,
                      dev_wallet=self.address_from_log(log_obj, "t2"))
-        fields = decode_string_tuple(
-            await self.eth_call(provider, address, _SEL_SOCIALS))
+        fields = decode_string_tuple(_unwrap_struct(
+            await self.eth_call(provider, address, _SEL_SOCIALS)))
         if fields:
             out.handle, out.handle_source = self.classify(find_x_link(fields))
             out.website = next((u for u in (_url_or_blank(f) for f in fields)
