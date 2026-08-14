@@ -125,6 +125,11 @@ async def handle_callback(cb: dict) -> tuple[str, bool]:
     if data.startswith("rsi:"):
         from . import rsi_panel
         return await rsi_panel.handle(data, cb)
+    # The Market Cap screen, the same arrangement — its own module because it
+    # is a screen with state rather than a one-shot action like muting.
+    if data.startswith("mc:"):
+        from . import mcap_panel
+        return await mcap_panel.handle(data, cb)
     if data.startswith("mt:"):
         key = data[3:]
         until = await mute("token", key)

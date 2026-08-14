@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2, Twitter } from "lucide-react";
+import { Activity, Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2, Twitter, Target } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -39,6 +39,12 @@ const CAT = {
   sol: { title: "Solana Sources", icon: Radio,
          desc: "The SOL panel is fed by two independent sources. The GMGN feed "
              + "is always on; the on-chain socket below is the one you can stop." },
+  // Shares the RSI nav on the dashboard, its own section here: it answers a
+  // different question and has its own worker, chains and endpoints.
+  mcap: { title: "Market Cap Alert", icon: Target,
+          desc: "Watches the tokens you add and says when one reaches the market "
+              + "cap you set. A chain needs both its switches — the chain and "
+              + "its endpoints — to be read." },
   rbhx: { title: "Robinhood Monitors", icon: Twitter,
           desc: "Who is behind a Robinhood launch, read off the token's own metadata. "
               + "Two panels, one socket — each block is one of them." },
@@ -376,6 +382,7 @@ export default function SettingsPage() {
         <div className="space-y-5">
           <ServiceGroup cat="rbhx" items={data?.rbhx ?? []} />
           <ServiceGroup cat="rsi" items={data?.rsi ?? []} />
+          <ServiceGroup cat="mcap" items={data?.mcap ?? []} />
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
           {/* Directly under Chains: "SOL is on" and "which SOL source is on"
               are read one after the other, not hunted for separately. */}

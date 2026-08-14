@@ -160,6 +160,10 @@ async def reconcile() -> None:
     # by hand and has nothing to do with whether a scanner is on.
     if bool(enabled.get("rsi_tracker")):
         want.add("rsi")
+    # Its own switch and its own worker: it watches the same tokens list nobody
+    # else has, and stopping RSI must not stop it.
+    if bool(enabled.get("mcap_tracker")):
+        want.add("mcap")
     if want_fwd:
         want.add("fwd")
     if want_cmd:
@@ -174,7 +178,7 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "fwd", "cmd"):
+    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "fwd", "cmd"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -217,6 +221,12 @@ async def reconcile() -> None:
     rsi = _instances.get("rsi")
     if rsi is not None:
         rsi.apply_toggles(enabled)
+
+    # Same for the Market Cap watcher: a chain switched off must stop being
+    # read on the next pass, not at its next refresh.
+    mcap = _instances.get("mcap")
+    if mcap is not None:
+        mcap.apply_toggles(enabled)
 
     # SOL's on-chain discovery is a child task of the SOL scanner, not a worker
     # of its own, so `want` above cannot start or stop it. scfg already carries
@@ -281,6 +291,14 @@ async def _start_worker(name: str) -> None:
         inst.apply_toggles(await registry.enabled_map())
         _instances["rsi"] = inst
         _tasks["rsi"] = asyncio.create_task(inst.run(), name="rsi-tracker")
+        return
+
+    if name == "mcap":
+        from .scanners.mcap_tracker import McapTracker
+        inst = McapTracker()
+        inst.apply_toggles(await registry.enabled_map())
+        _instances["mcap"] = inst
+        _tasks["mcap"] = asyncio.create_task(inst.run(), name="mcap-tracker")
         return
 
     if name == "rbhx":
@@ -418,6 +436,7 @@ def status() -> dict[str, str]:
         _SVC_RBH: "running" if _worker_alive("rbh") else "stopped",
         "rbhx_monitor": "running" if _worker_alive("rbhx") else "stopped",
         "rsi_tracker": "running" if _worker_alive("rsi") else "stopped",
+        "mcap_tracker": "running" if _worker_alive("mcap") else "stopped",
         "forwarder": "running" if _worker_alive("fwd") else "stopped",
         "bot_commands": "running" if _worker_alive("cmd") else "stopped",
     }
@@ -463,6 +482,17 @@ _DEPENDS_ON = {
     "rsi_rpc_eth":            "rsi",
     "rsi_rpc_bsc":            "rsi",
     "rsi_rpc_sol":            "rsi",
+    # The Market Cap watcher's own switches, on its own worker.
+    "mcap_tracker":           "mcap",
+    "mcap_telegram":          "mcap",
+    "mcap_chain_rbh":         "mcap",
+    "mcap_chain_eth":         "mcap",
+    "mcap_chain_bsc":         "mcap",
+    "mcap_chain_sol":         "mcap",
+    "mcap_rpc_rbh":           "mcap",
+    "mcap_rpc_eth":           "mcap",
+    "mcap_rpc_bsc":           "mcap",
+    "mcap_rpc_sol":           "mcap",
     "rbhx_monitor":           "rbhx",
     # Here because it can now be the only reason the worker is running: with
     # the X Monitor off, switching this on has to start it rather than wait for

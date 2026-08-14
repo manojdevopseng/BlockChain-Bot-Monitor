@@ -98,9 +98,22 @@ def _word(value: str) -> str:
 class PriceReader:
     """One HTTP session, one cache of resolved pools."""
 
-    def __init__(self, session: aiohttp.ClientSession) -> None:
+    def __init__(self, session: aiohttp.ClientSession,
+                 specs: Optional[dict[str, ChainSpec]] = None,
+                 tag: str = "RSI") -> None:
         self._session = session
+        # What this reader calls itself in the log, so a Market Cap read is not
+        # filed under [RSI] by a shared line.
+        self._tag = tag
         self._pools: dict[tuple[str, str], PoolRef] = {}
+        # Whose endpoints to read through. None means RSI's own, which is every
+        # caller that existed before the Market Cap tracker: that one prices the
+        # same pools on its own endpoints, and the pool-finding — three fee
+        # tiers, deepest wins, V2 fallback — is the part worth having once.
+        self._specs = specs
+
+    def _chains(self) -> dict[str, ChainSpec]:
+        return self._specs if self._specs is not None else chains()
 
     def forget(self, chain: str, token: str) -> None:
         self._pools.pop((chain, token.lower()), None)
@@ -117,7 +130,7 @@ class PriceReader:
             ) as resp:
                 body = await resp.json()
         except Exception as exc:  # noqa: BLE001
-            log.debug(f"[RSI] {spec.label} eth_call failed: {exc}")
+            log.debug(f"[{self._tag}] {spec.label} eth_call failed: {exc}")
             return None
         # A revert is the chain answering "no such pool", not a failure.
         return None if "error" in body else body.get("result")
@@ -128,7 +141,7 @@ class PriceReader:
         if cached is not None:
             return cached
 
-        spec = chains().get(chain)
+        spec = self._chains().get(chain)
         ref = PoolRef(chain=chain, token=token.lower(), found_at=time.time())
         if spec is None or not spec.http or not spec.wnative:
             self._pools[key] = ref
@@ -166,10 +179,10 @@ class PriceReader:
 
         self._pools[key] = ref
         if ref.kind:
-            log.info(f"[RSI] {spec.label} {token[:10]}… priced from {ref.kind}"
+            log.info(f"[{self._tag}] {spec.label} {token[:10]}… priced from {ref.kind}"
                      + (f" {ref.fee}" if ref.fee else "") + f" pool {ref.address[:10]}…")
         else:
-            log.info(f"[RSI] {spec.label} {token[:10]}… has no V2/V3 pool against "
+            log.info(f"[{self._tag}] {spec.label} {token[:10]}… has no V2/V3 pool against "
                      f"{spec.wnative[:8]}… — nothing to price it from yet")
         return ref
 
@@ -181,7 +194,7 @@ class PriceReader:
         and the two ERC-20 getters cost one call each, once, at add time.
         """
         from app.scanners.rbhx_monitor import decode_string_tuple
-        spec = chains().get(chain)
+        spec = self._chains().get(chain)
         if spec is None:
             return "", ""
 
@@ -201,7 +214,7 @@ class PriceReader:
         trades on. Usually exactly one answers.
         """
         found = []
-        for key in chains():
+        for key in self._chains():
             ref = await self.resolve(key, token)
             if ref.kind:
                 found.append(key)
@@ -214,7 +227,7 @@ class PriceReader:
         fills with the last close, not a crash to zero that reads as -100%.
         """
         ref = await self.resolve(chain, token)
-        spec = chains().get(chain)
+        spec = self._chains().get(chain)
         if not ref.kind or spec is None:
             return None
 

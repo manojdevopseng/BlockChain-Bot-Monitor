@@ -42,6 +42,11 @@ RBHX = "rbhx"
 # Its own section again: the tracker, its chains and its endpoints only make
 # sense read together.
 RSI = "rsi"
+# Its own section for the same reason RSI has one: the watcher, the chains it
+# reads and the endpoints it reads them on only make sense together. It shares
+# the RSI nav on the dashboard but not a single switch with it — one is "has
+# this turned" and the other "has this got there".
+MCAP = "mcap"
 # Solana's own sources. The SOL panel is fed by two independent things — the
 # GMGN rolling feed and the on-chain WebSocket — and only one of them is
 # switchable here, so it does not belong in Chains (which is "is SOL on at
@@ -170,6 +175,34 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "BSC endpoints", "chain": "bnb", "enabled": True},
     {"id": "rsi_rpc_sol",  "category": RSI, "group": "RPC Endpoints",
      "label": "SOL endpoints", "chain": "sol", "enabled": False},
+
+    # ── Market Cap Alert ───────────────────────────────────────────────────
+    # Same three blocks as the RSI tracker above and for the same reason: is it
+    # running, which chains it reads, and on whose endpoints. A chain needs
+    # both its switches to be checked at all.
+    {"id": "mcap_tracker",  "category": MCAP, "group": "Watcher",
+     "label": "Market Cap Alert", "chain": "eth", "enabled": True},
+    {"id": "mcap_telegram", "category": MCAP, "group": "Watcher",
+     "label": "Telegram Alerts", "chain": "eth", "enabled": True},
+    {"id": "mcap_chain_rbh", "category": MCAP, "group": "Chains",
+     "label": "RBH", "chain": "rbh", "enabled": True},
+    {"id": "mcap_chain_eth", "category": MCAP, "group": "Chains",
+     "label": "ETH", "chain": "eth", "enabled": True},
+    {"id": "mcap_chain_bsc", "category": MCAP, "group": "Chains",
+     "label": "BSC", "chain": "bnb", "enabled": True},
+    # On, unlike RSI's: a market cap needs a dollar price and a supply, and
+    # Solana can answer both — Jupiter for the price, one getTokenSupply for
+    # the supply — without the pool maths RSI has no Solana route for.
+    {"id": "mcap_chain_sol", "category": MCAP, "group": "Chains",
+     "label": "SOL", "chain": "sol", "enabled": True},
+    {"id": "mcap_rpc_rbh",  "category": MCAP, "group": "RPC Endpoints",
+     "label": "RBH endpoints", "chain": "rbh", "enabled": True},
+    {"id": "mcap_rpc_eth",  "category": MCAP, "group": "RPC Endpoints",
+     "label": "ETH endpoints", "chain": "eth", "enabled": True},
+    {"id": "mcap_rpc_bsc",  "category": MCAP, "group": "RPC Endpoints",
+     "label": "BSC endpoints", "chain": "bnb", "enabled": True},
+    {"id": "mcap_rpc_sol",  "category": MCAP, "group": "RPC Endpoints",
+     "label": "SOL endpoints", "chain": "sol", "enabled": True},
 
     # The starred-caller mirror. Its own switch so the filtered feed can be
     # stopped without touching the full one, and the other way round.
@@ -344,7 +377,7 @@ async def grouped() -> dict[str, list[dict]]:
     instead of rendering empty.
     """
     out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: [],
-                                  RSI: [], SOL: []}
+                                  RSI: [], MCAP: [], SOL: []}
     for svc in await list_services():
         out.setdefault(svc["category"], []).append(svc)
     return out

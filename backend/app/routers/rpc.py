@@ -67,6 +67,17 @@ async def _build() -> list[dict]:
         ("BNB Chain", "bnb", "", "", "HTTP", list(scfg.BNB_HTTP_ENDPOINTS)),
         ("Solana", "sol", "rpc_sol", "sol", "WSS", list(scfg.SOL_WSS_ENDPOINTS)),
         ("Solana", "sol", "rpc_sol", "",    "HTTP", list(scfg.SOL_HTTP_ENDPOINTS)),
+        # Market Cap Alert: two HTTP slots per chain, its own switch each. No
+        # worker column — these are one-off eth_call/getTokenSupply requests on
+        # a timer, not a socket that can be "connected".
+        ("Market Cap — RBH", "rbh", "mcap_rpc_rbh", "", "HTTP",
+         list(scfg.MCAP_ENDPOINTS.get("rbh") or [])),
+        ("Market Cap — ETH", "eth", "mcap_rpc_eth", "", "HTTP",
+         list(scfg.MCAP_ENDPOINTS.get("eth") or [])),
+        ("Market Cap — BSC", "bnb", "mcap_rpc_bsc", "", "HTTP",
+         list(scfg.MCAP_ENDPOINTS.get("bsc") or [])),
+        ("Market Cap — SOL", "sol", "mcap_rpc_sol", "", "HTTP",
+         list(scfg.MCAP_ENDPOINTS.get("sol") or [])),
     ]
 
     out: list[dict] = []

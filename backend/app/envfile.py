@@ -248,6 +248,57 @@ EDITABLE: dict[str, dict] = {
         "help": "Used when #1 keeps failing, then back to #1 if #2 fails too.",
     },
 
+    # The Market Cap Alert section reads on its own endpoints so a fifteen-
+    # second loop over your token list cannot spend a scanner's rate limit.
+    # Two per chain, #1 then #2; blank borrows the RSI tracker's and then that
+    # chain's own, which is what makes it work before these are filled in.
+    "MCAP_RBH_RPC_HTTP": {
+        "label": "Market Cap — RBH HTTP #1", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Reads totalSupply() and the pool price for every RBH token on "
+                "the Market Cap Alert list, once per check. Blank falls back to "
+                "the RSI tracker's RBH endpoint and then to the chain's own.",
+    },
+    "MCAP_RBH_RPC_HTTP_FALLBACK": {
+        "label": "Market Cap — RBH HTTP #2", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Used when #1 keeps failing.",
+    },
+    "MCAP_ETH_RPC_HTTP": {
+        "label": "Market Cap — ETH HTTP #1", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Same job on Ethereum. Blank borrows RSI's, then ETH's own.",
+    },
+    "MCAP_ETH_RPC_HTTP_FALLBACK": {
+        "label": "Market Cap — ETH HTTP #2", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Used when #1 keeps failing.",
+    },
+    "MCAP_BSC_RPC_HTTP": {
+        "label": "Market Cap — BSC HTTP #1", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Same job on BNB Chain, priced against WBNB through "
+                "PancakeSwap's factories.",
+    },
+    "MCAP_BSC_RPC_HTTP_FALLBACK": {
+        "label": "Market Cap — BSC HTTP #2", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Used when #1 keeps failing.",
+    },
+    "MCAP_SOL_RPC_HTTP": {
+        "label": "Market Cap — SOL HTTP #1", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Solana is asked for one thing only — getTokenSupply — because "
+                "the dollar price comes from Jupiter's public API, which needs "
+                "no key and no quota of ours. That is deliberate: this is the "
+                "chain where our own RPC is thinnest.",
+    },
+    "MCAP_SOL_RPC_HTTP_FALLBACK": {
+        "label": "Market Cap — SOL HTTP #2", "kind": "http", "secret": True,
+        "group": "RPC Endpoints — Market Cap Alert", "applies": "live",
+        "help": "Used when #1 keeps failing.",
+    },
+
     "AI_SCAN_INTERVAL": {
         "label": "AI judging interval (seconds)", "kind": "int", "group": "AI",
         "min": 1, "applies": "live",
@@ -486,6 +537,20 @@ def _refresh_derived(scfg, key: str) -> None:
                [u for u in (getattr(settings, f"{low}_rpc_http", "") or "",
                            getattr(settings, f"{low}_rpc_http_fallback", "") or "")
                 if u])
+        return
+    if key.startswith("MCAP_"):
+        # The Market Cap watcher's own slots. Its reader builds its chain specs
+        # from these scfg values on every call, so refreshing them here is all
+        # it takes for a saved endpoint to be used on the next check — no
+        # restart, same as everything else on the RPC Monitor page.
+        for chain in ("RBH", "ETH", "BSC", "SOL"):
+            low = chain.lower()
+            setattr(scfg, f"MCAP_{chain}_RPC_HTTP",
+                    getattr(settings, f"mcap_{low}_rpc_http", "") or "")
+            scfg.MCAP_ENDPOINTS[low] = [
+                u for u in (getattr(settings, f"mcap_{low}_rpc_http", "") or "",
+                            getattr(settings, f"mcap_{low}_rpc_http_fallback", "") or "")
+                if u]
         return
     if key.startswith("GAS_RPC"):
         # The gas feed's own slots. Without this the second endpoint saved in

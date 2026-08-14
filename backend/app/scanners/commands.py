@@ -76,6 +76,23 @@ COMMAND_SPEC = [
                                                               "RSI Controller"),
     ("rsi_off",      "Turn the tracker or one chain off: /rsi_off [chain]",
                                                               "RSI Controller"),
+    # The Market Cap Alert section, the same way: a button screen for the
+    # phone, commands for when the address is already in the clipboard. /menu
+    # opens this one in its own chat and the RSI one in RSI's — each group gets
+    # the screen its alerts belong to.
+    ("mcap",         "Market Cap settings screen (buttons)",   "Market Cap Alert"),
+    ("mcap_list",    "Watched tokens and their market cap",    "Market Cap Alert"),
+    ("mcap_add",     "Watch a token: /mcap_add <chain> <address> <target>",
+                                                              "Market Cap Alert"),
+    ("mcap_target",  "Change a target: /mcap_target <address> 250k",
+                                                              "Market Cap Alert"),
+    ("mcap_remove",  "Stop watching: /mcap_remove <address>",  "Market Cap Alert"),
+    ("mcap_check",   "How often it is checked: /mcap_check 15s",
+                                                              "Market Cap Alert"),
+    ("mcap_on",      "Turn the watcher or one chain on: /mcap_on [chain]",
+                                                              "Market Cap Alert"),
+    ("mcap_off",     "Turn the watcher or one chain off: /mcap_off [chain]",
+                                                              "Market Cap Alert"),
 ]
 
 # Checked against Telegram's own admin list for the chat, not a hardcoded user
@@ -244,6 +261,23 @@ class TelegramCommands:
                         log.info(f"[CMD] RSI chat menu published — "
                                  f"{len(rsi_cmds)} command(s) in "
                                  f"{config.RSI_ALERT_CHAT_ID}")
+                # And the Market Cap chat gets its own short menu, for the
+                # same reason: that group only ever needs /menu and /mcap*.
+                if config.MCAP_ALERT_CHAT_ID:
+                    mcap_cmds = [c for c in cmds
+                                 if c["command"] == "menu"
+                                 or c["command"].startswith("mcap")]
+                    res = await self._api("setMyCommands", {
+                        "commands": json.dumps(mcap_cmds),
+                        "scope": json.dumps({"type": "chat",
+                                             "chat_id": config.MCAP_ALERT_CHAT_ID})})
+                    if not res.get("ok"):
+                        log.warning(f"[CMD] menu for the Market Cap chat rejected: "
+                                    f"{res.get('description')}")
+                    else:
+                        log.info(f"[CMD] Market Cap chat menu published — "
+                                 f"{len(mcap_cmds)} command(s) in "
+                                 f"{config.MCAP_ALERT_CHAT_ID}")
                 # Empty everywhere else, so the "/" popup is blank in other chats.
                 await self._api("setMyCommands",
                                 {"commands": "[]",
@@ -382,8 +416,10 @@ class TelegramCommands:
             # Not a command — but the RSI settings screen asks for an address
             # as an ordinary message after a chain is chosen, and that is the
             # only time a plain message means anything to this bot.
-            from app import rsi_panel
-            await rsi_panel.pending_address(chat_id, text)
+            from app import mcap_panel, rsi_panel
+            if await rsi_panel.pending_address(chat_id, text):
+                return
+            await mcap_panel.pending_address(chat_id, text)
             return
 
         # Commands are answered in one group only, with one exception: the RSI
@@ -393,7 +429,12 @@ class TelegramCommands:
         rsi_chat = ((cmd_word.startswith("rsi") or cmd_word == "menu")
                     and config.RSI_ALERT_CHAT_ID
                     and str(chat_id) == str(config.RSI_ALERT_CHAT_ID))
-        if not rsi_chat and not self.allowed(chat_id):
+        # Same rule for the Market Cap chat: its own commands and /menu answer
+        # where its alerts land.
+        mcap_chat = ((cmd_word.startswith("mcap") or cmd_word == "menu")
+                     and config.MCAP_ALERT_CHAT_ID
+                     and str(chat_id) == str(config.MCAP_ALERT_CHAT_ID))
+        if not rsi_chat and not mcap_chat and not self.allowed(chat_id):
             log.debug(f"[CMD] ignored '{text.split()[0]}' from chat {chat_id} "
                       f"(only {self._chat_id} is allowed)")
             return
@@ -434,14 +475,32 @@ class TelegramCommands:
 
     async def _reply_for(self, cmd: str, chat_id, user_id, text: str = "") -> str:
         # The only commands that take arguments so far, and they take several.
-        if cmd == "menu" or cmd.startswith("rsi"):
-            # /rsi is the settings screen — buttons, edited in place. The rest
-            # stay as commands, which is what a phone keyboard is good for
-            # when you already know the address you want to add.
-            if cmd in ("rsi", "menu"):
+        if cmd == "menu" or cmd.startswith(("rsi", "mcap")):
+            # /rsi and /mcap are settings screens — buttons, edited in place.
+            # The rest stay as commands, which is what a phone keyboard is good
+            # for when you already know the address you want to add.
+            #
+            # /menu opens whichever screen belongs to the chat it was sent in,
+            # so each alert group has one way in and no wrong answers.
+            if cmd == "menu":
+                from app import mcap_panel, rsi_panel
+                if (config.MCAP_ALERT_CHAT_ID
+                        and str(chat_id) == str(config.MCAP_ALERT_CHAT_ID)):
+                    await mcap_panel.open_panel(chat_id)
+                else:
+                    await rsi_panel.open_panel(chat_id)
+                return ""
+            if cmd == "rsi":
                 from app import rsi_panel
                 await rsi_panel.open_panel(chat_id)
                 return ""
+            if cmd == "mcap":
+                from app import mcap_panel
+                await mcap_panel.open_panel(chat_id)
+                return ""
+            if cmd.startswith("mcap"):
+                from app.scanners.mcap_commands import reply as mcap_reply
+                return await mcap_reply(cmd, text)
             from app.scanners.rsi_commands import reply as rsi_reply
             return await rsi_reply(cmd, text)
         if cmd in ("start", "help"):

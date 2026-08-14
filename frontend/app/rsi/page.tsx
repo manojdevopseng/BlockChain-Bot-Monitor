@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
 import { ExternalLink } from "lucide-react";
 import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
+import { MarketCapSection } from "./_components/MarketCapSection";
 
 /* RSI Tracker.
  *
@@ -326,6 +327,10 @@ export default function RsiPage() {
           </table>
         </TableScroll>
       </CollapsibleSection>
+
+      {/* Same nav, separate feature: "has this turned" above, "has this got
+          there" here. Its own worker, its own endpoints, its own switches. */}
+      <MarketCapSection />
     </div>
   );
 }

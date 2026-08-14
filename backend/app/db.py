@@ -329,6 +329,11 @@ async def ensure_indexes() -> None:
         ("rsi_tokens",         [("chain", 1), ("address", 1)]),
         ("rsi_state",          [("chain", 1), ("address", 1)]),
         ("rsi_candles",        [("chain", 1), ("address", 1), ("interval", 1), ("ts", -1)]),
+        # Market Cap Alert: one row per token in each, read every cadence. No
+        # TTL on either — the list is the user's own and the state is one
+        # document per token, so it is bounded by that list rather than by time.
+        ("mcap_tokens",        [("chain", 1), ("address", 1)]),
+        ("mcap_state",         [("chain", 1), ("address", 1)]),
         ("launchpad_skip",     "handle"),
         ("launchpad_watch",    "handle"),
     ]

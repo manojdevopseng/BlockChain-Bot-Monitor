@@ -320,6 +320,22 @@ class Settings(BaseSettings):
     bnb_v3_factory: str = "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
     # How long candles and readings are kept, like every other panel.
     rsi_retention_days: int = 15
+
+    # ── Market Cap Alert ─────────────────────────────────────────────────────
+    # Its own endpoints again, two per chain, so a fifteen-second market cap
+    # loop cannot spend the RSI tracker's rate limit. Blank borrows RSI's, and
+    # then the chain's own — which is what makes it testable before they are
+    # filled in.
+    mcap_eth_rpc_http: str = ""
+    mcap_eth_rpc_http_fallback: str = ""
+    mcap_bsc_rpc_http: str = ""
+    mcap_bsc_rpc_http_fallback: str = ""
+    mcap_rbh_rpc_http: str = ""
+    mcap_rbh_rpc_http_fallback: str = ""
+    mcap_sol_rpc_http: str = ""
+    mcap_sol_rpc_http_fallback: str = ""
+    # Where market cap alerts go, and where its /menu screen answers.
+    mcap_alert_chat_id: str = ""
     # Where "all its endpoints are refusing" goes. Its own chat, not the
     # general alert group, so this feed's health is readable on its own.
     rbhx_alert_chat_id: str = ""

@@ -200,6 +200,19 @@ BNB_V2_FACTORY = settings.bnb_v2_factory
 BNB_V3_FACTORY = settings.bnb_v3_factory
 RSI_RETENTION_DAYS = settings.rsi_retention_days
 
+# ── Market Cap Alert ────────────────────────────────────────────
+MCAP_ETH_RPC_HTTP = settings.mcap_eth_rpc_http
+MCAP_BSC_RPC_HTTP = settings.mcap_bsc_rpc_http
+MCAP_RBH_RPC_HTTP = settings.mcap_rbh_rpc_http
+MCAP_SOL_RPC_HTTP = settings.mcap_sol_rpc_http
+MCAP_ENDPOINTS = {
+    "rbh": [u for u in (settings.mcap_rbh_rpc_http, settings.mcap_rbh_rpc_http_fallback) if u],
+    "eth": [u for u in (settings.mcap_eth_rpc_http, settings.mcap_eth_rpc_http_fallback) if u],
+    "bsc": [u for u in (settings.mcap_bsc_rpc_http, settings.mcap_bsc_rpc_http_fallback) if u],
+    "sol": [u for u in (settings.mcap_sol_rpc_http, settings.mcap_sol_rpc_http_fallback) if u],
+}
+MCAP_ALERT_CHAT_ID = _int_or_none(settings.mcap_alert_chat_id)
+
 DEST_PREMIUM_BY_CHAIN = {
     "eth": _int_or_none(settings.dest_premium_eth),
     "rbh": _int_or_none(settings.dest_premium_rbh),
