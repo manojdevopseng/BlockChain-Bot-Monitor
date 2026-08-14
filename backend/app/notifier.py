@@ -219,7 +219,7 @@ async def send(text: str, *, silent: bool = False) -> bool:
 
 async def notify_startup(details: str = "") -> None:
     await send(
-        "🟢 <b>BlockChain-Bot STARTED</b>\n"
+        "🟢 <b>Sightline STARTED</b>\n"
         f"<i>{html.escape(_now())}</i>"
         + (f"\n\n{details}" if details else "")
     )
@@ -227,7 +227,7 @@ async def notify_startup(details: str = "") -> None:
 
 async def notify_shutdown(reason: str = "graceful stop") -> None:
     await send(
-        "🔴 <b>BlockChain-Bot STOPPED</b>\n"
+        "🔴 <b>Sightline STOPPED</b>\n"
         f"<i>{html.escape(_now())}</i>\n"
         f"Reason: {html.escape(reason)}"
     )
@@ -236,7 +236,7 @@ async def notify_shutdown(reason: str = "graceful stop") -> None:
 async def notify_restart(uptime_seconds: int) -> None:
     """Sent on startup when a previous run ended without a clean shutdown."""
     await send(
-        "🔁 <b>BlockChain-Bot RESTARTED</b>\n"
+        "🔁 <b>Sightline RESTARTED</b>\n"
         f"<i>{html.escape(_now())}</i>\n"
         f"Previous run lasted {uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m"
     )

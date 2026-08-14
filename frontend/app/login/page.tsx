@@ -41,7 +41,7 @@ export default function LoginPage() {
             <Lock size={17} />
           </span>
           <div>
-            <h1 className="text-sm font-semibold text-text">BlockChain-Bot</h1>
+            <h1 className="text-sm font-semibold text-text">Sightline</h1>
             <p className="text-[11px] text-text-dim">Sign in to the dashboard</p>
           </div>
         </div>
