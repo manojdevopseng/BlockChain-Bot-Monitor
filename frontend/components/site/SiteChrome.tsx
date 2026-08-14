@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Cpu } from "lucide-react";
+import { getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /* The frame around every page a stranger can see.
@@ -12,7 +14,7 @@ import { cn } from "@/lib/utils";
  * looking at a nav full of things they cannot open. */
 
 const LINKS = [
-  { href: "/home", label: "Home" },
+  { href: "/", label: "Home" },
   { href: "/how-to-use", label: "How to use" },
   { href: "/pricing", label: "Pricing" },
   { href: "/faq", label: "FAQ" },
@@ -21,12 +23,16 @@ const LINKS = [
 
 export function SiteChrome({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  // Read after mount, never during render: the server has no localStorage, and
+  // a header that differs between the two flickers on every load.
+  const [signedIn, setSignedIn] = useState(false);
+  useEffect(() => setSignedIn(!!getToken()), []);
 
   return (
     <div className="min-h-screen bg-bg">
       <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-          <Link href="/home" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand/20 text-brand">
               <Cpu size={17} />
             </span>
@@ -48,14 +54,23 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <Link href="/login"
-                  className="rounded-lg px-3 py-1.5 text-xs text-text-muted hover:text-text">
-              Sign in
-            </Link>
-            <Link href="/register"
-                  className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">
-              Start free
-            </Link>
+            {signedIn ? (
+              <Link href="/dashboard"
+                    className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">
+                Open dashboard
+              </Link>
+            ) : (
+              <>
+                <Link href="/login"
+                      className="rounded-lg px-3 py-1.5 text-xs text-text-muted hover:text-text">
+                  Sign in
+                </Link>
+                <Link href="/register"
+                      className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">
+                  Start free
+                </Link>
+              </>
+            )}
           </div>
         </div>
 

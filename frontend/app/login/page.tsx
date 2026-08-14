@@ -23,7 +23,7 @@ export default function LoginPage() {
       // already mounted around the login page, so a client-side navigation
       // would leave the socket connected as "signed out". This also drops any
       // SWR cache from before signing in.
-      window.location.href = "/";
+      window.location.href = "/dashboard";
     } catch {
       setError("Invalid username or password");
       setBusy(false);

@@ -1,130 +1,123 @@
 "use client";
 
-import { Bell, Coins, Fuel, Eye, Activity } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Bell, Crosshair, Search, Target, Twitter } from "lucide-react";
 import { useApi } from "@/lib/api";
-import { StatCard } from "@/components/StatCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { DataTable, type Column } from "@/components/DataTable";
-import { Donut } from "@/components/features/Charts";
-import { cn, fmtEth, fmtUsd, timeAgo } from "@/lib/utils";
+import { SiteChrome, SiteHeading } from "@/components/site/SiteChrome";
 
-const ICONS: Record<string, any> = { total_alerts: Bell, total_tokens: Coins, eth_gas: Fuel, watchlist: Eye };
-const TONE: Record<string, any> = { total_alerts: "red", total_tokens: "amber", eth_gas: "blue", watchlist: "cyan" };
+/* The front page.
+ *
+ * It says the one thing that is actually different — you find out who is behind
+ * a Robinhood launch in the first seconds, not after the chart has moved — and
+ * it says the honest parts too. A landing page that promises returns is one
+ * that gets refund requests for a market it does not control. */
 
-export default function Dashboard() {
-  const { data: stats } = useApi<any>("/api/dashboard/stats");
-  const { data: overview } = useApi<any>("/api/dashboard/overview");
-  const { data: activity } = useApi<any>("/api/dashboard/activity");
-  const { data: tokens } = useApi<any>("/api/tokens?limit=6");
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="rounded-xl border border-border-soft bg-bg-card/40 px-4 py-3">
+      <p className="text-lg font-semibold text-text">{value}</p>
+      <p className="text-[11px] text-text-dim">{label}</p>
+    </div>
+  );
+}
 
-  const cards = stats?.cards ?? [];
-  const components = overview?.components ?? [];
-
-  const alertCols: Column<any>[] = [
-    { key: "message", header: "Event", render: (r) => <span className="text-text">{r.message}</span> },
-    { key: "chain", header: "Chain", render: (r) => <Badge variant="purple">{r.chain}</Badge> },
-    { key: "severity", header: "Severity", render: (r) => (
-      <Badge variant={r.severity === "high" ? "red" : r.severity === "medium" ? "amber" : "blue"}>{r.severity}</Badge>
-    )},
-    { key: "created_at", header: "When", render: (r) => <span className="text-text-muted">{timeAgo(r.created_at)}</span> },
-  ];
+export default function HomePage() {
+  // The public endpoint: counts of what the scanners actually recorded, never
+  // anything about a person.
+  const { data } = useApi<any>("/api/public/stats", { refreshInterval: 0 });
+  const pads: string[] = data?.launchpads ?? [];
 
   return (
-    <div className="space-y-5">
-      {/* stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {cards.map((c: any) => (
-          <StatCard key={c.key} label={c.label}
-            value={c.key === "eth_gas" ? fmtEth(c.value) : c.value}
-            delta={c.delta} icon={ICONS[c.key] || Activity} tone={TONE[c.key] || "purple"} />
-        ))}
-      </div>
+    <SiteChrome>
+      <section className="max-w-3xl">
+        <p className="mb-3 text-[11px] uppercase tracking-wide text-brand-soft">
+          Robinhood Chain · Ethereum · BNB Chain · Solana
+        </p>
+        <h1 className="text-3xl font-semibold leading-tight text-text sm:text-4xl">
+          Know who is behind a launch
+          <span className="block text-brand-soft">in the first seconds</span>
+        </h1>
+        <p className="mt-4 text-sm leading-relaxed text-text-muted">
+          Every launch on the Robinhood launchpads, read straight off the
+          contract: the X account named in its own metadata, that account&rsquo;s
+          bio and follower count, whether the bio carries the token address, and
+          whether the deployer bought their own supply. Not a feed of tickers —
+          the part that tells you whether there is anybody behind it.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/register"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+            Start 7 days free <ArrowRight size={14} />
+          </Link>
+          <Link href="/how-to-use"
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text">
+            See how it works
+          </Link>
+        </div>
+        <p className="mt-3 text-[11px] text-text-dim">
+          No card. The trial starts when you confirm your email, and stops by
+          itself.
+        </p>
+      </section>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* recent alerts */}
-        <Card className="lg:col-span-2">
-          <CardHeader><CardTitle>Recent Alerts</CardTitle></CardHeader>
-          <CardContent>
-            <DataTable columns={alertCols} rows={activity ?? []} empty="No alerts yet" />
-          </CardContent>
-        </Card>
+      {(data?.launches_24h != null) && (
+        <section className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat value={String(data.launches_24h)} label="launches read in 24h" />
+          <Stat value={String(data.accounts_named_24h ?? 0)} label="named an X account" />
+          <Stat value={String(pads.length)} label="launchpads watched" />
+          <Stat value="4" label="chains" />
+        </section>
+      )}
 
-        {/* system overview */}
-        <Card>
-          <CardHeader>
-            <CardTitle>System Overview</CardTitle>
-            <span
-              className={cn(
-                "text-lg font-bold",
-                (overview?.overall_health ?? 0) === 100 ? "text-accent-green"
-                  : (overview?.overall_health ?? 0) >= 50 ? "text-accent-amber"
-                  : "text-accent-red"
-              )}
-            >
-              {overview?.overall_health ?? 0}%
+      <section className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-2">
+        {[
+          { icon: Twitter, title: "Who launched it",
+            body: "The X account out of the token's own metadata — a profile link, a signed proof, or the launchpad's own record. Then the bio, the follower count, and whether that bio quotes the contract address." },
+          { icon: Crosshair, title: "Every Robinhood launchpad",
+            body: `${pads.join(", ") || "Pons, Pons V2, Flap, Pools.trade, Virtuals, LetsCash"} — one panel, one filter per launchpad, V2, V3 and V4 pools all priced.` },
+          { icon: Bell, title: "Watch and skip lists",
+            body: "Accounts you care about, flagged the moment they launch again. Accounts you are tired of, gone. Keywords matched against the bio, whole words only." },
+          { icon: Target, title: "Market cap alerts",
+            body: "Set a number on any token on four chains. One message when it gets there — not one every fifteen seconds while it sits above it." },
+          { icon: Search, title: "Market cap, on demand",
+            body: "Paste any address, pick the chain, read supply × price straight off the chain. Nothing stored, nothing watched." },
+          { icon: Bell, title: "RSI on your own terms",
+            body: "Your tokens, your timeframe, your candle count. Alerts on a crossing, not while it sits in the zone." },
+        ].map((f) => (
+          <div key={f.title} className="rounded-xl border border-border-soft bg-bg-card/40 p-5">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand/15 text-brand-soft">
+              <f.icon size={17} />
             </span>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-[11px] text-text-dim">
-              {overview?.running ?? 0} of {overview?.expected ?? 0} enabled services actually running
-            </p>
-            {components.map((c: any) => (
-              <div key={c.id ?? c.name} className="flex items-start justify-between gap-2 text-sm">
-                <div className="min-w-0">
-                  <div className={cn(c.status === "stopped" ? "text-text" : "text-text-muted")}>
-                    {c.name}
-                  </div>
-                  {/* Say why, so a red row is actionable rather than mysterious */}
-                  {c.status === "stopped" && c.reason && (
-                    <div className="text-[10px] text-accent-red">{c.reason}</div>
-                  )}
-                </div>
-                <Badge
-                  variant={
-                    c.status === "running" ? "green"
-                      : c.status === "stopped" ? "red"
-                      : "gray"
-                  }
-                >
-                  {c.status}
-                </Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+            <h3 className="mt-3 text-sm font-semibold text-text">{f.title}</h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-text-muted">{f.body}</p>
+          </div>
+        ))}
+      </section>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* latest tokens */}
-        <Card className="lg:col-span-2">
-          <CardHeader><CardTitle>Latest Tokens</CardTitle></CardHeader>
-          <CardContent>
-            <DataTable
-              columns={[
-                { key: "symbol", header: "Token", render: (r) => <span className="font-medium">{r.symbol}</span> },
-                { key: "chain", header: "Chain", render: (r) => <Badge variant="purple">{r.chain}</Badge> },
-                { key: "mcap_usd", header: "MCap", render: (r) => fmtUsd(r.mcap_usd) },
-                { key: "dex", header: "DEX", render: (r) => <Badge variant="blue">{(r.dex || "—").toUpperCase()}</Badge> },
-              ]}
-              rows={tokens?.items ?? []}
-              empty="No tokens detected yet"
-            />
-          </CardContent>
-        </Card>
+      <section className="mt-14 rounded-xl border border-border bg-bg-card/40 p-6">
+        <SiteHeading title="What this is not"
+                     lead="Worth saying before you pay for it." />
+        <ul className="space-y-2 text-xs leading-relaxed text-text-muted">
+          <li>• <b className="text-text">Not advice.</b> It reports; you decide. Nobody here knows what a token will do.</li>
+          <li>• <b className="text-text">Not a guarantee of being first.</b> You get the same second everyone else on the tool does — the edge is knowing who is behind it, not a private queue.</li>
+          <li>• <b className="text-text">Not unlimited seats.</b> A signal shared with everybody stops being one, so the number of accounts is capped on purpose.</li>
+          <li>• <b className="text-text">Not custody.</b> We never hold your funds or ask for a key. Payment is USDT or USDC to our address, once, for a plan.</li>
+        </ul>
+      </section>
 
-        {/* health donut */}
-        <Card>
-          <CardHeader><CardTitle>Health Distribution</CardTitle></CardHeader>
-          <CardContent>
-            <Donut data={[
-              { name: "Running",  value: components.filter((c: any) => c.status === "running").length,  color: "#22c55e" },
-              { name: "Stopped",  value: components.filter((c: any) => c.status === "stopped").length,  color: "#ef4444" },
-              { name: "Disabled", value: components.filter((c: any) => c.status === "disabled").length, color: "#334155" },
-            ].filter((d) => d.value > 0)} />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      <section className="mt-14 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-brand/30 bg-brand/5 p-6">
+        <div>
+          <h3 className="text-sm font-semibold text-text">Try it for a week</h3>
+          <p className="mt-1 text-xs text-text-muted">
+            Everything readable, three tokens of your own, alerts on the
+            dashboard. No card, nothing to cancel.
+          </p>
+        </div>
+        <Link href="/register"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+          Create an account <ArrowRight size={14} />
+        </Link>
+      </section>
+    </SiteChrome>
   );
 }

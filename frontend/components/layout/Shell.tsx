@@ -127,17 +127,21 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const PUBLIC_PATHS = ["/login", "/register", "/verify", "/forgot", "/reset",
                         "/home", "/pricing", "/how-to-use", "/faq", "/contact",
                         "/legal"];
-  const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+  // The root is the front page, for everybody. A signed-in visitor who types
+  // the address expects to see the site, not to be thrown into a dashboard —
+  // the way in is a button on it.
+  const isPublic = path === "/"
+    || PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
   const isLogin = isPublic;
 
   useEffect(() => {
     const ok = !!getToken();
     setSignedIn(ok);
     if (ok || isPublic) return;
-    // A stranger who lands on the app gets the front page, not a login box:
-    // "sign in" is no use to somebody who has never heard of this. Anywhere
-    // deeper still goes to the login, because they were asking for a page.
-    router.replace(path === "/" ? "/home" : "/login");
+    // Asking for a page inside the app while signed out goes to the login;
+    // the root and the rest of the site never do, so a visitor is never
+    // shown a login box for a page they did not ask for.
+    router.replace("/login");
   }, [isPublic, path, router]);
 
   // Route change always closes the mobile drawer.
