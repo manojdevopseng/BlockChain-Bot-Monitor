@@ -91,6 +91,45 @@ async def set_settings(payload: dict = Body(...)):
     return await get_settings()
 
 
+@router.post("/check")
+async def check(payload: dict = Body(...)):
+    """One market cap, right now, for an address you paste in.
+
+    Nothing is stored and nothing is watched: this is the "what is it worth"
+    question on its own, answered from the same reader the watcher uses, so the
+    two can never disagree about a number.
+    """
+    enabled = await registry.enabled_map()
+    if not enabled.get("mcap_checker", True):
+        raise HTTPException(409, "Market Cap Check is switched off in Settings")
+    chain = str(payload.get("chain") or "").lower()
+    if chain not in CHAIN_LABELS:
+        raise HTTPException(400, f"unknown chain '{chain}'")
+    if not enabled.get(f"mcap_chain_{chain}", True) or \
+            not enabled.get(f"mcap_rpc_{chain}", True):
+        raise HTTPException(409, f"{CHAIN_LABELS[chain]} is switched off for "
+                                 f"Market Cap")
+    address = _clean_address(payload.get("address"), chain)
+
+    import aiohttp
+    from ..scanners.mcap_price import MarketCapReader
+    async with aiohttp.ClientSession() as session:
+        reader = MarketCapReader(session)
+        symbol, name = await reader.name_symbol(chain, address)
+        reading = await reader.read(chain, address)
+    if reading is None:
+        # An honest "cannot" rather than a zero: no pool yet, or the endpoint
+        # is refusing. Both are worth saying out loud.
+        raise HTTPException(404, f"no price found for {address} on "
+                                 f"{CHAIN_LABELS[chain]} — it may have no pool yet")
+    return {"chain": chain, "chain_label": CHAIN_LABELS[chain], "address": address,
+            "symbol": symbol, "name": name, "mcap": reading.mcap,
+            "price_usd": reading.price_usd, "price_native": reading.price_native,
+            "supply": reading.supply, "source": reading.source,
+            "checked_at": time.time(),
+            "gmgn_url": gmgn_url(chain, address)}
+
+
 @router.get("/tokens")
 async def tokens(chain: str = Query("all"), q: str | None = None,
                  date: str | None = None, limit: int = Query(200, le=1000)):

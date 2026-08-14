@@ -81,6 +81,11 @@ COMMAND_SPEC = [
     # opens this one in its own chat and the RSI one in RSI's — each group gets
     # the screen its alerts belong to.
     ("mcap",         "Market Cap settings screen (buttons)",   "Market Cap Alert"),
+    # The checker: pick a chain, send an address, get its market cap. Nothing
+    # is watched or stored, so it is its own command rather than a mode of the
+    # one above.
+    ("mc",           "Check a market cap: pick chain, send address",
+                                                              "Market Cap Alert"),
     ("mcap_list",    "Watched tokens and their market cap",    "Market Cap Alert"),
     ("mcap_add",     "Watch a token: /mcap_add <chain> <address> <target>",
                                                               "Market Cap Alert"),
@@ -265,7 +270,7 @@ class TelegramCommands:
                 # same reason: that group only ever needs /menu and /mcap*.
                 if config.MCAP_ALERT_CHAT_ID:
                     mcap_cmds = [c for c in cmds
-                                 if c["command"] == "menu"
+                                 if c["command"] in ("menu", "mc")
                                  or c["command"].startswith("mcap")]
                     res = await self._api("setMyCommands", {
                         "commands": json.dumps(mcap_cmds),
@@ -431,7 +436,7 @@ class TelegramCommands:
                     and str(chat_id) == str(config.RSI_ALERT_CHAT_ID))
         # Same rule for the Market Cap chat: its own commands and /menu answer
         # where its alerts land.
-        mcap_chat = ((cmd_word.startswith("mcap") or cmd_word == "menu")
+        mcap_chat = ((cmd_word.startswith("mcap") or cmd_word in ("menu", "mc"))
                      and config.MCAP_ALERT_CHAT_ID
                      and str(chat_id) == str(config.MCAP_ALERT_CHAT_ID))
         if not rsi_chat and not mcap_chat and not self.allowed(chat_id):
@@ -475,7 +480,7 @@ class TelegramCommands:
 
     async def _reply_for(self, cmd: str, chat_id, user_id, text: str = "") -> str:
         # The only commands that take arguments so far, and they take several.
-        if cmd == "menu" or cmd.startswith(("rsi", "mcap")):
+        if cmd in ("menu", "mc") or cmd.startswith(("rsi", "mcap")):
             # /rsi and /mcap are settings screens — buttons, edited in place.
             # The rest stay as commands, which is what a phone keyboard is good
             # for when you already know the address you want to add.
@@ -497,6 +502,12 @@ class TelegramCommands:
             if cmd == "mcap":
                 from app import mcap_panel
                 await mcap_panel.open_panel(chat_id)
+                return ""
+            if cmd == "mc":
+                from app import mcap_panel, registry as reg
+                if not (await reg.enabled_map()).get("mcap_checker", True):
+                    return "🔎 Market Cap Check is switched off in Settings."
+                await mcap_panel.open_check_panel(chat_id)
                 return ""
             if cmd.startswith("mcap"):
                 from app.scanners.mcap_commands import reply as mcap_reply

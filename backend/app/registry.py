@@ -184,6 +184,14 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "Market Cap Alert", "chain": "eth", "enabled": True},
     {"id": "mcap_telegram", "category": MCAP, "group": "Watcher",
      "label": "Telegram Alerts", "chain": "eth", "enabled": True},
+    # The on-demand checker: pick a chain, paste an address, read the market cap
+    # once. Its own switches because it is a different thing from the watcher —
+    # nothing is stored, nothing is watched, and one costs a request only when
+    # you ask. Same chains, same endpoints, same alert chat.
+    {"id": "mcap_checker", "category": MCAP, "group": "Checker",
+     "label": "Market Cap Check (on demand)", "chain": "eth", "enabled": True},
+    {"id": "mcap_checker_telegram", "category": MCAP, "group": "Checker",
+     "label": "Telegram (/mc)", "chain": "eth", "enabled": True},
     {"id": "mcap_chain_rbh", "category": MCAP, "group": "Chains",
      "label": "RBH", "chain": "rbh", "enabled": True},
     {"id": "mcap_chain_eth", "category": MCAP, "group": "Chains",

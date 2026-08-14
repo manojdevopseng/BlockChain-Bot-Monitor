@@ -18,6 +18,7 @@ import { Age } from "@/components/Age";
 import { ExternalLink } from "lucide-react";
 import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
 import { MarketCapSection } from "./_components/MarketCapSection";
+import { MarketCapCheck } from "./_components/MarketCapCheck";
 
 /* RSI Tracker.
  *
@@ -331,6 +332,10 @@ export default function RsiPage() {
       {/* Same nav, separate feature: "has this turned" above, "has this got
           there" here. Its own worker, its own endpoints, its own switches. */}
       <MarketCapSection />
+
+      {/* And the other half of the same question: not "tell me when", but
+          "what is it right now". Same reader, nothing stored. */}
+      <MarketCapCheck />
     </div>
   );
 }

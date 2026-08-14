@@ -83,6 +83,10 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
     rows.append([{"text": "➕ Add token", "callback_data": "mc:add"},
                  {"text": f"🪙 Tokens ({total})", "callback_data": "mc:tokens"},
                  {"text": "🔄 Refresh", "callback_data": "mc:home"}])
+    # The checker lives beside the watcher rather than behind /mc only: they are
+    # two questions about the same token and this is the screen you are already
+    # on when the second one occurs to you.
+    rows.append([{"text": "🔎 Check a market cap", "callback_data": "mc:check"}])
     return text, rows
 
 
@@ -172,6 +176,66 @@ async def add_panel() -> tuple[str, list[list[dict]]]:
     return text, rows
 
 
+# ── the checker: one reading, nothing watched ────────────────────────────────
+
+async def check_panel(result: Optional[dict] = None) -> tuple[str, list[list[dict]]]:
+    """Pick a chain, send an address, get its market cap back. That is all.
+
+    Deliberately separate from the watcher's Add screen: this one stores
+    nothing, so nothing here can leave a token on a list by accident.
+    """
+    enabled = await registry.enabled_map()
+    on = enabled.get("mcap_checker", True)
+    text = ("🔎 <b>Market Cap Check</b>\n"
+            "➖➖➖➖➖➖➖➖➖➖\n"
+            + ("Pick a chain, then send me the token address.\n"
+               "<i>One reading, nothing watched, nothing saved.</i>"
+               if on else "⛔ Switched off in Settings."))
+    if result:
+        text = _check_result(result)
+    keys = list(CHAIN_LABELS)
+    rows = [[{"text": f"🔎 {CHAIN_LABELS[k]}", "callback_data": f"mc:chk:{k}"}
+             for k in keys[i:i + 2]] for i in range(0, len(keys), 2)]
+    rows.append([{"text": "🎯 Alerts screen", "callback_data": "mc:home"}])
+    return text, rows
+
+
+def _check_result(r: dict) -> str:
+    import html
+    return (
+        f"🔎 <b>{html.escape((r.get('symbol') or '?').upper())}</b>"
+        + (f" — {html.escape(r['name'])}" if r.get("name") else "") + "\n"
+        f"➖➖➖➖➖➖➖➖➖➖\n"
+        f"💰 market cap <b>{fmt_usd(r.get('mcap'))}</b>\n"
+        f"⛓ {r.get('chain_label') or ''} · read from {r.get('source') or '?'}\n"
+        + (f"💵 ${r['price_usd']:.10g} per token\n" if r.get("price_usd") else "")
+        + (f"🧮 supply {r['supply']:,.0f}\n" if r.get("supply") else "")
+        + f"\n<code>{r.get('address', '')}</code>\n"
+        f"\n<i>Pick a chain to check another.</i>"
+    )
+
+
+async def run_check(chain: str, address: str) -> dict:
+    """The reading itself — same reader the watcher uses, so one answer."""
+    import aiohttp
+    from .scanners.mcap_price import CHAIN_LABELS as LABELS, MarketCapReader
+    async with aiohttp.ClientSession() as session:
+        reader = MarketCapReader(session)
+        symbol, name = await reader.name_symbol(chain, address)
+        reading = await reader.read(chain, address)
+    if reading is None:
+        return {}
+    return {"chain": chain, "chain_label": LABELS.get(chain, chain.upper()),
+            "address": address, "symbol": symbol, "name": name,
+            "mcap": reading.mcap, "price_usd": reading.price_usd,
+            "supply": reading.supply, "source": reading.source}
+
+
+async def open_check_panel(chat_id) -> Optional[int]:
+    text, keyboard = await check_panel()
+    return await notifier.send_panel(chat_id, text, keyboard)
+
+
 async def pending_address(chat_id, text: str) -> bool:
     """A plain message after a chain was chosen: "<address> <target>".
 
@@ -188,6 +252,21 @@ async def pending_address(chat_id, text: str) -> bool:
         return False
     _PENDING.pop(chat_id, None)
     parts = text.strip().split()
+    if chain.startswith("check:"):
+        # The checker: read it once and say so. Nothing is written anywhere,
+        # which is the whole difference between this and adding a token.
+        address = parts[0] if parts else ""
+        result = await run_check(chain[6:], address) if address else {}
+        if not result:
+            await notifier.send_to(
+                chat_id, f"⚠️ Could not read a market cap for "
+                         f"<code>{address or 'that'}</code> on "
+                         f"{CHAIN_LABELS.get(chain[6:], '?')} — no pool yet, or "
+                         f"the address is not on that chain.")
+            return True
+        screen, keyboard = await check_panel(result)
+        await notifier.send_panel(chat_id, screen, keyboard)
+        return True
     if chain.startswith("set:"):
         # Retargeting an existing token — the address is already known.
         said = await command_reply("mcap_target",
@@ -250,6 +329,21 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
             f"<code>0xabc…  250k</code>\n"
             f"<i>Expires in {int(_PENDING_SECONDS // 60)} minutes.</i>")
 
+    elif what == "chk":
+        if not (await registry.enabled_map()).get("mcap_checker", True):
+            return ("Market Cap Check is switched off in Settings", True)
+        _PENDING[chat_id] = (f"check:{arg}", time.time())
+        screen, toast = "check", f"Send the {CHAIN_LABELS.get(arg, arg.upper())} address"
+        await notifier.send_to(
+            chat_id,
+            f"🔎 Send the <b>{CHAIN_LABELS.get(arg, arg.upper())}</b> token address "
+            f"as your next message and I will read its market cap.\n"
+            f"<i>Nothing is watched or saved. Expires in "
+            f"{int(_PENDING_SECONDS // 60)} minutes.</i>")
+
+    elif what == "check":
+        screen = "check"
+
     elif what == "tokens":
         screen = "tokens"
 
@@ -287,7 +381,9 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
     elif what == "home":
         screen = "home"
 
-    if screen == "add":
+    if screen == "check":
+        text, keyboard = await check_panel()
+    elif screen == "add":
         text, keyboard = await add_panel()
     elif screen == "tokens":
         text, keyboard = await token_list_panel()
