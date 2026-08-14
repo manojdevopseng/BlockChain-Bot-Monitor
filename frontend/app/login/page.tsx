@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Loader2, Lock } from "lucide-react";
 import { login } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,15 @@ export default function LoginPage() {
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : "Sign in"}
         </Button>
+
+        <div className="mt-4 flex items-center justify-between text-[11px]">
+          <Link href="/forgot" className="text-text-dim hover:text-brand-soft">
+            Forgot password?
+          </Link>
+          <Link href="/register" className="text-brand-soft hover:underline">
+            Create an account
+          </Link>
+        </div>
       </form>
     </div>
   );

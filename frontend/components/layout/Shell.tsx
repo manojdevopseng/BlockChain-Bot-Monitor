@@ -120,7 +120,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  const isLogin = path === "/login";
+  // Pages that exist for people who are not signed in yet — or cannot be,
+  // because they are here to fix exactly that. None of them may bounce to
+  // /login, and none of them get the dashboard chrome.
+  const PUBLIC_PATHS = ["/login", "/register", "/verify", "/forgot", "/reset"];
+  const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+  const isLogin = isPublic;
 
   useEffect(() => {
     const ok = !!getToken();
@@ -158,9 +163,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if (keys) revalidate(keys);
   });
 
-  // The login page gets the theme but none of the chrome — no sidebar to
+  // The signed-out pages get the theme but none of the chrome — no sidebar to
   // navigate with and no status bar to poll while signed out.
-  if (isLogin) {
+  if (isPublic) {
     return <ThemeProvider>{children}</ThemeProvider>;
   }
 

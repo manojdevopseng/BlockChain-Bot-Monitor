@@ -33,6 +33,23 @@ function onUnauthorized() {
   }
 }
 
+// Pages that must stay reachable with an ended subscription: paying is how you
+// get back in, and being bounced off the page that takes the payment is how an
+// account stays ended.
+const PAYWALL_SAFE = ["/plan", "/profile", "/login", "/register", "/verify",
+                      "/forgot", "/reset"];
+
+// 402 is the server saying "you may, but not until you pay". It is a different
+// answer from 401 (nobody is logged in) and from 403 (not yours), so it gets
+// its own destination rather than a red toast on an empty page.
+function onPaymentRequired() {
+  if (typeof window === "undefined") return;
+  const here = window.location.pathname;
+  if (!PAYWALL_SAFE.some((p) => here === p || here.startsWith(`${p}/`))) {
+    window.location.href = "/plan";
+  }
+}
+
 function headers(): HeadersInit {
   const h: HeadersInit = { "Content-Type": "application/json" };
   if (token) (h as any).Authorization = `Bearer ${token}`;
@@ -44,6 +61,12 @@ export async function apiGet<T = any>(path: string): Promise<T> {
   if (res.status === 401) {
     onUnauthorized();
     throw new Error("Not authenticated");
+  }
+  if (res.status === 402) {
+    onPaymentRequired();
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch {}
+    throw new Error(detail || "Your access has ended");
   }
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
   return res.json();
@@ -63,6 +86,9 @@ export async function apiSend<T = any>(
     onUnauthorized();
     throw new Error("Not authenticated");
   }
+  // A write refused for want of a subscription reads as a message on the page
+  // it was attempted from — "you have used 3 of 3" belongs beside the button,
+  // not on a redirect.
   if (!res.ok) {
     // Routers answer with {"detail": "..."} — surfacing that is far more use
     // than "PUT /x -> 400".
@@ -106,4 +132,20 @@ export function useApi<T = any>(path: string | null, cfg?: SWRConfiguration) {
     keepPreviousData: true,
     ...cfg,
   });
+}
+
+
+/** A call made by somebody who is not signed in — register, verify, reset. */
+export async function apiPublic<T = any>(path: string, body: any): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch {}
+    throw new Error(detail || `That did not work (${res.status})`);
+  }
+  return res.json();
 }

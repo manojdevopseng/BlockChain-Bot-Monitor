@@ -13,7 +13,12 @@ import { useApi } from "./api";
  * same rule is enforced on every request server-side, so nothing here is load
  * bearing, and a user who edits it in the console gets 403s rather than access.
  */
-export const ADMIN_ONLY_PATHS = ["/forwarder", "/commands", "/settings", "/users", "/rpc"] as const;
+// Operator surfaces. A customer never sees these in the nav and gets a 403
+// from the server if they type the path — the hiding is a courtesy, the rule
+// is in main.py. Commands is not here: it is readable by everyone and writable
+// by nobody but an admin, which the server enforces per method.
+export const ADMIN_ONLY_PATHS = ["/forwarder", "/settings", "/users", "/rpc",
+                                 "/system", "/logs"] as const;
 
 export function useRole() {
   // Cached hard: it changes at login, not while the page is open, and every

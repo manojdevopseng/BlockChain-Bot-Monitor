@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, Users, X } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, User, Users, X } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
@@ -14,19 +14,23 @@ const NAV = [
   { href: "/detections", label: "Detections", icon: Crosshair },
   { href: "/rsi", label: "RSI", icon: Activity },
   { href: "/ai", label: "AI Narrative", icon: Brain },
-  { href: "/forwarder", label: "Forwarder", icon: Send },
+  { hideFromUser: true, href: "/forwarder", label: "Forwarder", icon: Send },
   { href: "/commands", label: "Commands", icon: Terminal },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  // The account's own two pages. Every plan sees them, including an expired
+  // one — paying is how it stops being expired.
+  { href: "/profile", label: "Profile", icon: User },
+  { href: "/plan", label: "Plan", icon: BadgeCheck },
   { href: "/chains", label: "Chains", icon: Link2 },
-  { href: "/logs", label: "Logs", icon: ScrollText },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { hideFromUser: true, href: "/logs", label: "Logs", icon: ScrollText },
+  { hideFromUser: true, href: "/settings", label: "Settings", icon: Settings },
   // Hidden rather than disabled for a read-only account: the other locked
   // pages are things the dashboard does, worth knowing exist. Who can log in
   // is not — and a greyed "User Management" tells a user exactly where to go
   // looking.
   { href: "/users", label: "User Management", icon: Users, hideFromUser: true },
-  { href: "/rpc", label: "RPC Monitor", icon: Radio },
-  { href: "/system", label: "System", icon: Server },
+  { hideFromUser: true, href: "/rpc", label: "RPC Monitor", icon: Radio },
+  { hideFromUser: true, href: "/system", label: "System", icon: Server },
 ];
 
 export function Sidebar({
