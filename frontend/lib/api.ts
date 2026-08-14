@@ -4,7 +4,13 @@ import useSWR, { SWRConfiguration } from "swr";
 
 // Same-origin: next.config.js rewrites /api/* to the FastAPI backend in dev,
 // nginx does it in production. No CORS juggling on the client.
-const BASE = "";
+//
+// BASE_PATH is normally empty. It is set when this build is served under a
+// prefix — a preview of the next version living beside the live one on the
+// same host, where /beta/api has to reach the preview's backend rather than
+// the live one two directories up.
+export const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+const BASE = BASE_PATH;
 
 let token: string | null = null;
 if (typeof window !== "undefined") {
@@ -29,7 +35,7 @@ export function getToken(): string | null {
 function onUnauthorized() {
   setToken(null);
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-    window.location.href = "/login";
+    window.location.href = `${BASE_PATH}/login`;
   }
 }
 
@@ -46,7 +52,7 @@ function onPaymentRequired() {
   if (typeof window === "undefined") return;
   const here = window.location.pathname;
   if (!PAYWALL_SAFE.some((p) => here === p || here.startsWith(`${p}/`))) {
-    window.location.href = "/plan";
+    window.location.href = `${BASE_PATH}/plan`;
   }
 }
 

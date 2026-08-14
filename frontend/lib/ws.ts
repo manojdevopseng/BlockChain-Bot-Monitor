@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getToken } from "@/lib/api";
+import { BASE_PATH, getToken } from "@/lib/api";
 
 export type WSEvent = { type: string; data: any };
 
@@ -42,7 +42,8 @@ export function useWebSocket(onEvent?: (e: WSEvent) => void) {
         timer = setTimeout(connect, 1000);
         return;
       }
-      const ws = new WebSocket(`${base}/ws?token=${encodeURIComponent(tok)}`);
+      const ws = new WebSocket(
+        `${base}${BASE_PATH}/ws?token=${encodeURIComponent(tok)}`);
       ref.current = ws;
       ws.onopen = () => {
         setConnected(true);
