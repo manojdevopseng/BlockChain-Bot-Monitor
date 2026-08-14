@@ -74,6 +74,12 @@ _FEE_TIERS = (500, 3000, 10000)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=12)
 
+# How long "this token has no pool" is believed before it is asked again. Ten
+# minutes: long enough that a token that genuinely has none is not re-scanned on
+# every check, short enough that one added at launch starts reporting a price
+# the moment its pool exists.
+_RETRY_UNRESOLVED = 600.0
+
 
 @dataclass
 class ChainSpec:
@@ -224,7 +230,12 @@ class PriceReader:
     async def resolve(self, chain: str, token: str) -> PoolRef:
         key = (chain, token.lower())
         cached = self._pools.get(key)
-        if cached is not None:
+        # A pool that was found never moves, so that answer is kept for the life
+        # of the process. "No pool" is not the same kind of answer: a token
+        # added the minute it launched, or one whose RPC was down at the time,
+        # would otherwise stay unpriced until a restart. That one is retried.
+        if cached is not None and (cached.kind
+                                   or time.time() - cached.found_at < _RETRY_UNRESOLVED):
             return cached
 
         spec = self._chains().get(chain)
