@@ -55,6 +55,31 @@ def _col(name: str):
     return db.get_collection(name)
 
 
+def _owner() -> str:
+    """Whose rows Telegram writes — see the same helper on the Market Cap side."""
+    from app.config import settings
+    return settings.admin_username
+
+
+
+
+
+async def _reading(row: dict) -> dict:
+    """The RSI for one row's own settings.
+
+    Lives in `rsi_readings`, keyed by the three things the number depends on —
+    token, timeframe and candle count — so two accounts on the same settings
+    share one computation and two on different ones are not shown each other's.
+    """
+    from app.scanners.rsi_tracker import DEFAULT_CANDLES, period_of
+    return await _col("rsi_readings").find_one({
+        "chain": row.get("chain"),
+        "address": (row.get("address") or "").lower(),
+        "interval": row.get("interval"),
+        "period": int(row.get("period") or period_of(DEFAULT_CANDLES)),
+    }) or {}
+
+
 async def _settings() -> dict:
     return await _col("rsi_settings").find_one({"_id": "rsi"}) or {}
 
@@ -89,9 +114,11 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
     low = float(doc.get("low", DEFAULT_LOW))
     high = float(doc.get("high", DEFAULT_HIGH))
     cadence = str(doc.get("cadence", DEFAULT_CADENCE))
-    tokens = await _col("rsi_tokens").count_documents({})
-    oversold = await _col("rsi_state").count_documents({"zone": "oversold"})
-    overbought = await _col("rsi_state").count_documents({"zone": "overbought"})
+    tokens = await _col("rsi_tokens").count_documents({"user_id": _owner()})
+    mine = await _col("rsi_tokens").find({"user_id": _owner()}).to_list(500)
+    zones = [(await _reading(r)).get("zone") for r in mine]
+    oversold = zones.count("oversold")
+    overbought = zones.count("overbought")
 
     default_tf = str(doc.get("default_interval", DEFAULT_INTERVAL))
     default_candles = int(doc.get("default_candles", DEFAULT_CANDLES))
@@ -154,10 +181,9 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
 # ── the token list, and one token's own screen ────────────────────────────────
 
 async def token_list_panel() -> tuple[str, list[list[dict]]]:
-    rows_db = await _col("rsi_tokens").find({}).sort("added_at", -1).to_list(_TOKEN_LIMIT)
-    states = {}
-    async for st in _col("rsi_state").find({}):
-        states[(st.get("chain"), st.get("address"))] = st
+    rows_db = await _col("rsi_tokens").find({"user_id": _owner()})                                       .sort("added_at", -1).to_list(_TOKEN_LIMIT)
+    states = {(r.get("chain"), r.get("address")): await _reading(r)
+              for r in rows_db}
 
     if not rows_db:
         return ("🪙 <b>No tokens tracked yet</b>\n\nAdd one with\n"
@@ -186,11 +212,14 @@ async def token_list_panel() -> tuple[str, list[list[dict]]]:
 
 
 async def token_panel(address: str) -> tuple[str, list[list[dict]]]:
-    row = await _col("rsi_tokens").find_one({"address": address.lower()})
+    row = await _col("rsi_tokens").find_one({"user_id": _owner(),
+                                             "address": address.lower()})
     if not row:
         return await token_list_panel()
-    st = await _col("rsi_state").find_one({"chain": row.get("chain"),
-                                           "address": address.lower()}) or {}
+    st = await _reading(row)
+    price = (await _col("rsi_state").find_one(
+        {"chain": row.get("chain"), "address": address.lower()}) or {})
+    st = {**st, "price": price.get("price")}
     value = st.get("rsi")
     current = row.get("interval")
     mine = candles_of(row.get("period") or period_of(DEFAULT_CANDLES))
@@ -343,8 +372,9 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
         address = await _full_address(prefix)
         if count not in CANDLE_CHOICES or not address:
             return ("Unknown candle count", True)
-        await _col("rsi_tokens").update_one({"address": address},
-                                            {"$set": {"period": period_of(count)}})
+        await _col("rsi_tokens").update_one(
+            {"user_id": _owner(), "address": address},
+            {"$set": {"period": period_of(count)}})
         toast, screen, arg = f"Now {count} candles", "token", address
 
     elif what == "cad":
@@ -384,8 +414,9 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
         address = await _full_address(prefix)
         if interval not in INTERVALS or not address:
             return ("Unknown interval", True)
-        await _col("rsi_tokens").update_one({"address": address},
-                                            {"$set": {"interval": interval}})
+        await _col("rsi_tokens").update_one(
+            {"user_id": _owner(), "address": address},
+            {"$set": {"interval": interval}})
         # Its old candles belong to another interval; the new one starts fresh.
         await _col("rsi_candles").delete_many({"address": address,
                                                "interval": {"$ne": interval}})
@@ -394,9 +425,10 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
 
     elif what == "x":
         address = arg.lower()
-        await _col("rsi_tokens").delete_one({"address": address})
-        await _col("rsi_candles").delete_many({"address": address})
-        await _col("rsi_state").delete_many({"address": address})
+        # Only this owner's row: the candles and the reading belong to the
+        # token and may still be feeding somebody else.
+        await _col("rsi_tokens").delete_one({"user_id": _owner(),
+                                             "address": address})
         toast, screen = "Stopped tracking", "tokens"
 
     elif what == "home":
@@ -421,7 +453,8 @@ async def _full_address(prefix: str) -> str:
     if len(prefix) >= 42:
         return prefix.lower()
     row = await _col("rsi_tokens").find_one(
-        {"address": {"$regex": f"^{prefix.lower()}", "$options": "i"}})
+        {"user_id": _owner(),
+         "address": {"$regex": f"^{prefix.lower()}", "$options": "i"}})
     return (row or {}).get("address", "")
 
 

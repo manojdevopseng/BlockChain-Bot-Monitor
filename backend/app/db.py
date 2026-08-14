@@ -231,6 +231,7 @@ _TTL_COLLECTIONS = {
     # token list does not — that is the user's own list, not data.
     "rsi_candles": "rsi_retention_days",
     "rsi_state": "rsi_retention_days",
+    "rsi_readings": "rsi_retention_days",
     "launchpad_watch": "launchpad_retention_days",
 }
 
@@ -328,6 +329,10 @@ async def ensure_indexes() -> None:
         # evaluator, so both have to be lookups.
         ("rsi_tokens",         [("chain", 1), ("address", 1)]),
         ("rsi_state",          [("chain", 1), ("address", 1)]),
+        # One reading per token per settings — the key the evaluator writes and
+        # the panel reads back.
+        ("rsi_readings",       [("chain", 1), ("address", 1), ("interval", 1),
+                                ("period", 1)]),
         ("rsi_candles",        [("chain", 1), ("address", 1), ("interval", 1), ("ts", -1)]),
         # Market Cap Alert: one row per token in each, read every cadence. No
         # TTL on either — the list is the user's own and the state is one
@@ -377,6 +382,7 @@ _TS_FIELD = {
     "launchpad_tokens": "open_timestamp",
     "rsi_candles": "ts",
     "rsi_state": "updated_at",
+    "rsi_readings": "checked_at",
     "launchpad_skip": "added_at",
     "launchpad_watch": "added_at",
 }

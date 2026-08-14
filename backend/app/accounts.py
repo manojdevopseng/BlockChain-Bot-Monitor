@@ -59,6 +59,9 @@ class Plan:
     # The fastest cadence this plan may set, in seconds. A trial that could sit
     # on 15s would cost the same as a paid account.
     min_cadence: int
+    # The shortest RSI timeframe, in seconds. On RSI this is the bill: a token
+    # on 1 Sec is 3,600 reads an hour, one on 5 Min is twelve.
+    min_interval: int
     telegram_alerts: bool
     support_hours: int = 48
     note: str = ""
@@ -67,19 +70,23 @@ class Plan:
 PLANS: dict[str, Plan] = {
     "trial": Plan("trial", "7-day Trial", 0.0, TRIAL_DAYS,
                   rsi_tokens=3, mcap_tokens=3, mcap_checks_per_day=25,
-                  min_cadence=300, telegram_alerts=False, support_hours=72,
+                  min_cadence=300, min_interval=300,
+                  telegram_alerts=False, support_hours=72,
                   note="Everything readable, a few tokens of your own, "
                        "dashboard-only alerts."),
     "monthly": Plan("monthly", "Monthly", 29.99, 30,
                     rsi_tokens=25, mcap_tokens=25, mcap_checks_per_day=300,
-                    min_cadence=15, telegram_alerts=True, support_hours=24),
+                    min_cadence=15, min_interval=60,
+                    telegram_alerts=True, support_hours=24),
     "half": Plan("half", "6 Months", 149.99, 182,
                  rsi_tokens=50, mcap_tokens=50, mcap_checks_per_day=600,
-                 min_cadence=15, telegram_alerts=True, support_hours=24,
+                 min_cadence=15, min_interval=15,
+                 telegram_alerts=True, support_hours=24,
                  note="Five months' price for six."),
     "yearly": Plan("yearly", "Yearly", 299.99, 365,
                    rsi_tokens=100, mcap_tokens=100, mcap_checks_per_day=1500,
-                   min_cadence=15, telegram_alerts=True, support_hours=12,
+                   min_cadence=15, min_interval=5,
+                   telegram_alerts=True, support_hours=12,
                    note="Ten months' price for twelve."),
 }
 
@@ -87,7 +94,7 @@ PLANS: dict[str, Plan] = {
 # anywhere needs an "if admin" beside every limit.
 ADMIN_PLAN = Plan("admin", "Admin", 0.0, 36500,
                   rsi_tokens=10_000, mcap_tokens=10_000,
-                  mcap_checks_per_day=100_000, min_cadence=15,
+                  mcap_checks_per_day=100_000, min_cadence=15, min_interval=1,
                   telegram_alerts=True, support_hours=0)
 
 
@@ -122,6 +129,7 @@ def public(doc: dict) -> dict:
             "mcap_tokens": plan.mcap_tokens,
             "mcap_checks_per_day": plan.mcap_checks_per_day,
             "min_cadence": plan.min_cadence,
+            "min_interval": plan.min_interval,
             "telegram_alerts": plan.telegram_alerts,
         },
     }

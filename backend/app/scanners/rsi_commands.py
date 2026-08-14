@@ -35,8 +35,33 @@ def _col(name: str):
     return db.get_collection(name)
 
 
+def _owner() -> str:
+    """Whose rows Telegram writes — see the same helper on the Market Cap side."""
+    from app.config import settings
+    return settings.admin_username
+
+
+
 def _args(text: str) -> list[str]:
     return text.split()[1:]
+
+
+
+
+async def _reading(row: dict) -> dict:
+    """The RSI for one row's own settings.
+
+    Lives in `rsi_readings`, keyed by the three things the number depends on —
+    token, timeframe and candle count — so two accounts on the same settings
+    share one computation and two on different ones are not shown each other's.
+    """
+    from app.scanners.rsi_tracker import DEFAULT_CANDLES, period_of
+    return await _col("rsi_readings").find_one({
+        "chain": row.get("chain"),
+        "address": (row.get("address") or "").lower(),
+        "interval": row.get("interval"),
+        "period": int(row.get("period") or period_of(DEFAULT_CANDLES)),
+    }) or {}
 
 
 async def _settings() -> dict:
@@ -81,9 +106,10 @@ async def _reply(cmd: str, text: str) -> str:
 async def _status() -> str:
     doc = await _settings()
     enabled = await registry.enabled_map()
-    tokens = await _col("rsi_tokens").count_documents({})
-    oversold = await _col("rsi_state").count_documents({"zone": "oversold"})
-    overbought = await _col("rsi_state").count_documents({"zone": "overbought"})
+    tokens = await _col("rsi_tokens").count_documents({"user_id": _owner()})
+    mine = await _col("rsi_tokens").find({"user_id": _owner()}).to_list(500)
+    zones = [(await _reading(r)).get("zone") for r in mine]
+    oversold, overbought = zones.count("oversold"), zones.count("overbought")
     on = [c.label for k, c in chains().items() if enabled.get(f"rsi_chain_{k}", True)
           and enabled.get(f"rsi_rpc_{k}", True)]
     return (
@@ -103,12 +129,11 @@ async def _status() -> str:
 
 
 async def _list() -> str:
-    rows = await _col("rsi_tokens").find({}).sort("added_at", -1).to_list(60)
+    rows = await _col("rsi_tokens").find({"user_id": _owner()})                                    .sort("added_at", -1).to_list(60)
     if not rows:
         return "No tokens tracked yet — /rsi_add &lt;chain&gt; &lt;address&gt; [interval]"
-    states = {}
-    async for st in _col("rsi_state").find({}):
-        states[(st.get("chain"), st.get("address"))] = st
+    states = {(r.get("chain"), r.get("address")): await _reading(r)
+              for r in rows}
     lines = ["📋 <b>RSI — tracked tokens</b>", "➖➖➖➖➖➖➖➖➖➖"]
     for row in rows:
         st = states.get((row.get("chain"), row.get("address")), {})
@@ -156,8 +181,9 @@ async def _add(args: list[str]) -> str:
         symbol, name = await _name_symbol(chain, address.lower())
     now = time.time()
     await _col("rsi_tokens").update_one(
-        {"chain": chain, "address": address.lower()},
-        {"$set": {"chain": chain, "address": address.lower(), "interval": interval,
+        {"user_id": _owner(), "chain": chain, "address": address.lower()},
+        {"$set": {"user_id": _owner(),
+                  "chain": chain, "address": address.lower(), "interval": interval,
                   "symbol": symbol, "name": name,
                   "enabled": True, "added_at": now, "day": ist_date_str(now)}},
         upsert=True)
@@ -201,11 +227,12 @@ async def _remove(args: list[str]) -> str:
     if not args:
         raise ValueError("usage: /rsi_remove &lt;address&gt;")
     addr = args[0].lower()
-    res = await _col("rsi_tokens").delete_one({"address": addr})
+    res = await _col("rsi_tokens").delete_one({"user_id": _owner(),
+                                               "address": addr})
     if not res.deleted_count:
         raise ValueError(f"{args[0]} is not being tracked")
-    await _col("rsi_candles").delete_many({"address": addr})
-    await _col("rsi_state").delete_many({"address": addr})
+    # The candles and the reading stay: they belong to the token, not to the
+    # account that stopped watching it.
     return f"🗑 stopped tracking <code>{args[0]}</code>"
 
 
@@ -215,8 +242,8 @@ async def _interval(args: list[str]) -> str:
     addr, interval = args[0].lower(), args[1].lower()
     if interval not in INTERVALS:
         raise ValueError(f"unknown interval '{interval}' — have {', '.join(INTERVALS)}")
-    res = await _col("rsi_tokens").update_one({"address": addr},
-                                              {"$set": {"interval": interval}})
+    res = await _col("rsi_tokens").update_one(
+        {"user_id": _owner(), "address": addr}, {"$set": {"interval": interval}})
     if not res.matched_count:
         raise ValueError(f"{args[0]} is not being tracked")
     # Its old candles belong to a different interval; the new one starts fresh.
@@ -272,7 +299,8 @@ async def _candles(args: list[str]) -> str:
         raise ValueError("candles must be between 3 and 201")
     if address:
         res = await _col("rsi_tokens").update_one(
-            {"address": address.lower()}, {"$set": {"period": period_of(count)}})
+            {"user_id": _owner(), "address": address.lower()},
+            {"$set": {"period": period_of(count)}})
         if not res.matched_count:
             raise ValueError(f"{address} is not being tracked")
         return (f"📊 <code>{address}</code> now reads {count} candles — "
