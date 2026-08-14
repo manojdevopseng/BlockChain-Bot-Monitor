@@ -69,15 +69,15 @@ async def _build() -> list[dict]:
         ("Solana", "sol", "rpc_sol", "",    "HTTP", list(scfg.SOL_HTTP_ENDPOINTS)),
         # Market Cap Alert: two HTTP slots per chain, its own switch each. No
         # worker column — these are one-off eth_call/getTokenSupply requests on
-        # a timer, not a socket that can be "connected".
-        ("Market Cap — RBH", "rbh", "mcap_rpc_rbh", "", "HTTP",
-         list(scfg.MCAP_ENDPOINTS.get("rbh") or [])),
-        ("Market Cap — ETH", "eth", "mcap_rpc_eth", "", "HTTP",
-         list(scfg.MCAP_ENDPOINTS.get("eth") or [])),
-        ("Market Cap — BSC", "bnb", "mcap_rpc_bsc", "", "HTTP",
-         list(scfg.MCAP_ENDPOINTS.get("bsc") or [])),
-        ("Market Cap — SOL", "sol", "mcap_rpc_sol", "", "HTTP",
-         list(scfg.MCAP_ENDPOINTS.get("sol") or [])),
+        # a timer, not a socket that can be "connected". While its own slots are
+        # empty it borrows that chain's endpoints, and the name says so rather
+        # than reporting "not configured" for something that is working.
+        *(( f"Market Cap — {label}" if scfg.MCAP_ENDPOINTS.get(key)
+            else f"Market Cap — {label} (borrowing {label})",
+            chain, f"mcap_rpc_{key}", "", "HTTP",
+            list(scfg.MCAP_ENDPOINTS.get(key) or []))
+          for key, label, chain in (("rbh", "RBH", "rbh"), ("eth", "ETH", "eth"),
+                                    ("bsc", "BSC", "bnb"), ("sol", "SOL", "sol"))),
     ]
 
     out: list[dict] = []
