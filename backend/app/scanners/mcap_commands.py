@@ -17,7 +17,8 @@ import time
 from app import registry
 from app.scanners import scfg as config
 from app.scanners.mcap_price import CHAIN_LABELS
-from app.scanners.mcap_tracker import CADENCES, DEFAULT_CADENCE, fmt_usd, parse_usd
+from app.scanners.mcap_tracker import (CADENCES, DEFAULT_CADENCE, armed_for,
+                                      first_look, fmt_usd, parse_usd)
 from app.util import ist_date_str
 
 _EVM_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -137,9 +138,11 @@ async def _add(args: list[str]) -> str:
         raise ValueError("give it a target too — /mcap_add "
                          f"{chain} {address} 250k")
     target = parse_usd(rest[1])
-    symbol, name = await _name_symbol(chain, address)
+    # One look now: it names the token and says where it is, which is what
+    # decides whether the target is waiting for a rise or a fall.
+    symbol, name, current = await first_look(chain, address)
     now = time.time()
-    armed = await _armed_for(chain, address, target)
+    armed = armed_for(target, current)
     await _col("mcap_tokens").update_one(
         {"chain": chain, "address": address},
         {"$set": {"chain": chain, "address": address, "target": target,
@@ -205,21 +208,11 @@ async def _switch(on: bool, args: list[str]) -> str:
 
 
 async def _armed_for(chain: str, address: str, target: float) -> str:
-    """Which way it has to move — see the same rule in routers/mcap.py."""
+    """Which way an already-watched token has to move for a new target, read
+    off the market cap on file. Adding takes its number from `first_look`."""
     st = await _col("mcap_state").find_one({"chain": chain,
                                             "address": address}) or {}
-    current = float(st.get("mcap") or 0)
-    return "down" if current and target < current else "up"
-
-
-async def _name_symbol(chain: str, address: str) -> tuple[str, str]:
-    import aiohttp
-    from app.scanners.mcap_price import MarketCapReader
-    try:
-        async with aiohttp.ClientSession() as session:
-            return await MarketCapReader(session).name_symbol(chain, address)
-    except Exception:  # noqa: BLE001
-        return "", ""
+    return armed_for(target, float(st.get("mcap") or 0))
 
 
 async def _detect_chain(address: str) -> str:

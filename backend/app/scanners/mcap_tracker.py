@@ -96,6 +96,57 @@ def parse_usd(text: str) -> float:
     return value
 
 
+async def first_look(chain: str, address: str, symbol: str = "",
+                     name: str = "") -> tuple[str, str, float]:
+    """Ticker, name and market cap right now — one look, when a token is added.
+
+    Lives here rather than in the route or the command because both of them
+    need it and it must answer the same way for either: the reading is written
+    to `mcap_state`, so the row shows a figure immediately instead of an empty
+    column until the next pass, and the target is armed against a real number.
+
+    Without it a token nobody has checked yet has no market cap on file, every
+    target reads as "on the way up", and a target set below where the token
+    already trades fires on the very first pass.
+
+    Best-effort throughout: a token whose price cannot be read yet is still
+    added, and the worker fills it in when it can.
+    """
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as session:
+            reader = MarketCapReader(session)
+            if not symbol:
+                symbol, got_name = await reader.name_symbol(chain, address)
+                name = name or got_name
+            reading = await reader.read(chain, address)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[MCAP] first look at {address[:10]}… failed: {exc}")
+        return symbol, name, 0.0
+    if reading is None:
+        return symbol, name, 0.0
+    now = time.time()
+    await _col("mcap_state").update_one(
+        {"chain": chain, "address": address},
+        {"$set": {"chain": chain, "address": address, "mcap": reading.mcap,
+                  "price_usd": reading.price_usd, "supply": reading.supply,
+                  "source": reading.source, "checked_at": now,
+                  "day": ist_date_str(now), "dt": _utc_now()}},
+        upsert=True)
+    return symbol, name, reading.mcap
+
+
+def armed_for(target: float, current: float) -> str:
+    """Which way a market cap has to travel for a target to mean anything.
+
+    Above where it is now fires on the way up, below fires on the way down.
+    "up" when the current figure is unknown: the common case is a target above
+    where it is now, and an alert that waits is better than one that fires for
+    nothing.
+    """
+    return "down" if current and target < current else "up"
+
+
 class McapTracker:
     def __init__(self, session_factory=aiohttp.ClientSession) -> None:
         self._session_factory = session_factory

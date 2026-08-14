@@ -20,7 +20,8 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from .. import db, registry
 from ..scanners import scfg
 from ..scanners.mcap_price import CHAIN_LABELS, chains
-from ..scanners.mcap_tracker import CADENCES, DEFAULT_CADENCE, parse_usd
+from ..scanners.mcap_tracker import (CADENCES, DEFAULT_CADENCE, armed_for,
+                                     first_look, parse_usd)
 from ..util import clean_list, gmgn_url, ist_date_str
 
 router = APIRouter(prefix="/api/mcap", tags=["mcap"])
@@ -137,12 +138,16 @@ async def add_token(payload: dict = Body(...)):
         raise HTTPException(400, f"unknown chain '{chain}'")
     address = _clean_address(payload.get("address"), chain)
     target = _clean_target(payload.get("target"))
-    symbol = str(payload.get("symbol") or "")[:32]
-    name = str(payload.get("name") or "")[:64]
-    if not symbol:
-        symbol, name = await _name_symbol(chain, address, name)
+    # One live read at add time, which both names the token and answers "where
+    # is it now" — the question the direction depends on. Without it a token
+    # nobody has checked yet has no market cap on file, every target reads as
+    # "on the way up", and a target set below where it already trades fires on
+    # the very first pass.
+    symbol, name, current = await first_look(chain, address,
+                                             str(payload.get("symbol") or "")[:32],
+                                             str(payload.get("name") or "")[:64])
     now = time.time()
-    armed = await _arm(chain, address, target)
+    armed = armed_for(target, current)
     await db.get_collection("mcap_tokens").update_one(
         {"chain": chain, "address": address},
         {"$set": {"chain": chain, "address": address, "target": target,
@@ -193,34 +198,12 @@ async def remove_token(address: str):
 
 
 async def _arm(chain: str, address: str, target: float) -> str:
-    """Which way this token has to move for the target to mean anything.
-
-    Taken from where it is now: a target above the current market cap fires on
-    the way up, one below it fires on the way down. Without this, setting a
-    $1M target on a token already at $2M would alert on the very next check —
-    the number is past it, but nothing happened.
-
-    "up" when the current figure cannot be read: the common case is a target
-    above where it is now, and an alert that waits is better than one that
-    fires for nothing.
-    """
+    """Which way an existing token has to move for a new target to mean
+    anything, read off the market cap already on file. A token being added has
+    no file yet — that path takes its number from `first_look`."""
     st = await db.get_collection("mcap_state").find_one(
         {"chain": chain, "address": address}) or {}
-    current = float(st.get("mcap") or 0)
-    return "down" if current and target < current else "up"
-
-
-async def _name_symbol(chain: str, address: str, name: str = "") -> tuple[str, str]:
-    """Ticker and name, read rather than typed. Blank if nothing answers."""
-    import aiohttp
-    from ..scanners.mcap_price import MarketCapReader
-    try:
-        async with aiohttp.ClientSession() as session:
-            got_symbol, got_name = await MarketCapReader(session).name_symbol(
-                chain, address)
-    except Exception:  # noqa: BLE001
-        return "", name
-    return got_symbol, (name or got_name)
+    return armed_for(target, float(st.get("mcap") or 0))
 
 
 @router.get("/dates")

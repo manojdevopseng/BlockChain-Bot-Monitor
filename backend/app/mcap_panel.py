@@ -301,9 +301,9 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
 
 async def _set_target(address: str, target: float) -> None:
     """One place that writes a target, so re-arming is never forgotten."""
+    from .scanners.mcap_tracker import armed_for
     st = await _col("mcap_state").find_one({"address": address}) or {}
-    current = float(st.get("mcap") or 0)
-    armed = "down" if current and target < current else "up"
+    armed = armed_for(target, float(st.get("mcap") or 0))
     await _col("mcap_tokens").update_one(
         {"address": address},
         {"$set": {"target": target, "armed": armed},
