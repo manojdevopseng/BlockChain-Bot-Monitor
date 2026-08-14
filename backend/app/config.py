@@ -356,6 +356,9 @@ class Settings(BaseSettings):
     tron_api_key: str = ""
     # Where "payment received" and "unmatched payment" go. Blank = ALERT_CHAT_ID.
     pay_alert_chat_id: str = ""
+    # Where a new support request goes. Blank = ALERT_CHAT_ID. Worth its own
+    # chat (or its own topic) once there is more than a handful a day.
+    support_chat_id: str = ""
 
     # ── Market Cap Alert ─────────────────────────────────────────────────────
     # Its own endpoints again, two per chain, so a fifteen-second market cap

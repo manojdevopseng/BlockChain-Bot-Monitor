@@ -23,7 +23,7 @@ from . import db, migrations, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
     account, ai_agent as ai_router, alerts, analytics, auth, billing, chains,
-    chat_lookup,
+    chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
     outcomes as outcomes_router, rbhx, rpc, rsi,
     settings as settings_router, system, tokens, users as users_router,
@@ -160,7 +160,10 @@ app.add_middleware(
 _PRODUCT = (rsi, mcap)
 # Billing is its own rule: an account with an ended subscription must be able to
 # buy one, so this needs a login and nothing more.
-_ACCOUNT = (billing,)
+# Reporting a problem is not a product feature to be paywalled: an account
+# whose subscription ended because a payment did not land is exactly the one
+# that needs to say so.
+_ACCOUNT = (billing, support)
 _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
            chat_lookup, outcomes_router, ai_router, rbhx, launchpad)
 _OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router)
