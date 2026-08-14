@@ -11,6 +11,10 @@ const nextConfig = {
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${API}/api/:path*` },
+      // The realtime socket takes the same road as the API, so a build that
+      // proxies one proxies both — otherwise the dashboard sits on "Offline"
+      // and falls back to polling for no reason.
+      { source: "/ws", destination: `${API}/ws` },
     ];
   },
 };
