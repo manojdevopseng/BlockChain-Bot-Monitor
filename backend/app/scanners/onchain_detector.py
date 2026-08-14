@@ -204,6 +204,12 @@ class OnChainDetector:
         pool_id = topics[1]
         currency0 = _addr_from_topic(topics[2])
         currency1 = _addr_from_topic(topics[3])
+        # Recorded before the "is this one of ours" check, and for every V4
+        # pool: a pool id cannot be worked out later without knowing the hook,
+        # and this subscription is the one place it arrives for free. The RSI
+        # and Market Cap readers look here first, which is what lets them price
+        # a hooked launchpad pool without asking an explorer that rate-limits.
+        await self._remember_v4_pool(pool_id, currency0, currency1, log_obj)
         new_token = self._pick_new_token(currency0, currency1)
         if new_token is None:
             return
@@ -213,6 +219,31 @@ class OnChainDetector:
                             weth_is_token0=(currency0 in self._spec.base_addrs),
                             pool_id=pool_id,
                             pair_override=self._spec.v4_poolmanager or "")
+
+    async def _remember_v4_pool(self, pool_id: str, currency0: str,
+                                currency1: str, log_obj: dict) -> None:
+        """Keep this pool's id against both its currencies.
+
+        One small document per pool, written once. Never allowed to affect
+        detection: a database that is down must not cost us a launch, so
+        anything thrown here is logged at debug and dropped.
+        """
+        try:
+            from app import db
+            chain = self._spec.name.lower()
+            data = (log_obj.get("data") or "0x")[2:]
+            fee = int(data[0:64], 16) if len(data) >= 64 else 0
+            hooks = "0x" + data[128:192][-40:] if len(data) >= 192 else ""
+            await db.get_collection("v4_pools").update_one(
+                {"chain": chain, "pool_id": pool_id},
+                {"$set": {"chain": chain, "pool_id": pool_id,
+                          "currency0": currency0.lower(),
+                          "currency1": currency1.lower(),
+                          "fee": fee, "hooks": hooks,
+                          "block": log_obj.get("blockNumber", "")}},
+                upsert=True)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[{self._spec.name}] could not record V4 pool: {exc}")
 
     def _pick_new_token(self, addr0: str, addr1: str) -> Optional[str]:
         base = self._spec.base_addrs

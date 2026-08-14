@@ -21,14 +21,19 @@ on every sample would cost four calls instead of one.
       the StateView periphery contract. Two ways to get the id, in order:
 
         computed  keccak of the PoolKey (currency0, currency1, fee, tickSpacing,
-                  hooks). Standard pools have no hook, so the key is guessable:
-                  four fee tiers against native and against wrapped native, and
-                  the deepest one that answers wins. No indexer, no key.
-        looked up a pool WITH a hook cannot be guessed — the fee and the hook
-                  are the launchpad's own — so its Initialize log is fetched
-                  once from the chain's explorer API and the id cached. This is
-                  what prices Robinhood's launchpad tokens, which are V4 with a
-                  hook nearly every time.
+                  hooks). A standard pool has no hook, so the key is guessable:
+                  the fee tiers against native and against wrapped native, and
+                  the deepest one that answers wins. A launchpad pool has one,
+                  but a launchpad runs the same hook for every token it mints —
+                  so its address (RBH_V4_HOOKS) turns that back into a
+                  computation too. No indexer, no key, no rate limit.
+        recorded  the Robinhood detector already watches Initialize on the
+                  PoolManager for its own reasons, so every pool opened while
+                  we are running is written down as it happens (v4_pools) —
+                  including under a hook nobody told us about.
+        looked up last, and only then: the chain's explorer API. Blockscout's
+                  free tier starts answering 429 under any real use, which is
+                  exactly why it is not the thing this depends on.
 
 Checked against a live launch: our reading of SPX4663 and letscash.fun's own
 API agree to the last digit (1.3556577608171037 ETH).
@@ -59,6 +64,19 @@ _SEL = {"pair": "0xe6a43905", "pool": "0x1698ee82", "reserves": "0x0902f1ac",
 # LetsCash runs fee 0 with spacing 200 — which is why those are looked up
 # instead of guessed.
 _V4_TIERS = ((100, 1), (500, 10), (3000, 60), (10000, 200))
+
+# What a hooked launchpad pool uses instead of a standard tier. LetsCash mints
+# every token at fee 0 with tick spacing 200, and a launchpad has one shape for
+# all of its launches — so knowing the hook is enough to compute the id.
+_V4_HOOK_TIERS = ((0, 200), (0, 60), (0, 1))
+
+
+def _hooks_for(chain: str) -> list[str]:
+    """The hook contracts we know run pools on a chain, from .env."""
+    raw = {"rbh": config.RBH_V4_HOOKS, "eth": config.ETH_V4_HOOKS,
+           "bsc": config.BNB_V4_HOOKS}.get(chain, "")
+    return [h.strip() for h in str(raw or "").split(",") if h.strip()]
+
 
 # In V4 the native coin is a first-class currency at the zero address, so a
 # token is usually paired with ETH itself rather than WETH.
@@ -321,18 +339,44 @@ class PriceReader:
         """
         out: list[tuple[str, bool]] = []
         quotes = [q for q in (_NATIVE, (spec.wnative or "").lower()) if q]
+        # Hookless standard pools first, then the same tiers under each hook we
+        # know about — a launchpad runs one hook for every token it mints, so
+        # one address turns "cannot be guessed" back into "computed".
+        hooks = [_NATIVE] + [h.lower() for h in _hooks_for(spec.key) if h]
         for quote in dict.fromkeys(quotes):
             c0, c1 = sorted([quote.lower(), token.lower()])
-            for fee, spacing in _V4_TIERS:
-                out.append((_pool_id(c0, c1, fee, spacing, _NATIVE),
-                            c0 == token.lower()))
+            for hook in dict.fromkeys(hooks):
+                for fee, spacing in _V4_TIERS + _V4_HOOK_TIERS:
+                    out.append((_pool_id(c0, c1, fee, spacing, hook),
+                                c0 == token.lower()))
         found = []
-        for pool_id, token_is_0 in out:
+        for pool_id, token_is_0 in dict.fromkeys(out):
             if await self._v4_sqrt_price(spec, pool_id):
                 found.append((pool_id, token_is_0))
         if found:
             return found
+        # Then the pools our own detector watched being created. Free, instant,
+        # and it covers every hooked pool opened while we were running —
+        # including ones whose hook nobody has told us about.
+        found = await self._v4_from_our_own_records(spec, token)
+        if found:
+            return found
         return await self._v4_from_explorer(spec, token)
+
+    async def _v4_from_our_own_records(self, spec: ChainSpec,
+                                       token: str) -> list[tuple[str, bool]]:
+        """Pool ids the Robinhood detector recorded from Initialize events."""
+        try:
+            from app import db
+            rows = await db.get_collection("v4_pools").find(
+                {"chain": spec.key,
+                 "$or": [{"currency0": token.lower()},
+                         {"currency1": token.lower()}]}).to_list(10)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[{self._tag}] v4_pools lookup failed: {exc}")
+            return []
+        return [(r["pool_id"], str(r.get("currency0", "")).lower() == token.lower())
+                for r in rows if r.get("pool_id")]
 
     async def _v4_from_explorer(self, spec: ChainSpec,
                                 token: str) -> list[tuple[str, bool]]:

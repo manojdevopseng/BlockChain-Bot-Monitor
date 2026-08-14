@@ -414,6 +414,14 @@ class Settings(BaseSettings):
     eth_explorer_api: str = "https://eth.blockscout.com/api"
     rbh_explorer_api: str = "https://robinhoodchain.blockscout.com/api"
     bnb_explorer_api: str = ""
+    # Hook contracts we know about, comma-separated. A launchpad runs one hook
+    # for every token it mints, so its address is all that stands between "this
+    # pool id cannot be guessed" and computing it directly — no explorer, no
+    # rate limit. LetsCash's is the default because it is the one on Robinhood
+    # minting into V4 today.
+    rbh_v4_hooks: str = "0x75A54357D9C78a2Db19004a5FDc76c50F9242AEC"
+    eth_v4_hooks: str = ""
+    bnb_v4_hooks: str = ""
     rbh_weth: str = ""
     rbh_explorer_token_url: str = "https://robinhoodchain.blockscout.com/token/{addr}"
     noxa_factory_address: str = ""
