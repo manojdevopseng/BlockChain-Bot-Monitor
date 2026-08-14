@@ -24,11 +24,33 @@ OWNED = ("mcap_tokens", "rsi_tokens")
 
 
 async def run() -> None:
-    for step in (_adopt_orphans, _stamp_cadence):
+    for step in (_grandfather_accounts, _adopt_orphans, _stamp_cadence):
         try:
             await step()
         except Exception as exc:  # noqa: BLE001
             log.warning(f"[MIGRATE] {step.__name__} skipped: {exc}")
+
+
+async def _grandfather_accounts() -> None:
+    """Keep the accounts that existed before subscriptions did.
+
+    An account an admin created by hand has no email, no plan and no
+    confirmation — and `access()` reads all three, so without this the people
+    already using the dashboard would be told to confirm an address they never
+    gave and pay for a trial they never took. They are marked confirmed
+    (an admin vouched for them by creating the account) and given a plan that
+    does not run out, with `comped` on the row saying why.
+    """
+    col = db.get_collection("users")
+    far_future = 4102444800.0            # 1 Jan 2100
+    res = await col.update_many(
+        {"plan": {"$exists": False}},
+        {"$set": {"plan": "yearly", "comped": True, "email_verified": True,
+                  "trial_used": True, "plan_ends_at": far_future,
+                  "comped_reason": "account existed before subscriptions"}})
+    if res.modified_count:
+        log.info(f"[MIGRATE] users: {res.modified_count} existing account(s) "
+                 f"kept working, on the house")
 
 
 async def _adopt_orphans() -> None:
