@@ -354,6 +354,10 @@ class Settings(BaseSettings):
     pools_factories: str = ""
     pools_token_factories: str = ""
     virtuals_factories: str = ""
+    # LetsCash — letscash.fun: the docs print "n/a" for every address, so this
+    # one comes from the site's own config endpoint (api.letscash.fun/api/config,
+    # `contracts.launchpadFactory`).
+    letscash_factories: str = ""
     # Flap — docs.flap.sh: the Portal that mints both token implementations.
     flap_portals: str = ""
     # Rows are dropped this many days after they land.

@@ -130,6 +130,8 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "Pools.trade launches", "chain": "rbh", "enabled": True},
     {"id": "launchpad_virtuals", "category": RBHX, "group": "Launchpad Monitor",
      "label": "Virtuals launches", "chain": "rbh", "enabled": True},
+    {"id": "launchpad_letscash", "category": RBHX, "group": "Launchpad Monitor",
+     "label": "LetsCash launches", "chain": "rbh", "enabled": True},
     # This panel's own two lists, separate from the X Monitor's above: same
     # feature, same rules, its own entries.
     {"id": "launchpad_skip",   "category": RBHX, "group": "Launchpad Monitor",
