@@ -44,7 +44,7 @@ export function Sidebar({
 }) {
   const path = usePathname();
   const uptime = useUptime();
-  const { blocks } = useRole();
+  const { blocks, known, isAdmin } = useRole();
   // On mobile the rail is always full-width inside the drawer; only desktop collapses.
   const isCollapsed = collapsed;
 
@@ -91,6 +91,10 @@ export function Sidebar({
           {NAV.map(({ href, label, icon: Icon, hideFromUser }) => {
             const active = href === "/" ? path === "/" : path.startsWith(href);
             const locked = blocks(href);
+            // Hidden until we know, then hidden for anyone but an admin. The
+            // remembered role means an admin does not watch their own nav
+            // build itself on every load.
+            if (hideFromUser && (!known || !isAdmin)) return null;
             if (locked && hideFromUser) return null;
             // Otherwise shown either way — a nav that hides pages leaves you
             // wondering what the dashboard has. Disabled says "not for this

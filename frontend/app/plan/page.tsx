@@ -51,10 +51,16 @@ export default function PlanPage() {
     }
   }
 
+  // A skeleton where the cards will be. The account is remembered between
+  // visits, so this is only ever seen on a first load in a fresh browser.
   if (loading) {
-    return <div className="grid h-64 place-items-center">
-      <Loader2 size={18} className="animate-spin text-text-dim" />
-    </div>;
+    return (
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-48 animate-pulse rounded-xl border border-border-soft bg-bg-soft/40" />
+        ))}
+      </div>
+    );
   }
 
   const ended = account && !account.usable;

@@ -21,7 +21,13 @@ export function setToken(t: string | null) {
   token = t;
   if (typeof window !== "undefined") {
     if (t) localStorage.setItem("token", t);
-    else localStorage.removeItem("token");
+    else {
+      // Signing out drops what was remembered about who that was: the next
+      // person to use this browser must not start on the last one's nav.
+      localStorage.removeItem("token");
+      localStorage.removeItem("role");
+      localStorage.removeItem("account");
+    }
   }
 }
 

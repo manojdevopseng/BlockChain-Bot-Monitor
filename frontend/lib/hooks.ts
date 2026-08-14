@@ -20,24 +20,45 @@ import { useApi } from "./api";
 export const ADMIN_ONLY_PATHS = ["/forwarder", "/settings", "/users", "/rpc",
                                  "/system", "/logs"] as const;
 
+const ROLE_KEY = "role";
+
+function cachedRole(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return localStorage.getItem(ROLE_KEY) || undefined;
+}
+
 export function useRole() {
   // Cached hard: it changes at login, not while the page is open, and every
-  // nav item asks. Undefined while it is in flight — the nav renders enabled
-  // rather than flashing everything to disabled and back.
+  // nav item asks.
+  //
+  // The answer is also remembered between page loads. It used to be optimistic
+  // instead — unknown read as admin — and that showed a customer the whole
+  // operator nav for as long as the first request took. Nothing was reachable
+  // (the server refuses either way), but "Forwarder, Settings, RPC Monitor"
+  // flashing past on every navigation is not something a customer should ever
+  // see. Unknown now reads as NOT admin, and the remembered role is what keeps
+  // an actual admin's nav from flickering while that is confirmed.
   const { data } = useApi<any>("/api/auth/me", {
     refreshInterval: 0,
     revalidateOnFocus: false,
     revalidateIfStale: false,
+    fallbackData: cachedRole() ? { role: cachedRole() } : undefined,
   });
-  const role: string | undefined = data?.role;
+  const role: string | undefined = data?.role ?? cachedRole();
+
+  useEffect(() => {
+    if (data?.role && typeof window !== "undefined") {
+      localStorage.setItem(ROLE_KEY, data.role);
+    }
+  }, [data?.role]);
+
   return {
     role,
+    known: role !== undefined,
     username: data?.username,
-    // Unknown reads as admin so nothing flickers or blocks before the answer
-    // arrives; the server is the one that actually decides.
-    isAdmin: role === undefined || role === "admin",
+    isAdmin: role === "admin",
     blocks: (path: string) =>
-      role !== undefined && role !== "admin"
+      role !== "admin"
       && ADMIN_ONLY_PATHS.some((p) => path === p || path.startsWith(`${p}/`)),
   };
 }

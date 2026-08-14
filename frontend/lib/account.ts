@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import { useApi } from "./api";
 
 /**
@@ -48,11 +50,34 @@ export type Account = {
   plans: Plan[];
 };
 
+const CACHE_KEY = "account";
+
+function remembered(): Account | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? (JSON.parse(raw) as Account) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function useAccount() {
+  // Seeded from the last answer this browser had, so Profile, Plan and the
+  // paywall paint immediately instead of showing a spinner on every visit and
+  // a fresh one after every reload. It is still revalidated on mount — the
+  // remembered copy decides what is drawn first, never what is true.
   const { data, error, isLoading, mutate } = useApi<Account>("/api/account/me", {
     refreshInterval: 0,
     revalidateOnFocus: true,
+    fallbackData: remembered(),
   });
+
+  useEffect(() => {
+    if (data && typeof window !== "undefined") {
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch {}
+    }
+  }, [data]);
   return {
     account: data,
     loading: isLoading && !data,
