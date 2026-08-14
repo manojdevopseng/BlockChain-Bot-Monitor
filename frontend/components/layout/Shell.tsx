@@ -120,18 +120,25 @@ export function Shell({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  // Pages that exist for people who are not signed in yet — or cannot be,
-  // because they are here to fix exactly that. None of them may bounce to
-  // /login, and none of them get the dashboard chrome.
-  const PUBLIC_PATHS = ["/login", "/register", "/verify", "/forgot", "/reset"];
+  // Pages that exist for people who are not signed in — the ones that fix not
+  // being signed in, and the ones that explain what this is. None of them may
+  // bounce to /login, and none of them get the dashboard chrome: a visitor
+  // should not be paying for a WebSocket to read a price list.
+  const PUBLIC_PATHS = ["/login", "/register", "/verify", "/forgot", "/reset",
+                        "/home", "/pricing", "/how-to-use", "/faq", "/contact",
+                        "/legal"];
   const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
   const isLogin = isPublic;
 
   useEffect(() => {
     const ok = !!getToken();
     setSignedIn(ok);
-    if (!ok && !isLogin) router.replace("/login");
-  }, [isLogin, path, router]);
+    if (ok || isPublic) return;
+    // A stranger who lands on the app gets the front page, not a login box:
+    // "sign in" is no use to somebody who has never heard of this. Anywhere
+    // deeper still goes to the login, because they were asking for a page.
+    router.replace(path === "/" ? "/home" : "/login");
+  }, [isPublic, path, router]);
 
   // Route change always closes the mobile drawer.
   useEffect(() => setMobileOpen(false), [path]);

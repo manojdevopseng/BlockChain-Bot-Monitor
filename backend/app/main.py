@@ -25,7 +25,7 @@ from .routers import (
     account, ai_agent as ai_router, alerts, analytics, auth, billing, chains,
     chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
-    outcomes as outcomes_router, rbhx, rpc, rsi,
+    outcomes as outcomes_router, public, rbhx, rpc, rsi,
     settings as settings_router, system, tokens, users as users_router,
 )
 from .ws_hub import hub
@@ -172,6 +172,9 @@ app.include_router(auth.router)
 # Sign-up, email confirmation and password reset cannot sit behind a login,
 # and the routes that do need one carry their own dependency.
 app.include_router(account.router)
+# The marketing pages: a price list and a contact form, and nothing else that
+# a stranger could ask for.
+app.include_router(public.router)
 # `require_write` is the login check AND the read-only rule in one dependency:
 # any request that is not a GET needs the admin role. Mounting it on the
 # routers rather than listing endpoints means a new POST is covered the day it
