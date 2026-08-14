@@ -8,8 +8,11 @@ and both halves have to be read, because nothing in this project holds either:
            Solana. Cached for a few minutes — a mint or a burn moves it, but
            not between two fifteen-second checks.
   price    the pool, through the RSI tracker's own PriceReader: three V3 fee
-           tiers with the deepest winning, then V2. That gives ETH-per-token,
-           so the dollar price of ETH itself (usd_price) is the last step.
+           tiers with the deepest winning, then V2, then V4 by pool id. That
+           gives ETH-per-token, so the dollar price of ETH itself (usd_price)
+           is the last step. V4 matters more here than anywhere: Robinhood's
+           launchpads mint straight into a hooked V4 pool, so without it their
+           tokens have no price at all.
            Solana has no such pool to read on an EVM-shaped RPC, so its price
            comes from Jupiter's public price API, which quotes in dollars
            already.
@@ -73,15 +76,21 @@ def chains() -> dict[str, ChainSpec]:
         "rbh": ChainSpec("rbh", "RBH",
                          config.MCAP_RBH_RPC_HTTP or config.RSI_RBH_RPC_HTTP
                          or config.RBH_RPC_HTTP,
-                         config.RBH_WETH, config.RBH_V2_FACTORY, config.RBH_V3_FACTORY),
+                         config.RBH_WETH, config.RBH_V2_FACTORY, config.RBH_V3_FACTORY,
+                         config.RBH_V4_STATEVIEW, config.RBH_V4_POOLMANAGER,
+                         config.RBH_EXPLORER_API),
         "eth": ChainSpec("eth", "ETH",
                          config.MCAP_ETH_RPC_HTTP or config.RSI_ETH_RPC_HTTP
                          or config.ETH_RPC_HTTP,
-                         config.ETH_WETH, config.ETH_V2_FACTORY, config.ETH_V3_FACTORY),
+                         config.ETH_WETH, config.ETH_V2_FACTORY, config.ETH_V3_FACTORY,
+                         config.ETH_V4_STATEVIEW, config.ETH_V4_POOLMANAGER,
+                         config.ETH_EXPLORER_API),
         "bsc": ChainSpec("bsc", "BSC",
                          config.MCAP_BSC_RPC_HTTP or config.RSI_BSC_RPC_HTTP
                          or config.BNB_RPC_HTTP,
-                         config.BNB_WBNB, config.BNB_V2_FACTORY, config.BNB_V3_FACTORY),
+                         config.BNB_WBNB, config.BNB_V2_FACTORY, config.BNB_V3_FACTORY,
+                         config.BNB_V4_STATEVIEW, config.BNB_V4_POOLMANAGER,
+                         config.BNB_EXPLORER_API),
     }
 
 
@@ -102,7 +111,7 @@ class Reading:
     price_usd: float = 0.0
     price_native: float = 0.0
     supply: float = 0.0
-    source: str = ""            # "v3" | "v2" | "jupiter"
+    source: str = ""            # "v4" | "v3" | "v2" | "jupiter"
 
 
 class MarketCapReader:

@@ -114,6 +114,16 @@ BNB_WBNB           = settings.bnb_wbnb
 RBH_V2_FACTORY     = settings.rbh_v2_factory
 RBH_V3_FACTORY     = settings.rbh_v3_factory
 RBH_V4_POOLMANAGER = settings.rbh_v4_poolmanager
+# V4 has no pool address to call — the price lives in the PoolManager and is
+# read by pool id through StateView. The explorer API is only for pools with a
+# hook, whose id cannot be computed; it is asked once per token, not per check.
+ETH_V4_STATEVIEW   = settings.eth_v4_stateview
+RBH_V4_STATEVIEW   = settings.rbh_v4_stateview
+BNB_V4_POOLMANAGER = settings.bnb_v4_poolmanager
+BNB_V4_STATEVIEW   = settings.bnb_v4_stateview
+ETH_EXPLORER_API   = settings.eth_explorer_api
+RBH_EXPLORER_API   = settings.rbh_explorer_api
+BNB_EXPLORER_API   = settings.bnb_explorer_api
 RBH_WETH           = settings.rbh_weth
 RBH_EXPLORER_TOKEN_URL = settings.rbh_explorer_token_url
 ROBINHOOD_CHAT_ID  = settings.robinhood_chat_id

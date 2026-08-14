@@ -399,6 +399,21 @@ class Settings(BaseSettings):
     rbh_v2_factory: str = ""
     rbh_v3_factory: str = ""
     rbh_v4_poolmanager: str = ""
+    # V4 keeps every pool inside the PoolManager, so there is no pool address to
+    # call: the price is read through the StateView periphery contract by pool
+    # id. One per chain, at the canonical deployment.
+    eth_v4_stateview: str = "0x7fFE42C4a5DEeA5b0feC41C94C136Cf115597227"
+    rbh_v4_stateview: str = "0xF3334192D15450CdD385c8B70e03f9A6bD9E673b"
+    bnb_v4_poolmanager: str = "0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF"
+    bnb_v4_stateview: str = "0xd13Dd3D6E93f276FAFc9Db9E6BB47C1180aeE0c4"
+    # A pool with a hook has no id we can guess — the fee, tick spacing and hook
+    # address are the launchpad's own — so it is looked up once, by log, through
+    # the chain's public explorer API (Blockscout's etherscan-compatible one).
+    # Blank means hooked pools are not found on that chain; the standard ones
+    # still are, because those ids are computed rather than looked up.
+    eth_explorer_api: str = "https://eth.blockscout.com/api"
+    rbh_explorer_api: str = "https://robinhoodchain.blockscout.com/api"
+    bnb_explorer_api: str = ""
     rbh_weth: str = ""
     rbh_explorer_token_url: str = "https://robinhoodchain.blockscout.com/token/{addr}"
     noxa_factory_address: str = ""

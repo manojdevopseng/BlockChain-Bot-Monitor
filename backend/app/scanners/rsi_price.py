@@ -16,10 +16,22 @@ Two routes, tried in this order and then kept:
 Resolved once per token and cached — the pool does not move, and re-resolving
 on every sample would cost four calls instead of one.
 
-V4 is not covered yet. Its pools have no address to call, only an id inside
-the PoolManager, so reading one means computing a storage slot and going
-through extsload; a token whose only pool is V4 reports no price source rather
-than a wrong number.
+  V4  no pool address exists at all — every pool lives inside the PoolManager
+      under a bytes32 id — so the id is worked out and the price read through
+      the StateView periphery contract. Two ways to get the id, in order:
+
+        computed  keccak of the PoolKey (currency0, currency1, fee, tickSpacing,
+                  hooks). Standard pools have no hook, so the key is guessable:
+                  four fee tiers against native and against wrapped native, and
+                  the deepest one that answers wins. No indexer, no key.
+        looked up a pool WITH a hook cannot be guessed — the fee and the hook
+                  are the launchpad's own — so its Initialize log is fetched
+                  once from the chain's explorer API and the id cached. This is
+                  what prices Robinhood's launchpad tokens, which are V4 with a
+                  hook nearly every time.
+
+Checked against a live launch: our reading of SPX4663 and letscash.fun's own
+API agree to the last digit (1.3556577608171037 ETH).
 """
 
 from __future__ import annotations
@@ -39,7 +51,22 @@ log = get_logger(__name__)
 # token0() / slot0() / liquidity() / decimals()
 _SEL = {"pair": "0xe6a43905", "pool": "0x1698ee82", "reserves": "0x0902f1ac",
         "token0": "0x0dfe1681", "slot0": "0x3850c7bd", "liquidity": "0x1a686502",
-        "decimals": "0x313ce567"}
+        "decimals": "0x313ce567",
+        # StateView, V4's read-only window onto the PoolManager.
+        "v4_slot0": "0xc815641c", "v4_liquidity": "0xfa6793d5"}
+
+# V4's own (fee, tickSpacing) pairs. A pool with a hook can use anything —
+# LetsCash runs fee 0 with spacing 200 — which is why those are looked up
+# instead of guessed.
+_V4_TIERS = ((100, 1), (500, 10), (3000, 60), (10000, 200))
+
+# In V4 the native coin is a first-class currency at the zero address, so a
+# token is usually paired with ETH itself rather than WETH.
+_NATIVE = "0x0000000000000000000000000000000000000000"
+
+# Initialize(id, currency0, currency1, fee, tickSpacing, hooks, sqrtPriceX96, tick)
+_TOPIC_V4_INITIALIZE = ("0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307"
+                        "b95f85e6110838d6438")
 
 # Uniswap V3's three standard tiers. 100 exists too but is stablecoin-only in
 # practice and has never held a token this tracker would be pointed at.
@@ -56,6 +83,12 @@ class ChainSpec:
     wnative: str
     v2_factory: str
     v3_factory: str
+    # V4: where pools live, where their state is read, and where a hooked
+    # pool's id can be looked up. All three may be blank — then V4 is simply
+    # not tried and the V2/V3 answer stands, exactly as before.
+    v4_stateview: str = ""
+    v4_poolmanager: str = ""
+    explorer_api: str = ""
 
 
 def chains() -> dict[str, ChainSpec]:
@@ -68,13 +101,19 @@ def chains() -> dict[str, ChainSpec]:
     return {
         "eth": ChainSpec("eth", "ETH",
                          config.RSI_ETH_RPC_HTTP or config.ETH_RPC_HTTP,
-                         config.ETH_WETH, config.ETH_V2_FACTORY, config.ETH_V3_FACTORY),
+                         config.ETH_WETH, config.ETH_V2_FACTORY, config.ETH_V3_FACTORY,
+                         config.ETH_V4_STATEVIEW, config.ETH_V4_POOLMANAGER,
+                         config.ETH_EXPLORER_API),
         "bsc": ChainSpec("bsc", "BSC",
                          config.RSI_BSC_RPC_HTTP or config.BNB_RPC_HTTP,
-                         config.BNB_WBNB, config.BNB_V2_FACTORY, config.BNB_V3_FACTORY),
+                         config.BNB_WBNB, config.BNB_V2_FACTORY, config.BNB_V3_FACTORY,
+                         config.BNB_V4_STATEVIEW, config.BNB_V4_POOLMANAGER,
+                         config.BNB_EXPLORER_API),
         "rbh": ChainSpec("rbh", "RBH",
                          config.RSI_RBH_RPC_HTTP or config.RBH_RPC_HTTP,
-                         config.RBH_WETH, config.RBH_V2_FACTORY, config.RBH_V3_FACTORY),
+                         config.RBH_WETH, config.RBH_V2_FACTORY, config.RBH_V3_FACTORY,
+                         config.RBH_V4_STATEVIEW, config.RBH_V4_POOLMANAGER,
+                         config.RBH_EXPLORER_API),
     }
 
 
@@ -83,8 +122,10 @@ class PoolRef:
     """Where a token's price is read from, resolved once."""
     chain: str
     token: str
-    kind: str = ""            # "v3" | "v2" | "" when nothing was found
+    kind: str = ""            # "v3" | "v2" | "v4" | "" when nothing was found
     address: str = ""
+    # V4 only: the pool's bytes32 id. There is no address to hold instead.
+    pool_id: str = ""
     token_is_0: bool = False
     decimals: int = 18
     fee: int = 0
@@ -93,6 +134,51 @@ class PoolRef:
 
 def _word(value: str) -> str:
     return value.lower().replace("0x", "").rjust(64, "0")
+
+
+def _first_word(raw: Optional[str]) -> int:
+    """The first 32-byte word of a return value, as a number. 0 when there is
+    nothing to read — which for slot0 means the pool was never initialised."""
+    if not raw or len(raw) < 66:
+        return 0
+    return int(raw[2:66], 16)
+
+
+def _from_sqrt(sqrt_price: int, token_is_0: bool, decimals: int) -> Optional[float]:
+    """Native per token, out of a sqrtPriceX96.
+
+    The ratio is in raw units, so it is scaled by the difference in decimals —
+    `10 ** (decimals - 18)` either way round, because the quote side (ETH, WETH,
+    WBNB) is 18 decimals in every case. The inverse branch used to raise that to
+    `18 - decimals`, which is only harmless while the token has 18 decimals
+    itself: RSI never noticed because a constant factor cannot change it, but a
+    market cap is a number and would have been wrong by 10**24 on a 6-decimal
+    token quoted second.
+    """
+    ratio = (sqrt_price / (2 ** 96)) ** 2      # token1 per token0, raw units
+    if not ratio:
+        return None
+    base = ratio if token_is_0 else 1 / ratio
+    return base * (10 ** (decimals - 18))
+
+
+def _pool_id(currency0: str, currency1: str, fee: int, tick_spacing: int,
+             hooks: str) -> str:
+    """V4's pool id: keccak of the PoolKey, five words, in order.
+
+    Verified against a live pool — the id computed here is byte-for-byte the one
+    the PoolManager reported in its own Initialize log.
+    """
+    from eth_utils import keccak
+
+    def addr(value: str) -> bytes:
+        return bytes(12) + bytes.fromhex(value.lower().replace("0x", "").rjust(40, "0"))
+
+    def num(value: int) -> bytes:
+        return int(value).to_bytes(32, "big", signed=value < 0)
+
+    return "0x" + keccak(addr(currency0) + addr(currency1) + num(fee)
+                         + num(tick_spacing) + addr(hooks)).hex()
 
 
 class PriceReader:
@@ -177,6 +263,11 @@ class PriceReader:
                 ref.kind, ref.address = "v2", pair
                 ref.token_is_0 = bool(t0) and ("0x" + t0[-40:]).lower() == token.lower()
 
+        # V4 last, because it costs the most calls — and it is what finds the
+        # Robinhood launchpad tokens, which have no V2 or V3 pool at all.
+        if not ref.kind:
+            await self._resolve_v4(spec, token, ref)
+
         self._pools[key] = ref
         if ref.kind:
             log.info(f"[{self._tag}] {spec.label} {token[:10]}… priced from {ref.kind}"
@@ -185,6 +276,98 @@ class PriceReader:
             log.info(f"[{self._tag}] {spec.label} {token[:10]}… has no V2/V3 pool against "
                      f"{spec.wnative[:8]}… — nothing to price it from yet")
         return ref
+
+    # ── V4 ───────────────────────────────────────────────────────────────────
+
+    async def _resolve_v4(self, spec: ChainSpec, token: str, ref: PoolRef) -> None:
+        """Fill `ref` with the deepest V4 pool this token trades in, if any."""
+        if not spec.v4_stateview:
+            return
+        best_liq = -1
+        best: Optional[tuple[str, bool]] = None
+        for pool_id, token_is_0 in await self._v4_candidates(spec, token):
+            sqrt = await self._v4_sqrt_price(spec, pool_id)
+            if not sqrt:
+                continue                      # never initialised — not a pool
+            liq = await self._v4_liquidity(spec, pool_id)
+            # Deepest wins, the same rule as the V3 tiers and for the same
+            # reason: an empty pool still answers, with a price off by twenty
+            # orders of magnitude.
+            if liq > best_liq:
+                best_liq, best = liq, (pool_id, token_is_0)
+        if best is None:
+            return
+        ref.kind, ref.pool_id, ref.token_is_0 = "v4", best[0], best[1]
+        ref.address = spec.v4_poolmanager or spec.v4_stateview
+
+    async def _v4_candidates(self, spec: ChainSpec,
+                             token: str) -> list[tuple[str, bool]]:
+        """(pool id, is the token currency0) for every pool worth trying.
+
+        The computed ones first — they cost nothing but keccak — and the
+        explorer only when none of them answered, because that is a request to
+        somebody else's server.
+        """
+        out: list[tuple[str, bool]] = []
+        quotes = [q for q in (_NATIVE, (spec.wnative or "").lower()) if q]
+        for quote in dict.fromkeys(quotes):
+            c0, c1 = sorted([quote.lower(), token.lower()])
+            for fee, spacing in _V4_TIERS:
+                out.append((_pool_id(c0, c1, fee, spacing, _NATIVE),
+                            c0 == token.lower()))
+        found = []
+        for pool_id, token_is_0 in out:
+            if await self._v4_sqrt_price(spec, pool_id):
+                found.append((pool_id, token_is_0))
+        if found:
+            return found
+        return await self._v4_from_explorer(spec, token)
+
+    async def _v4_from_explorer(self, spec: ChainSpec,
+                                token: str) -> list[tuple[str, bool]]:
+        """A hooked pool's id, out of its Initialize log.
+
+        Its key holds the launchpad's own fee, tick spacing and hook address,
+        so there is nothing to guess — but the log names the id outright. Asked
+        once per token: a pool does not move, and the answer is cached with the
+        rest of the PoolRef.
+        """
+        if not (spec.explorer_api and spec.v4_poolmanager):
+            return []
+        found: list[tuple[str, bool]] = []
+        for slot in (2, 3):
+            url = (f"{spec.explorer_api}?module=logs&action=getLogs"
+                   f"&fromBlock=0&toBlock=latest&address={spec.v4_poolmanager}"
+                   f"&topic0={_TOPIC_V4_INITIALIZE}&topic0_{slot}_opr=and"
+                   f"&topic{slot}=0x{token.lower().replace('0x', '').rjust(64, '0')}")
+            try:
+                async with self._session.get(url, timeout=_TIMEOUT) as resp:
+                    if resp.status != 200:
+                        continue
+                    body = await resp.json(content_type=None)
+            except Exception as exc:  # noqa: BLE001
+                log.debug(f"[{self._tag}] {spec.label} explorer lookup failed: {exc}")
+                continue
+            rows = body.get("result") if isinstance(body.get("result"), list) else []
+            for row in rows:
+                topics = row.get("topics") or []
+                if len(topics) < 4:
+                    continue
+                currency0 = "0x" + topics[2][-40:]
+                found.append((topics[1], currency0.lower() == token.lower()))
+        return found
+
+    async def _v4_sqrt_price(self, spec: ChainSpec, pool_id: str) -> int:
+        raw = await self._call(spec, spec.v4_stateview,
+                               _SEL["v4_slot0"] + pool_id[2:])
+        if not raw or len(raw) < 66:
+            return 0
+        return int(raw[2:66], 16)
+
+    async def _v4_liquidity(self, spec: ChainSpec, pool_id: str) -> int:
+        raw = await self._call(spec, spec.v4_stateview,
+                               _SEL["v4_liquidity"] + pool_id[2:])
+        return int(raw, 16) if raw and raw != "0x" else 0
 
     async def name_symbol(self, chain: str, token: str) -> tuple[str, str]:
         """The token's own ticker and name, off the contract.
@@ -231,17 +414,14 @@ class PriceReader:
         if not ref.kind or spec is None:
             return None
 
-        if ref.kind == "v3":
-            raw = await self._call(spec, ref.address, _SEL["slot0"])
-            if not raw or len(raw) < 66:
-                return None
-            sqrt_price = int(raw[2:66], 16)
+        if ref.kind in ("v3", "v4"):
+            sqrt_price = (await self._v4_sqrt_price(spec, ref.pool_id)
+                          if ref.kind == "v4" else
+                          _first_word(await self._call(spec, ref.address,
+                                                       _SEL["slot0"])))
             if not sqrt_price:
                 return None
-            ratio = (sqrt_price / (2 ** 96)) ** 2      # token1 per token0
-            if ref.token_is_0:
-                return ratio * (10 ** (ref.decimals - 18))
-            return (1 / ratio) * (10 ** (18 - ref.decimals)) if ratio else None
+            return _from_sqrt(sqrt_price, ref.token_is_0, ref.decimals)
 
         raw = await self._call(spec, ref.address, _SEL["reserves"])
         if not raw or len(raw) < 130:
