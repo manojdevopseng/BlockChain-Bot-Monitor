@@ -61,16 +61,24 @@ async def stats():
     from ..scanners.launchpads import all_launchpads
     out = {"launchpads": [p.label for p in all_launchpads()],
            "chains": ["Robinhood", "Ethereum", "BNB Chain", "Solana"]}
-    try:
-        day_ago = time.time() - 86400
-        out["launches_24h"] = await db.get_collection(
-            "launchpad_tokens").count_documents({"open_timestamp": {"$gte": day_ago}})
-        out["accounts_named_24h"] = await db.get_collection(
-            "launchpad_tokens").count_documents(
-                {"open_timestamp": {"$gte": day_ago},
-                 "handle": {"$nin": [None, ""]}})
-    except Exception:  # noqa: BLE001
-        pass
+    # One count per thing the product does, over the same 24 hours. The time
+    # field differs by collection because they were written years apart; that
+    # is a fact about the database, not something to paper over with a guess.
+    windows = [
+        ("launches_24h", "launchpad_tokens", "open_timestamp", {}),
+        ("accounts_named_24h", "launchpad_tokens", "open_timestamp",
+         {"handle": {"$nin": [None, ""]}}),
+        ("gas_hits_24h", "gas_alerts", "created_at", {}),
+        ("calls_24h", "premium_detections", "ts", {}),
+        ("alerts_24h", "alerts", "created_at", {}),
+    ]
+    day_ago = time.time() - 86400
+    for key, coll, field, extra in windows:
+        try:
+            out[key] = await db.get_collection(coll).count_documents(
+                {field: {"$gte": day_ago}, **extra})
+        except Exception:  # noqa: BLE001
+            continue
     return out
 
 

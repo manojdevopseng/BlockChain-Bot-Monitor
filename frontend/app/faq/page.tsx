@@ -18,11 +18,13 @@ const QA: { q: string; a: React.ReactNode }[] = [
   },
   {
     q: "What is actually different about it?",
-    a: <>The Robinhood launchpads. Within seconds of a launch you get the X
-       account named in the token&rsquo;s own metadata — including the ones that
-       carry a signed proof rather than a link — plus that account&rsquo;s bio and
-       following, whether the bio quotes the contract, and whether the deployer
-       bought their own supply.</>,
+    a: <>Six things in one place, on four chains: gas fees that show somebody
+       paying to get in first, calls from the groups worth reading with what
+       those calls actually did afterwards, every Robinhood launch with the X
+       account read off the token&rsquo;s own metadata, the narrative it belongs
+       to, what it is worth on V2, V3 and V4 pools, and RSI on what you hold.
+       Any one of those exists somewhere; having them argue with each other on
+       one screen is the point.</>,
   },
   {
     q: "Do I get alerts before other subscribers?",

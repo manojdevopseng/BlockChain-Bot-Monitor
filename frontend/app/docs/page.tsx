@@ -17,6 +17,27 @@ type Entry = {
 
 const SECTIONS: { group: string; entries: Entry[] }[] = [
   {
+    group: "Money moving early",
+    entries: [
+      {
+        id: "gas", title: "ETH Gas Fees",
+        what: "Every new Uniswap pair on Ethereum is watched, and each buy's gas fee is read off its receipt. A buy paying far over the odds is somebody who knows something.",
+        when: "In the first minutes of a pair, before there is a chart to look at.",
+        how: ["Alerts fire once per token, at the first buy over the threshold, and the token stops being watched.",
+              "The threshold and the watch window are settings; the defaults catch snipers rather than ordinary traders."],
+        gotcha: "A high fee is evidence of intent, not of a good token. It says somebody wanted in badly — nothing about whether they were right.",
+      },
+      {
+        id: "calls", title: "Premium calls, and what they did next",
+        what: "Calls from the groups worth reading on ETH, Robinhood, BNB Chain and Solana — deduplicated, verified on chain, and counted per group.",
+        when: "Constantly. The same address from four groups inside an hour is the shape worth acting on.",
+        how: ["Detections shows each address with which groups called it and when.",
+              "Analytics shows what those calls did at 15 minutes, 1 hour, 6 hours and a day — per group, so a loud group with bad calls stops looking loud."],
+        gotcha: "A call is recorded only after the address is confirmed on chain, so a group posting nonsense contracts scores nothing.",
+      },
+    ],
+  },
+  {
     group: "Detections",
     entries: [
       {
@@ -36,6 +57,19 @@ const SECTIONS: { group: string; entries: Entry[] }[] = [
         how: ["Set Min Followers to cut the long tail.",
               "Verified accounts only is off by default; turn it on if blue ticks are all you trade."],
         gotcha: "It shares one socket with the Launchpad Monitor, so switching that off does not switch this off, and the reverse.",
+      },
+    ],
+  },
+  {
+    group: "Narrative",
+    entries: [
+      {
+        id: "ai", title: "AI Narrative",
+        what: "The X account behind a launch is read and judged against the narratives you are watching, with a confidence and the post it was based on.",
+        when: "When the same idea starts appearing under different tickers — that is a wave, and it reads as one here.",
+        how: ["Keep the narrative list to things you would actually trade; the model matches against it, not against the whole internet.",
+              "Dry run records the verdicts without sending anything — leave it on for a day and read the log first."],
+        gotcha: "It judges the account and the post, not the token. A polished account with a real following can still be the exit liquidity.",
       },
     ],
   },
