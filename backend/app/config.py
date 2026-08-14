@@ -344,6 +344,12 @@ class Settings(BaseSettings):
     pay_bsc_address: str = ""
     pay_sol_address: str = ""
     pay_tron_address: str = ""
+    # Which coins are actually accepted, comma-separated (eth_usdt, sol_usdc,
+    # bsc_usdt …). Blank means every coin on a chain that has an address —
+    # which is not always what is wanted: one wallet can hold both USDT and
+    # USDC, and offering a coin you did not intend to take is how a payment
+    # arrives somewhere nobody is watching for it.
+    pay_assets: str = ""
     # Tron has no RPC of ours to read, so its balance comes from TronGrid. The
     # key is optional at this volume and only raises the rate limit.
     tron_api_url: str = "https://api.trongrid.io"

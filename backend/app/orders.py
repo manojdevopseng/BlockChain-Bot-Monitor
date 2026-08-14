@@ -82,7 +82,7 @@ async def create(account: dict, plan_id: str, asset_id: str) -> dict:
     if asset is None:
         raise ValueError("Unknown payment option")
     address = payments.receiving_address(asset.chain)
-    if not address:
+    if not address or asset not in payments.available():
         raise ValueError(f"{asset.label} is not accepted yet")
 
     # One open order per account: two quotes at once is how somebody pays the

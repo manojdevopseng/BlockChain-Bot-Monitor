@@ -87,11 +87,27 @@ def receiving_address(chain: str) -> str:
     }.get(chain, "") or ""
 
 
+def allowed_ids() -> Optional[set[str]]:
+    """The explicit allowlist, or None when there is not one."""
+    raw = [a.strip().lower() for a in (settings.pay_assets or "").split(",")]
+    picked = {a for a in raw if a in ASSETS}
+    return picked or None
+
+
 def available() -> list[Asset]:
-    """The rails that actually have an address configured, cheapest first."""
+    """The rails that can actually take money, cheapest for the payer first.
+
+    Two conditions, both required: the chain has a receiving address, and the
+    coin is one we said we would accept. Cheapest first because the same $29.99
+    costs cents on Solana and several dollars on Ethereum, and the payer is the
+    one who feels that.
+    """
     order = ["sol_usdc", "sol_usdt", "bsc_usdt", "bsc_usdc", "tron_usdt",
              "eth_usdc", "eth_usdt"]
-    return [ASSETS[k] for k in order if receiving_address(ASSETS[k].chain)]
+    picked = allowed_ids()
+    return [ASSETS[k] for k in order
+            if receiving_address(ASSETS[k].chain)
+            and (picked is None or k in picked)]
 
 
 def asset_by_id(asset_id: str) -> Optional[Asset]:
