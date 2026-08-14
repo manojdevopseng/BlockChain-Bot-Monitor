@@ -185,6 +185,12 @@ async def settle(order: dict, seen: float) -> Optional[dict]:
              f"{time.strftime('%d-%m-%Y', time.localtime(until))}")
 
     row = {**order, "expires_on": time.strftime("%d %b %Y", time.localtime(until))}
+    from . import notifications
+    await notifications.notify(
+        order["user_id"], notifications.BILLING,
+        f"{order['plan_label']} is active",
+        f"Payment received. Your plan runs to {row['expires_on']}.",
+        f"/orders/{order['id']}")
     await mailer.send_order_activated(order.get("email", ""),
                                       order["user_id"], row)
     await mailer.notify_admin(

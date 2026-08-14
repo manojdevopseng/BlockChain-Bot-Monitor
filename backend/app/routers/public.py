@@ -115,3 +115,66 @@ async def contact(request: Request, payload: dict = Body(...)):
             f"<i>{html.escape(message[:500])}</i>")
     return {"sent": True,
             "message": "Thanks — we read these ourselves and answer by email."}
+
+
+# What changed, newest first. Kept in code so it ships with the change it
+# describes — a changelog maintained somewhere else is a changelog that lags.
+CHANGELOG: list[dict] = [
+    {"date": "2026-08-14", "title": "Accounts, plans and payment",
+     "items": ["Sign up, 7-day trial, and per-account data throughout",
+               "USDT and USDC on Solana, BNB Chain and Ethereum",
+               "Alerts to your own Telegram chat rather than a shared group",
+               "Support requests that carry their own diagnostics"]},
+    {"date": "2026-08-14", "title": "LetsCash, and V4 pricing everywhere",
+     "items": ["LetsCash added as the sixth Robinhood launchpad",
+               "Uniswap V4 pools priced on RBH, ETH and BSC — including hooked "
+               "launchpad pools, which most tools cannot read",
+               "Market Cap Alert and on-demand Market Cap Check"]},
+    {"date": "2026-08-13", "title": "Solana on-chain discovery is a switch",
+     "items": ["Turn discovery off without touching the market-cap stream",
+               "Gas endpoints rotate and say so when all of them are spent"]},
+]
+
+
+@router.get("/changelog")
+async def changelog():
+    return {"items": CHANGELOG}
+
+
+@router.get("/status")
+async def status():
+    """Is it working — answered coarsely, on purpose.
+
+    A public status page that names workers and endpoints is a map of what to
+    attack. This says which parts of the PRODUCT are up, in the words the
+    product uses, and nothing about how they are wired.
+    """
+    from .. import supervisor
+    from ..scanners import scfg
+
+    def state(ok: bool, degraded: bool = False) -> str:
+        return "operational" if ok else ("degraded" if degraded else "down")
+
+    try:
+        diag = supervisor.diagnostics()
+        workers = diag.get("workers") or {}
+    except Exception:  # noqa: BLE001
+        workers = {}
+
+    components = [
+        {"name": "Launch detection (Robinhood)",
+         "status": state(bool(workers.get("rbhx")) and supervisor.rpc_connected("rbhx"),
+                         bool(workers.get("rbhx")))},
+        {"name": "Solana feed", "status": state(bool(workers.get("sol")))},
+        {"name": "RSI tracker", "status": state(bool(workers.get("rsi")))},
+        {"name": "Market cap alerts", "status": state(bool(workers.get("mcap")))},
+        {"name": "Telegram alerts",
+         "status": state(bool(scfg.TELEGRAM_BOT_TOKEN_SET))},
+        {"name": "Payments", "status": state(bool(payments.available()))},
+    ]
+    worst = ("down" if any(c["status"] == "down" for c in components)
+             else "degraded" if any(c["status"] == "degraded" for c in components)
+             else "operational")
+    return {"overall": worst, "components": components,
+            "uptime_seconds": supervisor.uptime_seconds(),
+            "checked_at": time.time()}

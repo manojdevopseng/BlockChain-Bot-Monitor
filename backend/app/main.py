@@ -26,6 +26,7 @@ from .routers import (
     auth, billing, chains,
     chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
+    notifications as notif_router,
     outcomes as outcomes_router, public, rbhx, rpc, rsi,
     settings as settings_router, system, tokens, users as users_router,
 )
@@ -164,7 +165,7 @@ _PRODUCT = (rsi, mcap)
 # Reporting a problem is not a product feature to be paywalled: an account
 # whose subscription ended because a payment did not land is exactly the one
 # that needs to say so.
-_ACCOUNT = (billing, support)
+_ACCOUNT = (billing, support, notif_router)
 _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
            chat_lookup, outcomes_router, ai_router, rbhx, launchpad)
 _OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router,

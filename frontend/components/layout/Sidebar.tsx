@@ -24,6 +24,7 @@ const NAV = [
   { href: "/plan", label: "Plan", icon: BadgeCheck },
   { href: "/orders", label: "Orders", icon: Receipt },
   { href: "/support", label: "Support", icon: LifeBuoy },
+  { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/chains", label: "Chains", icon: Link2 },
   { hideFromUser: true, href: "/logs", label: "Logs", icon: ScrollText },
   { hideFromUser: true, href: "/settings", label: "Settings", icon: Settings },

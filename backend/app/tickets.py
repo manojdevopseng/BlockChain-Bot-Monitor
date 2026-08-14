@@ -236,7 +236,10 @@ async def reply(ticket_id: str, author: str, text: str, is_admin: bool,
 
 async def _tell_buyer(row: dict, entry: dict) -> None:
     """An answer is no use sitting on a page nobody has open."""
-    from . import mailer, notifier, telegram_link
+    from . import mailer, notifications, notifier, telegram_link
+    await notifications.notify(
+        row.get("user_id", ""), notifications.SUPPORT,
+        f"Reply on {row['id']}", entry["text"][:200], f"/support/{row['id']}")
     from .config import settings
     await mailer.send(
         row.get("email", ""), f"Re: your support request {row['id']}",

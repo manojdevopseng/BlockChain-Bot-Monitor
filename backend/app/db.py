@@ -232,6 +232,8 @@ _TTL_COLLECTIONS = {
     "rsi_candles": "rsi_retention_days",
     "rsi_state": "rsi_retention_days",
     "rsi_readings": "rsi_retention_days",
+    # A notice nobody read in a month is not going to be read.
+    "notifications": "alert_retention_days",
     "launchpad_watch": "launchpad_retention_days",
 }
 
@@ -352,6 +354,9 @@ async def ensure_indexes() -> None:
         ("payment_rails",      "asset_id"),
         ("contact_messages",   [("handled", 1), ("at", -1)]),
         ("admin_audit",        [("at", -1)]),
+        ("notifications",      [("user_id", 1), ("at", -1)]),
+        ("notifications",      [("user_id", 1), ("read", 1)]),
+        ("notifications",      [("user_id", 1), ("key", 1)]),
         ("payments_unmatched", [("settled", 1), ("at", -1)]),
         ("tickets",            [("user_id", 1), ("status", 1)]),
         ("tickets",            "id"),

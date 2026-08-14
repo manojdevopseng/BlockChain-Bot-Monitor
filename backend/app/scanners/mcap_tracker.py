@@ -304,6 +304,16 @@ class McapTracker:
         if not hit:
             return
         owner = token.get("user_id") or ""
+        # Kept in the app as well as sent: an alert that exists only in
+        # Telegram is lost to anyone who has not connected it.
+        from app import notifications
+        await notifications.notify(
+            owner, notifications.ALERT,
+            f"{token.get('symbol') or 'A token'} reached "
+            f"{fmt_usd(reading.mcap)}",
+            f"Your target was {fmt_usd(target)} on "
+            f"{CHAIN_LABELS.get(token.get('chain'), '')}.",
+            "/rsi")
         # Marked before the message is sent: a Telegram failure must not leave
         # it armed to fire again on the very next pass.
         await _col("mcap_tokens").update_one(

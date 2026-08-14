@@ -126,7 +126,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // should not be paying for a WebSocket to read a price list.
   const PUBLIC_PATHS = ["/login", "/register", "/verify", "/forgot", "/reset",
                         "/home", "/pricing", "/how-to-use", "/faq", "/contact",
-                        "/legal"];
+                        "/legal", "/docs", "/changelog", "/status"];
   // The root is the front page, for everybody. A signed-in visitor who types
   // the address expects to see the site, not to be thrown into a dashboard —
   // the way in is a button on it.

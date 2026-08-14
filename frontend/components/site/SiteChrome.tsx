@@ -17,6 +17,7 @@ const LINKS = [
   { href: "/", label: "Home" },
   { href: "/how-to-use", label: "How to use" },
   { href: "/pricing", label: "Pricing" },
+  { href: "/docs", label: "Docs" },
   { href: "/faq", label: "FAQ" },
   { href: "/contact", label: "Contact" },
 ];
@@ -95,6 +96,8 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
             <Link href="/legal/privacy" className="hover:text-text-muted">Privacy</Link>
             <Link href="/legal/refund" className="hover:text-text-muted">Refunds</Link>
             <Link href="/contact" className="hover:text-text-muted">Contact</Link>
+            <Link href="/changelog" className="hover:text-text-muted">Changelog</Link>
+            <Link href="/status" className="hover:text-text-muted">Status</Link>
           </div>
           <p className="mt-4 max-w-3xl text-[11px] leading-relaxed text-text-dim">
             This is a monitoring tool, not advice. It reports what is happening

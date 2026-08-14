@@ -25,7 +25,7 @@ from typing import Optional
 
 import aiohttp
 
-from app import orders, payments
+from app import notifications, orders, payments
 from app.scanners.slog import get_logger
 
 log = get_logger(__name__)
@@ -48,6 +48,9 @@ class PaymentWatcher:
         self._session_factory = session_factory
         self._session: Optional[aiohttp.ClientSession] = None
         self._reader: Optional[payments.BalanceReader] = None
+        # Zero rather than now, so the first sweep happens on the first pass
+        # after a restart rather than a day later.
+        self._warned_at = 0.0
 
     async def run(self) -> None:
         self._session = self._session_factory()
@@ -62,6 +65,11 @@ class PaymentWatcher:
                     await orders.expire_stale()
                     for asset in payments.available():
                         await self._check(asset)
+                    # Once a day, from whichever pass crosses the hour: telling
+                    # somebody their plan ends tomorrow needs no loop of its own.
+                    if time.time() - self._warned_at > 86400:
+                        self._warned_at = time.time()
+                        await notifications.warn_expiring()
                 except asyncio.CancelledError:
                     return
                 except Exception as exc:  # noqa: BLE001

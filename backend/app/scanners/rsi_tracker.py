@@ -343,6 +343,12 @@ class RsiTracker:
         token["announced_zone"], token["last_alert_at"] = turn, now
         await _col("rsi_tokens").update_one(
             owned, {"$set": {"last_alert_at": now, "announced_zone": turn}})
+        from app import notifications
+        await notifications.notify(
+            token.get("user_id") or "", notifications.ALERT,
+            f"{token.get('symbol') or 'A token'} is {turn} — RSI {value:.1f}",
+            f"On {INTERVAL_LABELS.get(token.get('interval'), '')}, "
+            f"{str(chain).upper()}.", "/rsi")
         log.info(f"[RSI] {token.get('symbol') or addr[:10]} ({chain.upper()}) "
                  f"{turn} — RSI {value:.1f} on "
                  f"{INTERVAL_LABELS.get(token.get('interval'), '')}"
