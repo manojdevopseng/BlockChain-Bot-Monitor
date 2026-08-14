@@ -19,10 +19,10 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import db, notifier, registry, seed, security, supervisor
+from . import db, migrations, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
-    ai_agent as ai_router, alerts, analytics, auth, chains, chat_lookup,
+    account, ai_agent as ai_router, alerts, analytics, auth, chains, chat_lookup,
     commands, dashboard, forwarder, launchpad, logs, mcap,
     outcomes as outcomes_router, rbhx, rpc, rsi,
     settings as settings_router, system, tokens, users as users_router,
@@ -99,6 +99,9 @@ async def lifespan(app: FastAPI):
     await db.ensure_indexes()
     await registry.seed()
     await seed.seed_all()
+    # Rows written before accounts existed belong to nobody; adopt them before
+    # anything scoped by owner runs and finds an empty list.
+    await migrations.run()
     await supervisor.start()
     _heartbeat_task = asyncio.create_task(_heartbeat())
     # Alerting must never be able to stop the bot from starting.
@@ -150,6 +153,9 @@ _PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
               rsi, mcap)
 
 app.include_router(auth.router)
+# Sign-up, email confirmation and password reset cannot sit behind a login,
+# and the routes that do need one carry their own dependency.
+app.include_router(account.router)
 # `require_write` is the login check AND the read-only rule in one dependency:
 # any request that is not a GET needs the admin role. Mounting it on the
 # routers rather than listing endpoints means a new POST is covered the day it

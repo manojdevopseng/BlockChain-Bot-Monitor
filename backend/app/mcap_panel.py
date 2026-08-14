@@ -41,6 +41,19 @@ def _col(name: str):
     return db.get_collection(name)
 
 
+def _owner() -> str:
+    """Whose rows Telegram writes.
+
+    The bot answers in one chat, and that chat is the operator's — so until an
+    account can link its own Telegram (and the alert goes to that person rather
+    than to this group), everything added here belongs to the admin. Written as
+    one function so there is a single place to change when it does.
+    """
+    from app.config import settings
+    return settings.admin_username
+
+
+
 async def _settings() -> dict:
     return await _col("mcap_settings").find_one({"_id": "mcap"}) or {}
 
@@ -55,8 +68,9 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
     doc = await _settings()
     enabled = await registry.enabled_map()
     cadence = str(doc.get("cadence", DEFAULT_CADENCE))
-    total = await _col("mcap_tokens").count_documents({})
-    hit = await _col("mcap_tokens").count_documents({"hit_at": {"$exists": True}})
+    total = await _col("mcap_tokens").count_documents({"user_id": _owner()})
+    hit = await _col("mcap_tokens").count_documents(
+        {"user_id": _owner(), "hit_at": {"$exists": True}})
 
     text = (
         f"🎯 <b>Market Cap Alert — settings</b>\n"
@@ -93,8 +107,8 @@ async def main_panel() -> tuple[str, list[list[dict]]]:
 # ── the token list, and one token's own screen ────────────────────────────────
 
 async def token_list_panel() -> tuple[str, list[list[dict]]]:
-    rows_db = await _col("mcap_tokens").find({}).sort("added_at", -1) \
-                                       .to_list(_TOKEN_LIMIT)
+    rows_db = await _col("mcap_tokens").find({"user_id": _owner()}) \
+                                       .sort("added_at", -1).to_list(_TOKEN_LIMIT)
     states = {}
     async for st in _col("mcap_state").find({}):
         states[(st.get("chain"), st.get("address"))] = st
@@ -126,7 +140,8 @@ async def token_list_panel() -> tuple[str, list[list[dict]]]:
 
 
 async def token_panel(address: str) -> tuple[str, list[list[dict]]]:
-    row = await _col("mcap_tokens").find_one({"address": address})
+    row = await _col("mcap_tokens").find_one({"user_id": _owner(),
+                                              "address": address})
     if not row:
         return await token_list_panel()
     st = await _col("mcap_state").find_one({"chain": row.get("chain"),
@@ -374,8 +389,8 @@ async def handle(data: str, cb: dict) -> tuple[str, bool]:
 
     elif what == "x":
         address = await _full_address(arg)
-        await _col("mcap_tokens").delete_one({"address": address})
-        await _col("mcap_state").delete_many({"address": address})
+        await _col("mcap_tokens").delete_one({"user_id": _owner(),
+                                             "address": address})
         toast, screen = "Stopped watching", "tokens"
 
     elif what == "home":
@@ -401,7 +416,7 @@ async def _set_target(address: str, target: float) -> None:
     st = await _col("mcap_state").find_one({"address": address}) or {}
     armed = armed_for(target, float(st.get("mcap") or 0))
     await _col("mcap_tokens").update_one(
-        {"address": address},
+        {"user_id": _owner(), "address": address},
         {"$set": {"target": target, "armed": armed},
          "$unset": {"hit_at": "", "hit_mcap": ""}})
 
@@ -414,7 +429,8 @@ async def _full_address(prefix: str) -> str:
     if len(prefix) >= 42:
         return prefix.lower()
     row = await _col("mcap_tokens").find_one(
-        {"address": {"$regex": f"^{prefix}", "$options": "i"}})
+        {"user_id": _owner(),
+         "address": {"$regex": f"^{prefix}", "$options": "i"}})
     return (row or {}).get("address", "")
 
 

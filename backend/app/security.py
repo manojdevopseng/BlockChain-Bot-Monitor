@@ -15,6 +15,11 @@ request came from the UI, from curl, or from a tab an admin left open.
 
 A `users` collection can replace the env accounts later without touching
 routers; everything downstream depends on these dependencies.
+
+Selling the dashboard adds a third question after "who is this" and "may they
+write": is their subscription still running. That one is `require_active`, and
+it is deliberately separate — an expired account must still be able to log in,
+see its own Profile and pay, or there is no way back in.
 """
 
 from __future__ import annotations
@@ -94,6 +99,43 @@ async def require_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return claims
+
+
+async def account(claims: dict = Depends(require_user)) -> dict:
+    """The full account row behind a token, or a stand-in for the env admin.
+
+    The env accounts exist so the box is reachable when the database is not,
+    so they cannot be looked up — they are answered from settings instead, with
+    the same shape every caller downstream expects.
+    """
+    from . import accounts
+    if claims["role"] == ADMIN and claims["username"] == settings.admin_username:
+        return {"username": claims["username"], "role": ADMIN,
+                "email_verified": True, "plan": "admin"}
+    doc = await accounts.by_username(claims["username"])
+    if doc is None:
+        # A token for an account that has since been deleted.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="This account no longer exists")
+    if not doc.get("enabled", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="This account has been disabled")
+    return doc
+
+
+async def require_active(doc: dict = Depends(account)) -> dict:
+    """For the product itself: a live trial or a paid subscription.
+
+    402 rather than 403 on purpose — "you may, but not until you pay" is a
+    different answer from "you may not", and the dashboard shows a paywall for
+    one and an error for the other.
+    """
+    from . import accounts
+    state = accounts.access(doc)
+    if not state.usable:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail=state.reason or "Your access has ended")
+    return doc
 
 
 async def require_admin(claims: dict = Depends(require_user)) -> dict:

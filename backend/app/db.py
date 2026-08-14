@@ -332,7 +332,17 @@ async def ensure_indexes() -> None:
         # Market Cap Alert: one row per token in each, read every cadence. No
         # TTL on either — the list is the user's own and the state is one
         # document per token, so it is bounded by that list rather than by time.
-        ("mcap_tokens",        [("chain", 1), ("address", 1)]),
+        # Every list is read by its owner, so that is the first key.
+        ("mcap_tokens",        [("user_id", 1), ("chain", 1), ("address", 1)]),
+        ("rsi_tokens",         [("user_id", 1)]),
+        ("users",              "email"),
+        ("users",              "verify_token"),
+        ("users",              "reset_token"),
+        ("usage_daily",        [("user_id", 1), ("day", 1)]),
+        ("orders",             [("user_id", 1), ("status", 1)]),
+        ("tickets",            [("user_id", 1), ("status", 1)]),
+        ("v4_pools",           [("chain", 1), ("currency0", 1)]),
+        ("v4_pools",           [("chain", 1), ("currency1", 1)]),
         ("mcap_state",         [("chain", 1), ("address", 1)]),
         ("launchpad_skip",     "handle"),
         ("launchpad_watch",    "handle"),

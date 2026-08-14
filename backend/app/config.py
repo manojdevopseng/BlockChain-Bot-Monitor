@@ -321,6 +321,21 @@ class Settings(BaseSettings):
     # How long candles and readings are kept, like every other panel.
     rsi_retention_days: int = 15
 
+    # ── Public site: accounts, email, billing ────────────────────────────────
+    # Where the dashboard is served from. Every link in an email is built from
+    # this, so a wrong value sends people to a page that does not exist.
+    public_url: str = "http://localhost:3000"
+    # SMTP. Blank host = not configured: nothing is sent and every message is
+    # written to the log with its link, so sign-up still works while the mail
+    # provider is being set up.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    # Where a new order or a support ticket is emailed. Blank = SMTP_FROM.
+    admin_email: str = ""
+
     # ── Market Cap Alert ─────────────────────────────────────────────────────
     # Its own endpoints again, two per chain, so a fifteen-second market cap
     # loop cannot spend the RSI tracker's rate limit. Blank borrows RSI's, and

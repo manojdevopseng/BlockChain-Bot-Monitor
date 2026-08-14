@@ -8,6 +8,15 @@ there is one copy of the answer.
 Nothing is added on its own and nothing is dropped on its own either: a token
 sits here until you remove it, target and all, which is the difference between
 this and every other panel in the app.
+
+Every row belongs to somebody. `user_id` is the account's username and every
+query here carries it, so one account cannot see, edit or delete another's
+list — the filter is in the query rather than in the response, because a
+filtered response is one forgotten line away from leaking the lot.
+
+The reading itself (`mcap_state`) is deliberately NOT per account: a market cap
+is a fact about a token, so twenty accounts watching the same one share a
+single read and a single row.
 """
 
 from __future__ import annotations
@@ -15,9 +24,9 @@ from __future__ import annotations
 import re
 import time
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from .. import db, registry
+from .. import accounts, db, registry, security
 from ..scanners import scfg
 from ..scanners.mcap_price import CHAIN_LABELS, chains
 from ..scanners.mcap_tracker import (CADENCES, DEFAULT_CADENCE, armed_for,
@@ -68,31 +77,73 @@ async def mcap_chains():
 
 
 @router.get("/settings")
-async def get_settings():
-    doc = await db.get_collection("mcap_settings").find_one({"_id": "mcap"}) or {}
+async def get_settings(owner: dict = Depends(security.account)):
+    doc = await _settings_doc(owner)
     enabled = await registry.enabled_map()
+    plan = accounts.plan_of(owner)
     return {
-        "cadence": str(doc.get("cadence", DEFAULT_CADENCE)),
-        "cadences": list(CADENCES),
+        "cadence": str(doc.get("cadence", _default_cadence(owner))),
+        # Only the cadences this plan may pick. A trial sitting on 15s would
+        # cost exactly what a paid account costs.
+        "cadences": [c for c, secs in CADENCES.items()
+                     if secs >= plan.min_cadence],
         "alert_chat_set": bool(scfg.MCAP_ALERT_CHAT_ID),
         "enabled": bool(enabled.get("mcap_tracker", True)),
     }
 
 
 @router.patch("/settings")
-async def set_settings(payload: dict = Body(...)):
+async def set_settings(payload: dict = Body(...),
+                       owner: dict = Depends(security.require_active)):
     if "cadence" not in payload:
         raise HTTPException(400, "nothing to change")
     cadence = str(payload["cadence"])
     if cadence not in CADENCES:
         raise HTTPException(400, f"cadence must be one of {', '.join(CADENCES)}")
+    plan = accounts.plan_of(owner)
+    if CADENCES[cadence] < plan.min_cadence:
+        raise HTTPException(
+            402, f"The {plan.label} plan checks every {plan.min_cadence}s at "
+                 f"the fastest. A paid plan checks every 15s.")
     await db.get_collection("mcap_settings").update_one(
-        {"_id": "mcap"}, {"$set": {"cadence": cadence}}, upsert=True)
-    return await get_settings()
+        {"_id": _settings_id(owner)},
+        {"$set": {"cadence": cadence, "user_id": owner["username"]}},
+        upsert=True)
+    # Every row this account owns moves with it, because the worker reads the
+    # cadence off the row rather than looking the account up mid-pass.
+    await db.get_collection("mcap_tokens").update_many(
+        {"user_id": owner["username"]},
+        {"$set": {"cadence": CADENCES[cadence]}})
+    return await get_settings(owner)
+
+
+def _settings_id(owner: dict) -> str:
+    return f"mcap:{owner.get('username', '')}"
+
+
+async def _settings_doc(owner: dict) -> dict:
+    return await db.get_collection("mcap_settings").find_one(
+        {"_id": _settings_id(owner)}) or {}
+
+
+def _default_cadence(owner: dict) -> str:
+    """The fastest cadence this plan may have, as its starting point."""
+    plan = accounts.plan_of(owner)
+    for name, secs in CADENCES.items():
+        if secs >= plan.min_cadence:
+            return name
+    return DEFAULT_CADENCE
+
+
+def _cadence_for(owner: dict) -> int:
+    """Seconds between checks for a row this account owns."""
+    plan = accounts.plan_of(owner)
+    return max(CADENCES[DEFAULT_CADENCE], plan.min_cadence)
 
 
 @router.post("/check")
-async def check(payload: dict = Body(...)):
+async def check(payload: dict = Body(...),
+                owner: dict = Depends(security.require_active)):
     """One market cap, right now, for an address you paste in.
 
     Nothing is stored and nothing is watched: this is the "what is it worth"
@@ -102,6 +153,12 @@ async def check(payload: dict = Body(...)):
     enabled = await registry.enabled_map()
     if not enabled.get("mcap_checker", True):
         raise HTTPException(409, "Market Cap Check is switched off in Settings")
+    plan = accounts.plan_of(owner)
+    used = await accounts.checks_today(owner["username"])
+    if used >= plan.mcap_checks_per_day:
+        raise HTTPException(
+            402, f"That is {used} checks today — the {plan.label} plan allows "
+                 f"{plan.mcap_checks_per_day} a day.")
     chain = str(payload.get("chain") or "").lower()
     if chain not in CHAIN_LABELS:
         raise HTTPException(400, f"unknown chain '{chain}'")
@@ -122,7 +179,11 @@ async def check(payload: dict = Body(...)):
         # is refusing. Both are worth saying out loud.
         raise HTTPException(404, f"no price found for {address} on "
                                  f"{CHAIN_LABELS[chain]} — it may have no pool yet")
-    return {"chain": chain, "chain_label": CHAIN_LABELS[chain], "address": address,
+    # Counted after the answer, so a lookup that could not be read costs
+    # nothing against the allowance.
+    used_now = await accounts.note_check(owner["username"])
+    return {"checks_today": used_now, "checks_allowed": plan.mcap_checks_per_day,
+            "chain": chain, "chain_label": CHAIN_LABELS[chain], "address": address,
             "symbol": symbol, "name": name, "mcap": reading.mcap,
             "price_usd": reading.price_usd, "price_native": reading.price_native,
             "supply": reading.supply, "source": reading.source,
@@ -132,9 +193,12 @@ async def check(payload: dict = Body(...)):
 
 @router.get("/tokens")
 async def tokens(chain: str = Query("all"), q: str | None = None,
-                 date: str | None = None, limit: int = Query(200, le=1000)):
+                 date: str | None = None, limit: int = Query(200, le=1000),
+                 owner: dict = Depends(security.require_active)):
     """Every token you added, with its latest market cap and its target."""
-    flt: dict = {} if chain == "all" else {"chain": chain}
+    flt: dict = {"user_id": owner["username"]}
+    if chain != "all":
+        flt["chain"] = chain
     rows = await db.get_collection("mcap_tokens").find(flt) \
                    .sort("added_at", -1).to_list(1000)
 
@@ -169,9 +233,15 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
 
 
 @router.post("/tokens")
-async def add_token(payload: dict = Body(...)):
+async def add_token(payload: dict = Body(...),
+                    owner: dict = Depends(security.require_active)):
     """Watch a token for a market cap. The target is the whole point, so it is
     required — a row with no target would just be a price ticker."""
+    room = await accounts.check_room(owner, "mcap")
+    if not room.room:
+        raise HTTPException(
+            402, f"Your plan watches {room.limit} tokens and you are watching "
+                 f"{room.used}. Remove one, or move up a plan.")
     chain = str(payload.get("chain") or "").lower()
     if chain not in CHAIN_LABELS:
         raise HTTPException(400, f"unknown chain '{chain}'")
@@ -188,9 +258,13 @@ async def add_token(payload: dict = Body(...)):
     now = time.time()
     armed = armed_for(target, current)
     await db.get_collection("mcap_tokens").update_one(
-        {"chain": chain, "address": address},
-        {"$set": {"chain": chain, "address": address, "target": target,
+        {"user_id": owner["username"], "chain": chain, "address": address},
+        {"$set": {"user_id": owner["username"],
+                  "chain": chain, "address": address, "target": target,
                   "armed": armed, "symbol": symbol, "name": name,
+                  # Read off the row by the worker, so a pass never has to look
+                  # an account up. Floored by what the plan allows.
+                  "cadence": _cadence_for(owner),
                   "enabled": True, "added_at": now, "day": ist_date_str(now)},
          # A re-added token starts armed again rather than inheriting the hit
          # it fired for its previous target.
@@ -201,9 +275,11 @@ async def add_token(payload: dict = Body(...)):
 
 
 @router.patch("/tokens/{address}")
-async def edit_token(address: str, payload: dict = Body(...)):
+async def edit_token(address: str, payload: dict = Body(...),
+                     owner: dict = Depends(security.require_active)):
     """Change the target, or switch this one off without losing it."""
-    row = await db.get_collection("mcap_tokens").find_one({"address": address})
+    row = await db.get_collection("mcap_tokens").find_one(
+        {"user_id": owner["username"], "address": address})
     if row is None:
         raise HTTPException(404, f"{address} is not being watched")
     update: dict = {}
@@ -223,16 +299,20 @@ async def edit_token(address: str, payload: dict = Body(...)):
     ops: dict = {"$set": update}
     if unset:
         ops["$unset"] = unset
-    await db.get_collection("mcap_tokens").update_one({"address": address}, ops)
+    await db.get_collection("mcap_tokens").update_one(
+        {"user_id": owner["username"], "address": address}, ops)
     return {"address": address, **update}
 
 
 @router.delete("/tokens/{address}")
-async def remove_token(address: str):
-    res = await db.get_collection("mcap_tokens").delete_one({"address": address})
+async def remove_token(address: str,
+                       owner: dict = Depends(security.require_active)):
+    res = await db.get_collection("mcap_tokens").delete_one(
+        {"user_id": owner["username"], "address": address})
     if not res.deleted_count:
         raise HTTPException(404, f"{address} is not being watched")
-    await db.get_collection("mcap_state").delete_many({"address": address})
+    # The reading stays: somebody else may still be watching this token, and
+    # nobody paying for it costs one small document until it is read again.
     return {"address": address, "removed": True}
 
 
@@ -246,21 +326,23 @@ async def _arm(chain: str, address: str, target: float) -> str:
 
 
 @router.get("/dates")
-async def dates(chain: str = Query("all")):
+async def dates(chain: str = Query("all"),
+                owner: dict = Depends(security.require_active)):
     from datetime import datetime
-    flt = {} if chain == "all" else {"chain": chain}
+    flt: dict = {} if chain == "all" else {"chain": chain}
     days = [d for d in await db.get_collection("mcap_state").distinct("day", flt) if d]
     return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"),
                             reverse=True)}
 
 
 @router.get("/stats")
-async def stats():
+async def stats(owner: dict = Depends(security.require_active)):
     col = db.get_collection("mcap_tokens")
+    mine = {"user_id": owner["username"]}
     return {
-        "total": await col.count_documents({}),
-        "armed": await col.count_documents({"hit_at": {"$exists": False},
+        "total": await col.count_documents(mine),
+        "armed": await col.count_documents({**mine, "hit_at": {"$exists": False},
                                             "target": {"$gt": 0}}),
-        "hit": await col.count_documents({"hit_at": {"$exists": True}}),
+        "hit": await col.count_documents({**mine, "hit_at": {"$exists": True}}),
         "chains": len([c for c in chains()]) + 1,
     }
