@@ -164,6 +164,12 @@ async def reconcile() -> None:
     # else has, and stopping RSI must not stop it.
     if bool(enabled.get("mcap_tracker")):
         want.add("mcap")
+    # Only when there is somewhere for money to land: a watcher with no
+    # receiving address would poll four chains to learn nothing.
+    if bool(enabled.get("payments")):
+        from . import payments as pay_cfg
+        if pay_cfg.available():
+            want.add("pay")
     if want_fwd:
         want.add("fwd")
     if want_cmd:
@@ -178,7 +184,7 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "fwd", "cmd"):
+    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fwd", "cmd"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -291,6 +297,13 @@ async def _start_worker(name: str) -> None:
         inst.apply_toggles(await registry.enabled_map())
         _instances["rsi"] = inst
         _tasks["rsi"] = asyncio.create_task(inst.run(), name="rsi-tracker")
+        return
+
+    if name == "pay":
+        from .scanners.payment_watcher import PaymentWatcher
+        inst = PaymentWatcher()
+        _instances["pay"] = inst
+        _tasks["pay"] = asyncio.create_task(inst.run(), name="payment-watcher")
         return
 
     if name == "mcap":
@@ -437,6 +450,7 @@ def status() -> dict[str, str]:
         "rbhx_monitor": "running" if _worker_alive("rbhx") else "stopped",
         "rsi_tracker": "running" if _worker_alive("rsi") else "stopped",
         "mcap_tracker": "running" if _worker_alive("mcap") else "stopped",
+        "payments": "running" if _worker_alive("pay") else "stopped",
         "forwarder": "running" if _worker_alive("fwd") else "stopped",
         "bot_commands": "running" if _worker_alive("cmd") else "stopped",
     }
@@ -493,6 +507,7 @@ _DEPENDS_ON = {
     "mcap_rpc_eth":           "mcap",
     "mcap_rpc_bsc":           "mcap",
     "mcap_rpc_sol":           "mcap",
+    "payments":               "pay",
     "rbhx_monitor":           "rbhx",
     # Here because it can now be the only reason the worker is running: with
     # the X Monitor off, switching this on has to start it rather than wait for

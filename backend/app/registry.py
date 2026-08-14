@@ -282,6 +282,13 @@ DEFAULT_SERVICES: list[dict] = [
     {"id": "sol_onchain_discovery", "category": SOL, "group": "On-Chain Discovery",
      "label": "SOL On-Chain Discovery (WebSocket)", "chain": "sol", "enabled": True},
 
+    # ── Billing ────────────────────────────────────────────────────────────
+    # Watches the receiving addresses and starts a plan when its exact figure
+    # arrives. Off, orders can still be created and paid — they just wait for
+    # an operator to settle them by hand, which is the safe way round.
+    {"id": "payments", "category": BOT, "label": "Payment watcher",
+     "chain": None, "enabled": True},
+
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth", "enabled": True},
     {"id": "chain_rbh", "category": CHAIN, "label": "RBH", "chain": "rbh", "enabled": True},

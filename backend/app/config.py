@@ -336,6 +336,21 @@ class Settings(BaseSettings):
     # Where a new order or a support ticket is emailed. Blank = SMTP_FROM.
     admin_email: str = ""
 
+    # ── Taking payment (USDT / USDC) ─────────────────────────────────────────
+    # One receiving address per chain — yours, not ours, and never a key. A
+    # blank address closes that rail: it disappears from the checkout instead
+    # of taking money nobody can see.
+    pay_eth_address: str = ""
+    pay_bsc_address: str = ""
+    pay_sol_address: str = ""
+    pay_tron_address: str = ""
+    # Tron has no RPC of ours to read, so its balance comes from TronGrid. The
+    # key is optional at this volume and only raises the rate limit.
+    tron_api_url: str = "https://api.trongrid.io"
+    tron_api_key: str = ""
+    # Where "payment received" and "unmatched payment" go. Blank = ALERT_CHAT_ID.
+    pay_alert_chat_id: str = ""
+
     # ── Market Cap Alert ─────────────────────────────────────────────────────
     # Its own endpoints again, two per chain, so a fifteen-second market cap
     # loop cannot spend the RSI tracker's rate limit. Blank borrows RSI's, and

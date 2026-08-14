@@ -22,7 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db, migrations, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
-    account, ai_agent as ai_router, alerts, analytics, auth, chains, chat_lookup,
+    account, ai_agent as ai_router, alerts, analytics, auth, billing, chains,
+    chat_lookup,
     commands, dashboard, forwarder, launchpad, logs, mcap,
     outcomes as outcomes_router, rbhx, rpc, rsi,
     settings as settings_router, system, tokens, users as users_router,
@@ -157,6 +158,9 @@ app.add_middleware(
 #             from a customer rather than greyed out, and the rule is here so
 #             the hiding is a courtesy and not the control.
 _PRODUCT = (rsi, mcap)
+# Billing is its own rule: an account with an ended subscription must be able to
+# buy one, so this needs a login and nothing more.
+_ACCOUNT = (billing,)
 _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
            chat_lookup, outcomes_router, ai_router, rbhx, launchpad)
 _OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router)
@@ -170,6 +174,8 @@ app.include_router(account.router)
 # routers rather than listing endpoints means a new POST is covered the day it
 # is written. What a `user` may not even read — the .env credentials — is
 # guarded at its own endpoint, because it is a GET.
+for r in _ACCOUNT:
+    app.include_router(r.router, dependencies=[Depends(security.require_user)])
 for r in _PRODUCT:
     app.include_router(r.router,
                        dependencies=[Depends(security.require_customer)])

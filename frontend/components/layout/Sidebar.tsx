@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, User, Users, X } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, Terminal, User, Users, X } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
@@ -21,6 +21,7 @@ const NAV = [
   // one — paying is how it stops being expired.
   { href: "/profile", label: "Profile", icon: User },
   { href: "/plan", label: "Plan", icon: BadgeCheck },
+  { href: "/orders", label: "Orders", icon: Receipt },
   { href: "/chains", label: "Chains", icon: Link2 },
   { hideFromUser: true, href: "/logs", label: "Logs", icon: ScrollText },
   { hideFromUser: true, href: "/settings", label: "Settings", icon: Settings },
