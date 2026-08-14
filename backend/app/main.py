@@ -22,7 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db, migrations, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
-    account, ai_agent as ai_router, alerts, analytics, auth, billing, chains,
+    account, admin as admin_router, ai_agent as ai_router, alerts, analytics,
+    auth, billing, chains,
     chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
     outcomes as outcomes_router, public, rbhx, rpc, rsi,
@@ -166,7 +167,8 @@ _PRODUCT = (rsi, mcap)
 _ACCOUNT = (billing, support)
 _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
            chat_lookup, outcomes_router, ai_router, rbhx, launchpad)
-_OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router)
+_OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router,
+             admin_router)
 
 app.include_router(auth.router)
 # Sign-up, email confirmation and password reset cannot sit behind a login,

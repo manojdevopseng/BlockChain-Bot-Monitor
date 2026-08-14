@@ -351,6 +351,8 @@ async def ensure_indexes() -> None:
         ("orders",             [("status", 1), ("asset_id", 1)]),
         ("payment_rails",      "asset_id"),
         ("contact_messages",   [("handled", 1), ("at", -1)]),
+        ("admin_audit",        [("at", -1)]),
+        ("payments_unmatched", [("settled", 1), ("at", -1)]),
         ("tickets",            [("user_id", 1), ("status", 1)]),
         ("tickets",            "id"),
         # The operator's queue: urgent first, then oldest.

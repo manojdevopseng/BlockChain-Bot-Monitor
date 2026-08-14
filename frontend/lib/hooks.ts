@@ -17,8 +17,8 @@ import { useApi } from "./api";
 // from the server if they type the path — the hiding is a courtesy, the rule
 // is in main.py. Commands is not here: it is readable by everyone and writable
 // by nobody but an admin, which the server enforces per method.
-export const ADMIN_ONLY_PATHS = ["/forwarder", "/settings", "/users", "/rpc",
-                                 "/system", "/logs"] as const;
+export const ADMIN_ONLY_PATHS = ["/admin", "/forwarder", "/settings", "/users",
+                                 "/rpc", "/system", "/logs"] as const;
 
 const ROLE_KEY = "role";
 
