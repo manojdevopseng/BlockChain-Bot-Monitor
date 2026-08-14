@@ -39,7 +39,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
             </span>
             <span className="text-sm font-semibold text-text">Sightline</span>
             <span className="hidden text-[11px] text-text-dim sm:inline">
-              four chains, six ways
+              MultiChain Monitor
             </span>
           </Link>
 
