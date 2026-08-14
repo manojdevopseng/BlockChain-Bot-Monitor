@@ -108,11 +108,19 @@ def _qr(data: str) -> str:
         import io
 
         import segno
-        buf = io.StringIO()
+        # BytesIO, not StringIO: segno's SVG writer emits encoded bytes, and a
+        # text buffer raises "string argument expected, got 'bytes'" — which the
+        # except below would have swallowed into a checkout with no QR at all.
+        buf = io.BytesIO()
         segno.make(data, error="m").save(buf, kind="svg", xmldecl=False,
                                          svgclass=None, lineclass=None,
                                          omitsize=True, dark="#e5e7eb",
                                          light=None)
-        return buf.getvalue()
-    except Exception:  # noqa: BLE001
+        return buf.getvalue().decode("utf-8")
+    except Exception as exc:  # noqa: BLE001
+        # Not fatal — an order with an address and an amount is payable by
+        # hand — but say so, because a silently missing QR looks like a design
+        # choice rather than a broken dependency.
+        from ..scanners.slog import get_logger
+        get_logger(__name__).warning(f"[BILLING] QR not drawn: {exc}")
         return ""
