@@ -427,6 +427,14 @@ class TelegramCommands:
             await mcap_panel.pending_address(chat_id, text)
             return
 
+        # One exception before any of the chat rules: a private chat may send
+        # `/start <token>` to connect an account, and that is ALL it may do
+        # there. The token is one-shot and fifteen minutes old at most, so an
+        # unknown person opening a private chat gets nothing but this.
+        if (msg.get("chat") or {}).get("type") == "private":
+            await self._connect_account(msg, text)
+            return
+
         # Commands are answered in one group only, with one exception: the RSI
         # commands also answer in the RSI alert chat, because that is where its
         # alerts land and its settings screen belongs beside them.
@@ -464,6 +472,42 @@ class TelegramCommands:
             log.error(f"[CMD] /{cmd} failed: {exc}")
             ok = False
         await self._record(cmd, ok, time.perf_counter() - started, user_id)
+
+    async def _connect_account(self, msg: dict, text: str) -> None:
+        """`/start <token>` from somebody's own chat with the bot.
+
+        Answers something either way: a person who taps a stale link and hears
+        nothing assumes the product is broken.
+        """
+        from app import notifier, telegram_link
+        chat_id = (msg.get("chat") or {}).get("id")
+        parts = text.split()
+        first = parts[0].lstrip("/").split("@")[0].lower() if parts else ""
+        token = parts[1] if first == "start" and len(parts) > 1 else ""
+        if not token:
+            await notifier.send_to(
+                chat_id,
+                "👋 This bot sends alerts for your dashboard account.\n\n"
+                "Open <b>Profile → Connect Telegram</b> on the site and tap the "
+                "link there — it connects this chat to your account.")
+            return
+        try:
+            doc = await telegram_link.finish(
+                token, chat_id, (msg.get("from") or {}).get("username") or "")
+        except ValueError as exc:
+            await notifier.send_to(chat_id, f"⚠️ {exc}")
+            return
+        if doc is None:
+            await notifier.send_to(
+                chat_id, "⚠️ That link has expired. Ask for a new one on "
+                         "<b>Profile → Connect Telegram</b> — they last fifteen "
+                         "minutes.")
+            return
+        await notifier.send_to(
+            chat_id,
+            f"✅ Connected to <b>{doc.get('username')}</b>.\n"
+            f"Your RSI and Market Cap alerts will arrive here.\n\n"
+            f"<i>You can disconnect any time from your Profile.</i>")
 
     async def _record(self, cmd: str, ok: bool, seconds: float, user_id) -> None:
         """Real usage stats for the dashboard — no invented numbers."""

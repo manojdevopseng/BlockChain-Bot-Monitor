@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from .. import accounts, mailer, security
+from .. import accounts, mailer, notifier, security, telegram_link
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
@@ -146,3 +146,35 @@ async def update_me(payload: dict = Body(...),
     await db.get_collection("users").update_one({"username": doc["username"]},
                                                 {"$set": update})
     return {"updated": sorted(update)}
+
+
+# ── Telegram ─────────────────────────────────────────────────────────────────
+
+@router.post("/telegram/link")
+async def telegram_link_start(doc: dict = Depends(security.require_customer)):
+    """A one-shot link that connects this account to a Telegram chat.
+
+    The token travels in the deep link rather than being typed: opening it
+    sends the bot `/start <token>` from the person's own chat, which is how the
+    chat id arrives without anybody having to look one up.
+    """
+    plan = accounts.plan_of(doc)
+    if not plan.telegram_alerts:
+        raise HTTPException(
+            402, f"The {plan.label} plan shows alerts on the dashboard. "
+                 f"Telegram alerts come with a paid plan.")
+    bot = await notifier.bot_username()
+    if not bot:
+        raise HTTPException(503, "The Telegram bot is not reachable right now")
+    token = await telegram_link.begin(doc["username"])
+    return {"url": f"https://t.me/{bot}?start={token}",
+            "bot": bot,
+            "expires_in": int(telegram_link.TOKEN_TTL),
+            "message": "Open the link and press Start. Alerts will arrive in "
+                       "that chat."}
+
+
+@router.delete("/telegram/link")
+async def telegram_link_stop(doc: dict = Depends(security.require_customer)):
+    removed = await telegram_link.unlink(doc["username"])
+    return {"unlinked": removed}

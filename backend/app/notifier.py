@@ -42,6 +42,29 @@ def enabled() -> bool:
     return bool(settings.telegram_bot_token and settings.alert_chat_id)
 
 
+# The bot's own @name, asked once and kept. Needed to build the connect link a
+# customer taps — and asked rather than configured, because a name typed into
+# .env by hand is a name that will one day be wrong.
+_bot_username: str = ""
+
+
+async def bot_username() -> str:
+    """The bot's @name without the @, or "" if it cannot be asked."""
+    global _bot_username
+    if _bot_username or not settings.telegram_bot_token:
+        return _bot_username
+    try:
+        session = await _session_get()
+        async with session.get(
+                f"{TELEGRAM_API}/bot{settings.telegram_bot_token}/getMe",
+                timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            body = await resp.json(content_type=None)
+        _bot_username = str((body.get("result") or {}).get("username") or "")
+    except Exception as exc:  # noqa: BLE001
+        _safe_print(f"[notifier] getMe failed: {exc}")
+    return _bot_username
+
+
 def _safe_print(msg: str) -> None:
     """Console-safe print: Windows consoles are cp1252 and raise on emoji."""
     try:

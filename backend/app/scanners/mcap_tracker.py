@@ -318,7 +318,18 @@ class McapTracker:
         await self._alert(token, reading, target, armed)
 
     async def _alert(self, token: dict, reading, target: float, armed: str) -> None:
-        if not self._on("mcap_telegram") or not config.MCAP_ALERT_CHAT_ID:
+        if not self._on("mcap_telegram"):
+            return
+        # Whose alert this is decides where it goes: an account that connected
+        # its own chat gets it there, the operator falls back to the group, and
+        # an account on a plan without Telegram gets it on the dashboard only.
+        # Never the group as a fallback for a customer — that is a leak, not a
+        # fallback.
+        from app import telegram_link
+        chat_id, why = await telegram_link.alert_target(
+            token.get("user_id") or "", config.MCAP_ALERT_CHAT_ID)
+        if not chat_id:
+            log.debug(f"[MCAP] alert not sent for {token.get('symbol')}: {why}")
             return
         import html
         chain = token.get("chain", "")
@@ -337,5 +348,5 @@ class McapTracker:
             + f"\n<code>{address}</code>"
         )
         buttons = [b for b in (("📊 GMGN", gmgn_url(chain, address)),) if b[1]]
-        if not await notifier.send_to(config.MCAP_ALERT_CHAT_ID, text, buttons=buttons):
+        if not await notifier.send_to(chat_id, text, buttons=buttons):
             log.warning(f"[MCAP] alert not delivered for {token.get('symbol')}")

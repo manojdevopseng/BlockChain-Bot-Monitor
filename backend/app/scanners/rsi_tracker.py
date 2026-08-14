@@ -351,7 +351,16 @@ class RsiTracker:
 
     async def _alert(self, token: dict, value: float, turn: str,
                      price: Optional[float]) -> None:
-        if not self._on("rsi_telegram") or not config.RSI_ALERT_CHAT_ID:
+        if not self._on("rsi_telegram"):
+            return
+        # Same rule as the Market Cap watcher: the owner's own chat, the
+        # operator's group for the operator, and nothing at all for an account
+        # whose plan has no Telegram alerts.
+        from app import telegram_link
+        chat_id, why = await telegram_link.alert_target(
+            token.get("user_id") or "", config.RSI_ALERT_CHAT_ID)
+        if not chat_id:
+            log.debug(f"[RSI] alert not sent for {token.get('symbol')}: {why}")
             return
         import html
         chain = token.get("chain", "")
@@ -370,7 +379,7 @@ class RsiTracker:
             + f"\n<code>{addr}</code>"
         )
         buttons = [b for b in (("📊 GMGN", gmgn_url(chain, addr)),) if b[1]]
-        if not await notifier.send_to(config.RSI_ALERT_CHAT_ID, text, buttons=buttons):
+        if not await notifier.send_to(chat_id, text, buttons=buttons):
             log.warning(f"[RSI] alert not delivered for {token.get('symbol')}")
 
 

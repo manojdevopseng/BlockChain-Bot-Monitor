@@ -344,6 +344,8 @@ async def ensure_indexes() -> None:
         ("users",              "verify_token"),
         ("users",              "reset_token"),
         ("usage_daily",        [("user_id", 1), ("day", 1)]),
+        ("telegram_links",     "token"),
+        ("users",              "telegram_chat_id"),
         ("orders",             [("user_id", 1), ("status", 1)]),
         ("tickets",            [("user_id", 1), ("status", 1)]),
         ("v4_pools",           [("chain", 1), ("currency0", 1)]),
