@@ -987,8 +987,13 @@ class RbhXMonitor:
         if not self._on("rbhx_telegram") or not config.DEST_RBH_X_MONITOR:
             return
         import html
+        # Same line as the Launchpad Monitor's, because a launch that carries an
+        # account is alerted here *instead of* there — leaving it out would drop
+        # the marking on exactly the launches that carry both.
+        strong = _strong_dev_buy(row)
         text = (
             ("👁 <b>WATCHED ACCOUNT</b>\n" if row["watched"] else "")
+            + (f"🟢 <b>Strong Signal</b> — dev bought {strong:.3f} Ξ\n" if strong else "")
             + f"🔎 <b>ROBINHOOD × TOKEN</b>\n"
             f"➖➖➖➖➖➖➖➖➖➖\n"
             f"🪙 <b>{html.escape(row['symbol'])}</b>"
@@ -1023,6 +1028,18 @@ def _mentions_address(texts: list[str], address: str) -> bool:
                for text in texts for m in _ADDRESS_RE.finditer(text or ""))
 
 
+def _strong_dev_buy(row: dict) -> float:
+    """The dev buy on this row, when it is big enough to be worth saying twice.
+
+    Returns 0.0 otherwise, so callers can write `if strong:` and print the
+    figure from the same call. Reads the threshold every time rather than
+    closing over it, because it is a setting.
+    """
+    dev = row.get("dev_buy_eth")
+    floor = config.RBHX_DEV_BUY_STRONG_ETH
+    return float(dev) if floor > 0 and dev and float(dev) > floor else 0.0
+
+
 def _pad_alert_text(row: dict) -> str:
     """A Launchpad Monitor alert, shaped like the X Monitor's.
 
@@ -1049,8 +1066,13 @@ def _pad_alert_text(row: dict) -> str:
     else:
         who = "👤 no X account named\n"
     dev = row.get("dev_buy_eth")
+    strong = _strong_dev_buy(row)
     return (
         ("🟢 <b>Keyword Matched</b>\n" if matched else "")
+        # Up here with the other headings rather than down in the body: it is
+        # the reason to stop scrolling, and the amount is the whole of it —
+        # which is why the ordinary dev-buy line below stands down for it.
+        + (f"🟢 <b>Strong Signal</b> — dev bought {strong:.3f} Ξ\n" if strong else "")
         + (headline + "\n" if headline
            else "👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
         + f"🚀 <b>{pad.upper()} LAUNCH</b>\n"
@@ -1058,7 +1080,7 @@ def _pad_alert_text(row: dict) -> str:
         f"🪙 <b>{html.escape(row.get('symbol') or '?')}</b>"
         + (f" — {html.escape(row['name'])}" if row.get("name") else "") + "\n"
         + who
-        + (f"💰 dev bought {dev:.3f} Ξ\n" if dev else "")
+        + (f"💰 dev bought {dev:.3f} Ξ\n" if dev and not strong else "")
         + (f"\n<blockquote>{html.escape(row['excerpt'][:300])}</blockquote>\n"
            if row.get("excerpt") else "")
         + (f"<b>Text Matched KW:</b> {html.escape(matched)}\n" if matched else "")

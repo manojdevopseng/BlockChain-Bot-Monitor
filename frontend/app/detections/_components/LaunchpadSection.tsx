@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
 import { HandleList } from "@/components/HandleList";
-import { fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
+import { cn, fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 
 /* Robinhood Launchpad Monitor.
  *
@@ -127,6 +127,11 @@ export function LaunchpadSection() {
   const { data: kwData } = useApi<any>("/api/launchpad/keywords");
   const keywords: string[] = kwData?.items ?? [];
   const items = data?.items ?? [];
+  // The line above which a deployer is putting real money into their own
+  // launch. Comes from the backend rather than being typed here, so the
+  // highlighted rows and the 🟢 Telegram alerts are the same set — 0 while the
+  // figure is still loading, which marks nothing.
+  const strongAt: number = stats?.dev_buy_strong_eth ?? 0;
 
   return (
     <CollapsibleSection
@@ -165,6 +170,12 @@ export function LaunchpadSection() {
         {stats?.dev_buy_max_eth ? (
           <> {" "}A launch whose deployer buys more than{" "}
             <b>{stats.dev_buy_max_eth} Ξ</b> of it is not recorded at all.</>
+        ) : null}
+        {strongAt > 0 ? (
+          <> {" "}<span className="text-accent-green">
+            A dev buy over <b>{strongAt} Ξ</b> is a Strong Signal — the row is
+            marked here and the alert says so.
+          </span></>
         ) : null}
         {offPads.length > 0 && (
           <> {" "}<span className="text-accent-amber">
@@ -217,8 +228,17 @@ export function LaunchpadSection() {
                   : pads.length === 0 ? "No launchpad configured — set PONS_FACTORIES / FLAP_PORTALS"
                   : "No launches caught yet"}
               </td></tr>
-            ) : items.map((r: any, i: number) => (
-              <tr key={rowKey(r, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
+            ) : items.map((r: any, i: number) => {
+              const strong = strongAt > 0 && r.dev_buy_eth > strongAt;
+              return (
+              <tr key={rowKey(r, i)}
+                  className={cn(
+                    "border-b border-border-soft align-top hover:bg-bg-hover/40",
+                    // A tint plus a rail down the left edge: the tint alone is
+                    // easy to miss when every other row is striped by hover,
+                    // and the rail survives at a glance on a long page.
+                    strong && "bg-accent-green/10 shadow-[inset_3px_0_0_0_rgb(var(--accent-green))] hover:bg-accent-green/[0.15]",
+                  )}>
                 <td className="px-3 py-3">
                   <Badge variant={PAD_TONE[r.launchpad] || "gray"}>
                     {r.launchpad_label || r.launchpad || "?"}
@@ -277,9 +297,14 @@ export function LaunchpadSection() {
                   {r.dev_buy_eth == null ? (
                     <span className="text-xs text-text-dim">—</span>
                   ) : (
-                    <span className={`font-mono text-xs ${r.dev_buy_eth > 0 ? "text-accent-amber" : "text-text-dim"}`}
-                          title={r.dev_wallet || ""}>
-                      {r.dev_buy_eth.toFixed(3)} Ξ
+                    <span className={cn("font-mono text-xs",
+                                        strong ? "font-semibold text-accent-green"
+                                          : r.dev_buy_eth > 0 ? "text-accent-amber"
+                                          : "text-text-dim")}
+                          title={strong
+                            ? `Strong Signal — over ${strongAt} Ξ${r.dev_wallet ? `\n${r.dev_wallet}` : ""}`
+                            : r.dev_wallet || ""}>
+                      {strong && "🟢 "}{r.dev_buy_eth.toFixed(3)} Ξ
                     </span>
                   )}
                 </td>
@@ -313,7 +338,8 @@ export function LaunchpadSection() {
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </TableScroll>

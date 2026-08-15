@@ -390,6 +390,14 @@ class Settings(BaseSettings):
     # measured launch came at +30s, so this has to outlast that; three minutes
     # is where it stops being worth a held subscription.
     rbhx_dev_buy_window: int = 180
+    # The other end of the same number. Above this the deployer has put real
+    # money into their own launch, which is the one thing on this panel that
+    # costs the person doing it something — so it is called out rather than
+    # left as a figure in a column: the row is highlighted and the Telegram
+    # alert says so.
+    #
+    # 0 turns the marking off; every launch still lands as before.
+    rbhx_dev_buy_strong_eth: float = 0.199
 
     # ── Chain contract addresses (protocol constants — env-overridable) ──
     eth_v2_factory: str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
