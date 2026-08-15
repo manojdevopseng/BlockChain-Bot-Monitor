@@ -589,7 +589,7 @@ class TelegramCommands:
     async def _msg_help(self) -> str:
         enabled = await self._enabled_map()
         lines = [
-            "🤖 <b>Sightline</b>\n",
+            "🤖 <b>SightLine</b>\n",
             "SOL→ETH and SOL→Robinhood cross-chain moves, premium Telegram "
             "calls, and high-gas early buys on Ethereum.\n",
             "<b>Commands:</b>",

@@ -52,7 +52,7 @@ export function StatusBar({ backend }: { backend?: string }) {
         <span>
           DB: <span className={cn(backend ? "text-text" : "text-text-dim")}>{backend || "—"}</span>
         </span>
-        <span className="hidden sm:inline">Sightline v0.1.0</span>
+        <span className="hidden sm:inline">SightLine v0.1.0</span>
       </div>
     </footer>
   );

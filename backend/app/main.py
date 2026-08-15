@@ -1,4 +1,4 @@
-"""Sightline — FastAPI application entry point.
+"""SightLine — FastAPI application entry point.
 
 Run (from backend/):
     uvicorn app.main:app --reload --port 8000
@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
         await db.close()
 
 
-app = FastAPI(title="Sightline API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SightLine API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

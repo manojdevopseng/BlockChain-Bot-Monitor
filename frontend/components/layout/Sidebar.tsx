@@ -77,7 +77,7 @@ export function Sidebar({
             <Cpu size={20} />
           </div>
           <div className={cn("min-w-0", isCollapsed && "lg:hidden")}>
-            <div className="truncate text-sm font-bold leading-tight text-accent-green">Sightline</div>
+            <div className="truncate text-sm font-bold leading-tight text-accent-green">SightLine</div>
             <div className="truncate text-[11px] leading-tight text-text-muted">MultiChain Monitor</div>
           </div>
           {/* Close (mobile only) */}

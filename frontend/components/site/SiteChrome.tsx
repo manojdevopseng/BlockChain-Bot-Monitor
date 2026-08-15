@@ -37,7 +37,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand/20 text-brand">
               <Cpu size={17} />
             </span>
-            <span className="text-sm font-semibold text-text">Sightline</span>
+            <span className="text-sm font-semibold text-text">SightLine</span>
             <span className="hidden text-[11px] text-text-dim sm:inline">
               MultiChain Monitor
             </span>

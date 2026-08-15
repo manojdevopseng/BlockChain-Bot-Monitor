@@ -73,7 +73,7 @@ async def send_verification(to: str, username: str, token: str) -> bool:
         to, "Confirm your email",
         f"Hi {username},\n\n"
         f"Confirm your email address to start your 7-day trial on "
-        f"Sightline:\n\n{link}\n\n"
+        f"SightLine:\n\n{link}\n\n"
         f"If you did not sign up, ignore this message — nothing happens until "
         f"that link is opened.\n")
 
@@ -101,7 +101,7 @@ async def send_order_activated(to: str, username: str, order: dict) -> bool:
     return await send(
         to, f"You're in — {order.get('plan_label', '')} active",
         f"Hi {username},\n\n"
-        f"Your Sightline {order.get('plan_label', '')} plan is active until "
+        f"Your SightLine {order.get('plan_label', '')} plan is active until "
         f"{order.get('expires_on', '')}.\n\n"
         f"Connect Telegram from your Profile to get alerts on your phone:\n\n"
         f"{_base_url()}/app/profile\n")
