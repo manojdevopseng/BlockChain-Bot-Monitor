@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
 import { HandleList } from "@/components/HandleList";
+import { NoteButton, SectionNote, useSectionNote } from "@/components/SectionNote";
 import { cn, fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 
 /* Robinhood Launchpad Monitor.
@@ -132,6 +133,7 @@ export function LaunchpadSection() {
   // highlighted rows and the 🟢 Telegram alerts are the same set — 0 while the
   // figure is still loading, which marks nothing.
   const strongAt: number = stats?.dev_buy_strong_eth ?? 0;
+  const note = useSectionNote("launchpad");
 
   return (
     <CollapsibleSection
@@ -160,9 +162,20 @@ export function LaunchpadSection() {
                 onClick={() => setLists((v) => !v)} title="Skip and watch lists">
           <Eye size={13} /> Lists
         </Button>
+        <NoteButton {...note} />
       </>}
     >
-      <p className="mb-3 text-xs text-text-dim">
+      {/* Stays out of the note: a launchpad being off is not a description of
+          the section, it is the reason rows have stopped arriving from one —
+          and it only appears when something actually is off. */}
+      {offPads.length > 0 && (
+        <p className="mb-3 text-xs text-accent-amber">
+          {offPads.map((p) => p.label).join(" and ")} switched off in Settings —
+          no new launches from {offPads.length > 1 ? "them" : "it"}.
+        </p>
+      )}
+
+      <SectionNote open={note.open}>
         Every launch from a watched launchpad, caught on its own mint event —
         seconds after the token is created, not when it graduates to a pool.
         Each launchpad is read its own way, because each keeps its socials
@@ -177,18 +190,12 @@ export function LaunchpadSection() {
             marked here and the alert says so.
           </span></>
         ) : null}
-        {offPads.length > 0 && (
-          <> {" "}<span className="text-accent-amber">
-            {offPads.map((p) => p.label).join(" and ")} switched off in Settings —
-            no new launches from {offPads.length > 1 ? "them" : "it"}.
-          </span></>
-        )}
         {stats?.with_x != null && stats?.total ? (
           <> {" "}<span className="text-text-muted">
             {fmtNum(stats.with_x)} of {fmtNum(stats.total)} carry an X account.
           </span></>
         ) : null}
-      </p>
+      </SectionNote>
 
       {/* This panel's own two lists — the same widget the X Monitor uses, over
           its own entries. Adding an account here does not touch that one. */}
