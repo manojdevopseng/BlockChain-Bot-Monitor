@@ -98,7 +98,10 @@ class Settings(BaseSettings):
     # Hard cap on how long one token is watched, counted from detection.
     monitor_window_seconds: int = 14400      # 4h
     # Shorter window started by the first buy; whichever timer fires first wins.
-    first_buy_window_seconds: int = 240
+    # Half an hour rather than the four minutes this started at: the first buy
+    # is when a token starts being traded, not when it stops, and the gas fees
+    # worth seeing kept landing after the watch had already been dropped.
+    first_buy_window_seconds: int = 1800
     # Max tokens watched for swaps at once (each holds a WS subscription).
     max_gas_monitors: int = 150
 
