@@ -309,6 +309,7 @@ FLAP_PORTALS   = _addr_list(settings.flap_portals)
 LAUNCHPAD_RETENTION_DAYS = settings.launchpad_retention_days
 RBHX_DEV_BUY_MAX_ETH = settings.rbhx_dev_buy_max_eth
 RBHX_DEV_BUY_WINDOW  = settings.rbhx_dev_buy_window
+RBHX_DEV_BUY_STRONG_ETH = settings.rbhx_dev_buy_strong_eth
 RBHX_RETENTION_DAYS = settings.rbhx_retention_days
 
 # ── Forwarder source channels (from .env) ───────────────────────

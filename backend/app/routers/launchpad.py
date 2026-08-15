@@ -112,6 +112,7 @@ async def stats():
         "enabled": bool(enabled.get("launchpad_monitor", True)),
         "retention_days": scfg.LAUNCHPAD_RETENTION_DAYS,
         "dev_buy_max_eth": scfg.RBHX_DEV_BUY_MAX_ETH,
+        "dev_buy_strong_eth": scfg.RBHX_DEV_BUY_STRONG_ETH,
         "own_endpoints": scfg.RBHX_OWN_ENDPOINTS,
     }
 
