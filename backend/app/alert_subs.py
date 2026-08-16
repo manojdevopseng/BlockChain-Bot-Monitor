@@ -46,10 +46,12 @@ CHAINS: dict[str, str] = {"eth": "Ethereum", "rbh": "Robinhood",
 MODES = ("instant", "digest")
 DIGEST_CHOICES = (5, 15, 30, 60)
 
-# A ceiling on a ceiling: whatever an account sets, it cannot ask for more than
-# this many alerts a day. High-volume feeds are hundreds a day on their own, and
-# an account that sets no filters at all should still not be sent all of them.
-HARD_DAILY_CAP = 400
+# A ceiling on the plans' ceilings: whatever an account sets and whatever plan
+# it is on, it cannot be sent more than this many alerts a day. High-volume
+# feeds are hundreds a day on their own, and an account that sets no filters at
+# all should still not be sent all of them. Above every plan on purpose — the
+# plan is the number that normally bites, this one is the backstop.
+HARD_DAILY_CAP = 1000
 
 
 @dataclass
@@ -198,19 +200,53 @@ async def save(username: str, changes: dict) -> dict:
 
 
 async def all_active() -> list[dict]:
-    """Every subscription that is switched on, defaults filled in.
+    """Every subscription that can actually be sent to right now.
 
     Read whole rather than queried per event: the dispatcher re-reads this on a
     timer and matches in memory, because an event arriving every few seconds
     must not become a database query per subscriber per event.
+
+    "Can be sent to" is decided here and not at the send: the account has to be
+    switched on, its subscription running, and its plan has to include Telegram
+    at all. A subscription outliving the subscription that paid for it is the
+    one bug in this whole path that costs money rather than noise.
+
+    The plan travels on the subscription — cap, delay, label — so the dispatcher
+    never has to look an account up in the middle of a send.
     """
-    out = []
+    from . import accounts
+    raw: list[dict] = []
     async for doc in _col().find({"enabled": {"$ne": False}}):
         sub = blank(str(doc.get("user_id") or ""))
         for key, value in DEFAULTS.items():
             if key in doc and doc[key] is not None:
                 sub[key] = doc[key]
         sub["feeds"] = {**DEFAULTS["feeds"], **(doc.get("feeds") or {})}
+        if sub["user_id"]:
+            raw.append(sub)
+    if not raw:
+        return []
+
+    names = [s["user_id"] for s in raw]
+    people = {}
+    async for user in db.get_collection("users").find({"username": {"$in": names}}):
+        people[str(user.get("username"))] = user
+
+    out = []
+    for sub in raw:
+        user = people.get(sub["user_id"])
+        if user is None or not user.get("enabled", True):
+            continue
+        plan = accounts.plan_of(user)
+        if not plan.telegram_alerts or not accounts.access(user).usable:
+            continue
+        sub["plan"] = {"id": plan.id, "label": plan.label,
+                       "alerts_per_day": plan.alerts_per_day,
+                       "delay_seconds": plan.alert_delay_seconds}
+        # Whatever they set, the plan is the ceiling — a plan that changes down
+        # takes the cap with it without anyone reopening the page.
+        sub["daily_cap"] = min(int(sub.get("daily_cap") or 0) or plan.alerts_per_day,
+                               plan.alerts_per_day)
         out.append(sub)
     return out
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BellRing, Clock, Filter, Send, Plus, X } from "lucide-react";
+import { BellRing, Clock, Filter, HelpCircle, Send, Plus, X } from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -250,7 +250,112 @@ export default function AlertRulesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <WhyPanel />
     </div>
+  );
+}
+
+/* "Why am I not getting alerts?" — the same question the support inbox gets,
+ * answered from the launches that actually happened rather than from the
+ * settings above. A list of filters says what you set; this says what it did. */
+function WhyPanel() {
+  const [open, setOpen] = useState(false);
+  const { data } = useApi<any>(open ? "/api/alert-rules/why" : null);
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2">
+          <HelpCircle size={15} /> Why am I not getting alerts?
+        </CardTitle>
+        <Button size="sm" variant={open ? "primary" : "outline"}
+                onClick={() => setOpen((v) => !v)}>
+          {open ? "Hide" : "Check"}
+        </Button>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4">
+          {!data ? (
+            <div className="h-24 animate-pulse rounded-lg bg-bg-soft" />
+          ) : (
+            <>
+              {data.blockers?.length > 0 ? (
+                <div className="space-y-1.5">
+                  {data.blockers.map((b: string) => (
+                    <div key={b} className="flex items-start gap-2 text-sm text-accent-amber">
+                      <span>•</span><span>{b}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-accent-green">
+                  Nothing is stopping delivery — Telegram is connected, a feed is
+                  on, and the day&apos;s cap has room.
+                </p>
+              )}
+
+              <div className="rounded-lg border border-border-soft p-3">
+                <p className="text-sm text-text">
+                  Of the last <b>{data.sample}</b> launches, your rules would have
+                  sent <b>{data.would_send}</b>.
+                  {data.delay_seconds ? (
+                    <span className="text-text-muted">
+                      {" "}Your plan sends each one {data.delay_seconds}s after it happens.
+                    </span>
+                  ) : null}
+                </p>
+
+                {data.rejected_for?.length > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+                      What turned the rest away
+                    </div>
+                    <div className="space-y-1">
+                      {data.rejected_for.slice(0, 6).map((r: any) => (
+                        <div key={r.reason} className="flex items-baseline gap-2 text-xs">
+                          <Badge variant="gray">{r.count}</Badge>
+                          <span className="text-text-muted">{r.reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[11px] text-text-dim">
+                      The top line is the filter doing the most work — loosen that
+                      one first.
+                    </p>
+                  </div>
+                )}
+
+                {data.recent_matches?.length > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+                      Recent launches that fit
+                    </div>
+                    <div className="space-y-1 text-xs text-text-muted">
+                      {data.recent_matches.map((m: any, i: number) => (
+                        <div key={`${m.symbol}-${i}`}>
+                          <b className="text-text">{m.symbol}</b>
+                          {m.handle ? ` · @${m.handle}` : ""}
+                          {m.followers ? ` · ${m.followers} followers` : ""}
+                          {m.dev_buy_eth ? ` · ${m.dev_buy_eth} Ξ` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!data.delivery_running && (
+                <p className="text-xs text-accent-red">
+                  Alert delivery is not running on the server right now. That is
+                  ours to fix — please raise a ticket from Support.
+                </p>
+              )}
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 

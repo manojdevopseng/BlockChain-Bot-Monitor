@@ -58,6 +58,10 @@ _RELOAD_SECONDS = 30
 
 _last_global = 0.0
 _last_chat: dict[int, float] = {}
+# One sender at a time. The pump is single, but a trial's delayed send runs in
+# its own task — without this the two could compute the same gap and send
+# together, which is exactly the burst the gaps exist to prevent.
+_send_lock = asyncio.Lock()
 _subs: list[dict] = []
 # username -> the events waiting to go out in their next digest.
 _digests: dict[str, list[tuple[float, Event, str]]] = {}
@@ -163,7 +167,25 @@ async def _fan_out(event: Event) -> None:
             _digests.setdefault(username, []).append(
                 (time.time(), event, alert_subs.hit_keywords(sub, event)))
             continue
+        delay = float((sub.get("plan") or {}).get("delay_seconds") or 0)
+        if delay > 0:
+            # The trial's handicap. In its own task rather than a sleep here:
+            # the pump serves every other subscriber, and one plan's delay must
+            # not become everybody's.
+            asyncio.create_task(_send_later(sub, event, delay),
+                                name=f"fanout-late-{username}")
+            continue
         await _send_one(sub, event)
+
+
+async def _send_later(sub: dict, event: Event, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+        await _send_one(sub, event)
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[FANOUT] delayed send failed: {exc}")
 
 
 async def _send_one(sub: dict, event: Event) -> None:
@@ -195,25 +217,28 @@ async def _send_one(sub: dict, event: Event) -> None:
 async def _paced(chat, text: str, buttons: Optional[list] = None) -> bool:
     """One send, spaced globally and per chat, honouring a 429 exactly once.
 
-    Serialised by being the only thing the pump does: there is one pump, so
-    two sends never overlap and the gaps below are the whole rate limiter.
+    Serialised under one lock, so the gaps below are the whole rate limiter
+    however many tasks are sending — the pump, the digests and the delayed
+    trial sends all queue here.
     """
     global _last_global
-    now = time.time()
-    wait = max(_GLOBAL_GAP - (now - _last_global),
-               _PER_CHAT_GAP - (now - _last_chat.get(chat, 0.0)))
-    if wait > 0:
-        await asyncio.sleep(wait)
+    async with _send_lock:
+        now = time.time()
+        wait = max(_GLOBAL_GAP - (now - _last_global),
+                   _PER_CHAT_GAP - (now - _last_chat.get(chat, 0.0)))
+        if wait > 0:
+            await asyncio.sleep(wait)
 
-    ok, retry_after = await notifier.send_result(chat, text, buttons=buttons or None)
-    _last_global = time.time()
-    _last_chat[chat] = _last_global
-    if not ok and retry_after:
-        log.warning(f"[FANOUT] Telegram asked for {retry_after:.0f}s on {chat}")
-        await asyncio.sleep(retry_after)
-        ok, _ = await notifier.send_result(chat, text, buttons=buttons or None)
+        ok, retry_after = await notifier.send_result(chat, text,
+                                                     buttons=buttons or None)
         _last_global = time.time()
         _last_chat[chat] = _last_global
+        if not ok and retry_after:
+            log.warning(f"[FANOUT] Telegram asked for {retry_after:.0f}s on {chat}")
+            await asyncio.sleep(retry_after)
+            ok, _ = await notifier.send_result(chat, text, buttons=buttons or None)
+            _last_global = time.time()
+            _last_chat[chat] = _last_global
     return ok
 
 

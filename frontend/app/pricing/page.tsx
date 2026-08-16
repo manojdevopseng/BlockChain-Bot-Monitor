@@ -59,7 +59,11 @@ export default function PricingPage() {
                 `${p.ai_checks_per_day} AI fact-checks a day`,
                 `checks every ${every(p.min_cadence)}`,
                 `RSI down to ${every(p.min_interval)}`,
-                p.telegram_alerts ? "alerts on Telegram" : "alerts on the dashboard",
+                p.telegram_alerts
+                  ? `${p.alerts_per_day} Telegram alerts a day`
+                    + (p.alert_delay_seconds
+                        ? ` (${p.alert_delay_seconds}s behind live)` : ", live")
+                  : "alerts on the dashboard",
                 p.support_hours ? `support within ${p.support_hours}h` : "support",
               ].map((line) => (
                 <li key={line} className="flex items-start gap-1.5 text-xs text-text-muted">

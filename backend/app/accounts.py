@@ -63,6 +63,15 @@ class Plan:
     # on 1 Sec is 3,600 reads an hour, one on 5 Min is twelve.
     min_interval: int
     telegram_alerts: bool
+    # Alerts a day this plan may be sent, and how long each one waits first.
+    #
+    # The trial gets real alerts on purpose. It used to get none at all, which
+    # meant a person could spend seven days with the product and never once see
+    # the thing it is for — the upgrade was described to them rather than felt.
+    # It gets few of them, and each arrives a beat late: a late call is still
+    # worth reading and is exactly the reason to pay for the on-time one.
+    alerts_per_day: int = 25
+    alert_delay_seconds: int = 0
     # AI fact-checks a day. Its own allowance rather than sharing the market-cap
     # one, because it is a different bill: a market cap check is an RPC call,
     # a fact-check is a model call and costs real money per press.
@@ -75,22 +84,27 @@ PLANS: dict[str, Plan] = {
     "trial": Plan("trial", "7-day Trial", 0.0, TRIAL_DAYS,
                   rsi_tokens=3, mcap_tokens=3, mcap_checks_per_day=25,
                   min_cadence=300, min_interval=300,
-                  telegram_alerts=False, ai_checks_per_day=10, support_hours=72,
+                  telegram_alerts=True, alerts_per_day=25,
+                  alert_delay_seconds=45,
+                  ai_checks_per_day=10, support_hours=72,
                   note="Everything readable, a few tokens of your own, "
-                       "dashboard-only alerts."),
+                       "and 25 Telegram alerts a day, 45s behind live."),
     "monthly": Plan("monthly", "Monthly", 29.99, 30,
                     rsi_tokens=25, mcap_tokens=25, mcap_checks_per_day=300,
                     min_cadence=15, min_interval=60,
-                    telegram_alerts=True, ai_checks_per_day=100, support_hours=24),
+                    telegram_alerts=True, alerts_per_day=300,
+                    ai_checks_per_day=100, support_hours=24),
     "half": Plan("half", "6 Months", 149.99, 182,
                  rsi_tokens=50, mcap_tokens=50, mcap_checks_per_day=600,
                  min_cadence=15, min_interval=15,
-                 telegram_alerts=True, ai_checks_per_day=250, support_hours=24,
+                 telegram_alerts=True, alerts_per_day=500,
+                 ai_checks_per_day=250, support_hours=24,
                  note="Five months' price for six."),
     "yearly": Plan("yearly", "Yearly", 299.99, 365,
                    rsi_tokens=100, mcap_tokens=100, mcap_checks_per_day=1500,
                    min_cadence=15, min_interval=5,
-                   telegram_alerts=True, ai_checks_per_day=600, support_hours=12,
+                   telegram_alerts=True, alerts_per_day=800,
+                   ai_checks_per_day=600, support_hours=12,
                    note="Ten months' price for twelve."),
 }
 
@@ -99,7 +113,8 @@ PLANS: dict[str, Plan] = {
 ADMIN_PLAN = Plan("admin", "Admin", 0.0, 36500,
                   rsi_tokens=10_000, mcap_tokens=10_000,
                   mcap_checks_per_day=100_000, min_cadence=15, min_interval=1,
-                  telegram_alerts=True, ai_checks_per_day=100_000, support_hours=0)
+                  telegram_alerts=True, alerts_per_day=100_000,
+                  ai_checks_per_day=100_000, support_hours=0)
 
 
 def _col():
@@ -136,6 +151,8 @@ def public(doc: dict) -> dict:
             "min_cadence": plan.min_cadence,
             "min_interval": plan.min_interval,
             "telegram_alerts": plan.telegram_alerts,
+            "alerts_per_day": plan.alerts_per_day,
+            "alert_delay_seconds": plan.alert_delay_seconds,
         },
     }
 

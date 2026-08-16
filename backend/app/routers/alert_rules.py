@@ -29,7 +29,7 @@ def _plan_cap(doc: dict) -> int:
     plan = accounts.plan_of(doc)
     if not plan.telegram_alerts:
         return 0
-    return alert_subs.HARD_DAILY_CAP
+    return min(plan.alerts_per_day, alert_subs.HARD_DAILY_CAP)
 
 
 @router.get("")
@@ -77,6 +77,94 @@ async def set_rules(payload: dict = Body(...),
     if not changes:
         raise HTTPException(400, "nothing to change")
     return {"rules": await alert_subs.save(owner["username"], changes)}
+
+
+@router.get("/why")
+async def why(owner: dict = Depends(security.require_customer)):
+    """"Why am I not getting alerts?", answered against real launches.
+
+    The most common support ticket there is, and it has a real answer sitting
+    in the database: run this account's own rules over the launches that
+    actually happened and report what each one was rejected for. A list of
+    filters tells somebody what they set; this tells them what it did.
+
+    Everything else here is the short list of things that stop alerts before a
+    filter is ever reached — no Telegram, plan without alerts, master switch
+    off, quiet hours, the day's cap already spent.
+    """
+    from .. import alert_dispatch, db, registry, supervisor
+    from ..alert_subs import Event, in_quiet_hours, matches
+
+    sub = await alert_subs.get(owner["username"])
+    plan = accounts.plan_of(owner)
+    enabled = await registry.enabled_map()
+    sent = await alert_dispatch.sent_today(owner["username"])
+
+    blockers = []
+    if not plan.telegram_alerts:
+        blockers.append(f"The {plan.label} plan does not include Telegram alerts.")
+    if not owner.get("telegram_chat_id"):
+        blockers.append("No Telegram chat is connected — connect one from Profile.")
+    if not sub.get("enabled"):
+        blockers.append("Your rules are switched off at the top of this page.")
+    if not any((sub.get("feeds") or {}).values()):
+        blockers.append("No feed is switched on, so nothing can match.")
+    if in_quiet_hours(sub):
+        blockers.append(f"It is inside your quiet hours "
+                        f"({sub.get('quiet_from')}–{sub.get('quiet_to')} IST).")
+    cap = int(sub.get("daily_cap") or 0)
+    if cap and sent >= cap:
+        blockers.append(f"Today's cap is spent — {sent} of {cap} sent.")
+    if not enabled.get("alert_fanout", True):
+        blockers.append("Alert delivery is switched off on the server. "
+                        "This one is ours, not yours — please raise a ticket.")
+
+    # The launches themselves, run through this account's own rules.
+    rows = await db.get_collection("launchpad_tokens").find({}).sort(
+        "open_timestamp", -1).limit(200).to_list(200)
+    passed, reasons = [], {}
+    for row in rows:
+        dev = float(row.get("dev_buy_eth") or 0)
+        ok, no = matches(sub, Event(
+            feed="launchpad", text="", chain="rbh",
+            address=str(row.get("address") or ""),
+            symbol=str(row.get("symbol") or ""),
+            handle=str(row.get("handle") or ""),
+            followers=int(row.get("followers") or 0),
+            launchpad=str(row.get("launchpad") or ""),
+            dev_buy_eth=dev, strong=dev > _strong_floor(),
+            watched=bool(row.get("watched")),
+            excerpt=str(row.get("excerpt") or ""),
+            matched_keywords=str(row.get("matched_keywords") or "")))
+        if ok:
+            passed.append({"symbol": row.get("symbol"), "handle": row.get("handle"),
+                           "followers": row.get("followers"),
+                           "launchpad": row.get("launchpad"),
+                           "dev_buy_eth": row.get("dev_buy_eth"),
+                           "at": row.get("open_timestamp")})
+        else:
+            reasons[no] = reasons.get(no, 0) + 1
+
+    return {
+        "blockers": blockers,
+        "sample": len(rows),
+        "would_send": len(passed),
+        "recent_matches": passed[:8],
+        # Biggest first: the filter at the top of this list is the one to
+        # loosen, and it is nearly always one of them doing all the work.
+        "rejected_for": [{"reason": r, "count": n}
+                         for r, n in sorted(reasons.items(), key=lambda kv: -kv[1])],
+        "sent_today": sent,
+        "daily_cap": cap,
+        "delay_seconds": plan.alert_delay_seconds,
+        "delivery_running": bool(supervisor.diagnostics()
+                                 .get("workers", {}).get("fan")),
+    }
+
+
+def _strong_floor() -> float:
+    from ..scanners import scfg
+    return float(getattr(scfg, "RBHX_DEV_BUY_STRONG_ETH", 0.199) or 0.199)
 
 
 @router.post("/test")
