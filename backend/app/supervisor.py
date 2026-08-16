@@ -174,6 +174,12 @@ async def reconcile() -> None:
         want.add("fwd")
     if want_cmd:
         want.add("cmd")
+    # The fan-out is not a scanner and watches nothing itself — it only carries
+    # what the others found to the accounts that asked for it. Its own switch,
+    # because "stop sending to customers" has to be one flip and must not mean
+    # stopping the detection that fills the panels.
+    if bool(enabled.get("alert_fanout", True)):
+        want.add("fan")
 
     # Stop workers no longer wanted.
     for name in list(_tasks):
@@ -184,7 +190,7 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fwd", "cmd"):
+    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd", "cmd"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -290,6 +296,10 @@ async def _start_worker(name: str) -> None:
         inst = EthTrendingScanner(sol_scanner=_sol, session_factory=aiohttp.ClientSession)
         _instances["eth"] = inst
         _tasks["eth"] = asyncio.create_task(inst.run(), name="eth-scanner")
+        return
+    if name == "fan":
+        from . import alert_dispatch
+        _tasks["fan"] = asyncio.create_task(alert_dispatch.run(), name="alert-fanout")
         return
     if name == "rsi":
         from .scanners.rsi_tracker import RsiTracker
@@ -568,7 +578,7 @@ def service_states(enabled: dict[str, bool]) -> dict[str, dict]:
 # read it — the diagnostics attached to a support request, and the public status
 # page — and both of them were quietly reporting False for the four workers that
 # were missing from the old hardcoded list.
-WORKER_NAMES = ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fwd", "cmd")
+WORKER_NAMES = ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd", "cmd")
 
 
 def diagnostics() -> dict:

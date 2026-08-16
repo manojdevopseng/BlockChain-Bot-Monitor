@@ -92,6 +92,20 @@ class GasMonitorManager:
                     age_seconds: int, tx_hash: str) -> None:
         await self._store(token, fee_eth, age_seconds, tx_hash)
         await self._send_telegram(token, fee_eth, age_seconds)
+        self._fan_out(token, fee_eth, age_seconds)
+
+    def _fan_out(self, token: DetectedToken, fee_eth: float,
+                 age_seconds: int) -> None:
+        """The subscribers' copy of the same alert, after the operator's."""
+        from .. import alert_dispatch
+        from ..alert_subs import Event
+        try:
+            alert_dispatch.deliver(Event(
+                feed="gas", chain="eth",
+                text=_format_alert(token, fee_eth, age_seconds),
+                address=token.address, symbol=token.symbol or ""))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[GasMonitor] not queued for fan-out: {exc}")
 
     async def _store(self, token: DetectedToken, fee_eth: float,
                      age_seconds: int, tx_hash: str) -> None:

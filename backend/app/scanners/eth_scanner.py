@@ -168,3 +168,14 @@ class EthTrendingScanner:
         )
         record_alert(sol_data, tok, self._spec,
                      tg_chat_id=config.CROSS_CHAIN_CHAT_ID, tg_message_id=msg_id)
+
+        # And the same call to whoever subscribed to it. After the operator's
+        # send and the record, so neither waits on the fan-out.
+        try:
+            from app import alert_dispatch
+            from app.alert_subs import Event
+            alert_dispatch.deliver(Event(
+                feed="sol", chain="eth", text=text,
+                address=tok.address, symbol=tok.symbol or symbol or ""))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[ETH-XCHAIN] not queued for fan-out: {exc}")

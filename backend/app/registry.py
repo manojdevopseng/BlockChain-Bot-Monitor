@@ -243,6 +243,12 @@ DEFAULT_SERVICES: list[dict] = [
     # it is independent of the forwarder's userbot session.
     {"id": "bot_commands",          "category": BOT, "label": "Bot Commands",
      "chain": None, "enabled": True},
+    # Carries what the scanners found to the customers who subscribed to it,
+    # each in their own chat. Off, the operator's groups keep getting
+    # everything exactly as before and no customer is sent anything — which is
+    # the switch to reach for if the bot is ever rate-limited into the ground.
+    {"id": "alert_fanout",          "category": BOT,
+     "label": "Customer Alert Fan-out", "chain": None, "enabled": True},
     # Follows every fired alert forward and records what the price did at 15m,
     # 1h, 6h and 24h. Off, the background task is not running at all: no price
     # lookups, no writes — and Analytics, the digest and the group ranking stop

@@ -102,8 +102,22 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
     a button instead of text keeps it out of the message body, where it would
     otherwise sit as a bare URL under everything else.
     """
+    ok, _ = await send_result(chat_id, text, silent=silent, buttons=buttons)
+    return ok
+
+
+async def send_result(chat_id, text: str, *, silent: bool = False,
+                      buttons: Optional[list[tuple[str, str]]] = None
+                      ) -> tuple[bool, float]:
+    """(sent, seconds to wait before trying this chat again).
+
+    The second half is what `send_to` throws away and the alert dispatcher
+    cannot: sending to many chats at once is how a bot meets 429, and Telegram
+    says in the refusal exactly how long to wait. Guessing instead — a fixed
+    sleep, or worse a retry — is how a bot earns a longer ban.
+    """
     if not chat_id or not settings.telegram_bot_token:
-        return False
+        return False, 0.0
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -123,13 +137,24 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
             if resp.status == 200:
-                return True
+                return True, 0.0
             body = await resp.text()
             _safe_print(f"[notifier] Telegram error {resp.status} for {chat_id}: {body[:200]}")
-            return False
+            return False, _retry_after(body) if resp.status == 429 else 0.0
     except Exception as exc:  # noqa: BLE001
         _safe_print(f"[notifier] send to {chat_id} failed: {exc}")
-        return False
+        return False, 0.0
+
+
+def _retry_after(body: str) -> float:
+    """The wait Telegram asked for, off a 429 body. 5s when it did not say."""
+    import json as _json
+    try:
+        got = _json.loads(body or "{}")
+        wait = (got.get("parameters") or {}).get("retry_after")
+        return float(wait) if wait else 5.0
+    except Exception:  # noqa: BLE001
+        return 5.0
 
 
 async def send_panel(chat_id, text: str, keyboard: list[list[dict]]) -> Optional[int]:

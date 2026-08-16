@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, Terminal, User, Users, X } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
@@ -10,6 +10,10 @@ import { useUptime, uptimeLabel } from "@/components/layout/uptime";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/alerts", label: "Alerts", icon: Bell },
+  // Next to the alerts themselves rather than buried in Profile: it is the one
+  // page that decides what a customer's own phone does, and the first thing
+  // they should reach for after connecting Telegram.
+  { href: "/alert-rules", label: "Alert Rules", icon: SlidersHorizontal },
   { href: "/tokens", label: "Tokens", icon: Coins },
   { href: "/detections", label: "Detections", icon: Crosshair },
   { href: "/rsi", label: "RSI", icon: Activity },

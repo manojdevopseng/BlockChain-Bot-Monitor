@@ -101,6 +101,18 @@ class PremiumCaptureMixin:
             ("📊 GMGN", gmgn_url(chain, address)),
             ("💬 View on Telegram", post_url),
         ) if b[1]]
+        # The subscribers' copy. Queued before the operator's send rather than
+        # after, because `send_to` awaits Telegram and this does not — a slow
+        # send must not hold a detection back from everybody else.
+        try:
+            from app import alert_dispatch
+            from app.alert_subs import Event
+            alert_dispatch.deliver(Event(
+                feed="calls", chain=chain, text=text, buttons=buttons or [],
+                address=address, symbol=symbol or ""))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[PREMIUM] not queued for fan-out: {exc}")
+
         if await notifier.send_to(chat_id, text, buttons=buttons or None):
             self.count_premium += 1
             log.info(f"[PREMIUM] [{group}] {symbol or address[:10]} -> {label} group ({calls}/{CALL_CAP})")

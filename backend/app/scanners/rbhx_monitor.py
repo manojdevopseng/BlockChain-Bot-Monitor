@@ -699,6 +699,50 @@ class RbhXMonitor:
                 self._watch_dev_buy(addr, dev, shared["symbol"], first_buy),
                 name=f"rbhx-devbuy-{addr[:10]}")
 
+        # Everything above sends to the operator's groups, as it always has.
+        # This is the customers' copy, and it is last on purpose: whatever the
+        # fan-out does or fails to do, the launch is already recorded and the
+        # operator has already been told.
+        self._fan_out(pad_row, shared, got_profile)
+
+    def _fan_out(self, pad_row: Optional[dict], shared: dict,
+                 got_profile: bool) -> None:
+        """Hand this launch to the subscribers who asked for its kind.
+
+        One event per launch, never two: a launchpad mint that also carries an
+        X account is a launchpad event, so an account subscribed to both feeds
+        is not told about the same token twice.
+        """
+        from app import alert_dispatch
+        from app.alert_subs import Event
+
+        if pad_row is not None:
+            row, feed = pad_row, "launchpad"
+        elif shared.get("handle") and got_profile:
+            row, feed = shared, "rbhx"
+        else:
+            return          # nothing a subscriber has a way to ask for
+        dev = row.get("dev_buy_eth")
+        try:
+            alert_dispatch.deliver(Event(
+                feed=feed,
+                text=_pad_alert_text(row),
+                buttons=_pad_alert_buttons(row),
+                chain="rbh",
+                address=str(row.get("address") or ""),
+                symbol=str(row.get("symbol") or ""),
+                handle=str(row.get("handle") or ""),
+                followers=int(row.get("followers") or 0),
+                launchpad=str(row.get("launchpad") or ""),
+                dev_buy_eth=float(dev or 0),
+                strong=bool(_strong_dev_buy(row)),
+                watched=bool(row.get("watched")),
+                excerpt=str(row.get("excerpt") or ""),
+                matched_keywords=str(row.get("matched_keywords") or ""),
+            ))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[FANOUT] {row.get('symbol')} not queued: {exc}")
+
     async def _launch_buy(self, tx: str) -> tuple[str, float]:
         """(deployer, ETH it paid) from the launch transaction.
 

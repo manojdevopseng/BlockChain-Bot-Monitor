@@ -22,7 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db, migrations, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
-    account, admin as admin_router, ai_agent as ai_router, alerts, analytics,
+    account, admin as admin_router, ai_agent as ai_router, alert_rules,
+    alerts, analytics,
     auth, billing, chains,
     chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
@@ -164,7 +165,7 @@ app.add_middleware(
 #           admin-only — which left the main button of a paid feature answering
 #           403 to the people paying for it. Its writes are its own allowance
 #           instead, checked at the endpoint.
-_PRODUCT = (rsi, mcap, ai_router)
+_PRODUCT = (rsi, mcap, ai_router, alert_rules)
 # Billing is its own rule: an account with an ended subscription must be able to
 # buy one, so this needs a login and nothing more.
 # Reporting a problem is not a product feature to be paywalled: an account
