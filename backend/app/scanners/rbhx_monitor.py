@@ -1076,6 +1076,18 @@ def _mentions_address(texts: list[str], address: str) -> bool:
                for text in texts for m in _ADDRESS_RE.finditer(text or ""))
 
 
+def _strong_dev_buy(row: dict) -> float:
+    """The dev buy on this row, when it is big enough to be worth saying twice.
+
+    Returns 0.0 otherwise, so callers can write `if strong:` and print the
+    figure from the same call. Reads the threshold every time rather than
+    closing over it, because it is a setting.
+    """
+    dev = row.get("dev_buy_eth")
+    floor = config.RBHX_DEV_BUY_STRONG_ETH
+    return float(dev) if floor > 0 and dev and float(dev) > floor else 0.0
+
+
 def _pad_alert_text(row: dict) -> str:
     """A Launchpad Monitor alert, in the house style (see app/tgstyle.py).
 
