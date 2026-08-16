@@ -75,7 +75,9 @@ class Event:
     watched: bool = False
     excerpt: str = ""
     matched_keywords: str = ""
-    buttons: list = field(default_factory=list)
+    # Inline-keyboard rows, already built by tgstyle.keyboard — the subscriber
+    # gets the same buttons the operator's group gets.
+    keyboard: list = field(default_factory=list)
 
 
 DEFAULTS: dict = {

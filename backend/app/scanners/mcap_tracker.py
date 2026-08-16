@@ -341,27 +341,24 @@ class McapTracker:
         if not chat_id:
             log.debug(f"[MCAP] alert not sent for {token.get('symbol')}: {why}")
             return
-        import html
+        from app import tgstyle
         chain = token.get("chain", "")
         address = token.get("address") or ""
-        head = ("🎯 <b>MARKET CAP HIT</b>" if armed == "up"
-                else "🔻 <b>MARKET CAP FELL TO TARGET</b>")
-        text = (
-            f"{head} — {fmt_usd(reading.mcap)}\n"
-            f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"🪙 <b>{html.escape(token.get('symbol') or '?')}</b>"
-            + (f" — {html.escape(token['name'])}" if token.get("name") else "") + "\n"
-            f"⛓ {CHAIN_LABELS.get(chain, chain.upper())}\n"
-            f"🎯 target {fmt_usd(target)} · now <b>{fmt_usd(reading.mcap)}</b>\n"
-            + (f"💵 ${reading.price_usd:.10g} per token\n" if reading.price_usd else "")
-            + (f"🧮 supply {reading.supply:,.0f}\n" if reading.supply else "")
-            + f"\n<code>{address}</code>"
-        )
-        buttons = [b for b in (("📊 GMGN", gmgn_url(chain, address)),) if b[1]]
+        icon, kind = (("🎯", "MARKET CAP HIT") if armed == "up"
+                      else ("🔻", "MARKET CAP FELL TO TARGET"))
+        text = tgstyle.card(
+            icon=icon, kind=kind, chain=chain,
+            symbol=token.get("symbol") or "?", name=token.get("name") or "",
+            lines=[f"🎯 target {fmt_usd(target)} · now <b>{fmt_usd(reading.mcap)}</b>",
+                   (f"💵 ${reading.price_usd:.10g} per token"
+                    if reading.price_usd else ""),
+                   (f"🧮 supply {reading.supply:,.0f}" if reading.supply else "")],
+            address=address)
         # Same road as the RSI tracker and the fan-out: quiet hours applied,
         # one rate limiter for everything this bot sends a customer.
         from app import alert_dispatch
         sent, why = await alert_dispatch.send_personal(
-            token.get("user_id") or "", chat_id, text, buttons)
+            token.get("user_id") or "", chat_id, text,
+            tgstyle.keyboard(chain=chain, address=address, mute=False))
         if not sent:
             log.info(f"[MCAP] alert not delivered for {token.get('symbol')}: {why}")

@@ -219,12 +219,12 @@ async def _send_one(sub: dict, event: Event) -> None:
     text = event.text
     if mine:
         text = f"🟢 <b>Your keyword:</b> {html.escape(mine)}\n" + text
-    if await _paced(chat, text, event.buttons):
+    if await _paced(chat, text, event.keyboard):
         await _note_sent(username)
 
 
 async def send_personal(username: str, chat, text: str,
-                        buttons: Optional[list] = None) -> tuple[bool, str]:
+                        keyboard: Optional[list] = None) -> tuple[bool, str]:
     """One alert about a token this account picked itself — RSI, Market Cap.
 
     Not part of the fan-out: nobody subscribed to these, they are the answer to
@@ -253,7 +253,7 @@ async def send_personal(username: str, chat, text: str,
     except Exception as exc:  # noqa: BLE001
         # Rules unreadable is not a reason to swallow somebody's alert.
         log.debug(f"[FANOUT] rules unreadable for {username}: {exc}")
-    if await _paced(chat, text, buttons):
+    if await _paced(chat, text, keyboard):
         # The operator's own alerts carry no username and are not an account's
         # usage — counting them would make a row keyed on nobody.
         if username:
@@ -262,7 +262,7 @@ async def send_personal(username: str, chat, text: str,
     return False, "Telegram refused it"
 
 
-async def _paced(chat, text: str, buttons: Optional[list] = None) -> bool:
+async def _paced(chat, text: str, keyboard: Optional[list] = None) -> bool:
     """One send, spaced globally and per chat, honouring a 429 exactly once.
 
     Serialised under one lock, so the gaps below are the whole rate limiter
@@ -278,13 +278,14 @@ async def _paced(chat, text: str, buttons: Optional[list] = None) -> bool:
             await asyncio.sleep(wait)
 
         ok, retry_after = await notifier.send_result(chat, text,
-                                                     buttons=buttons or None)
+                                                     keyboard=keyboard or None)
         _last_global = time.time()
         _last_chat[chat] = _last_global
         if not ok and retry_after:
             log.warning(f"[FANOUT] Telegram asked for {retry_after:.0f}s on {chat}")
             await asyncio.sleep(retry_after)
-            ok, _ = await notifier.send_result(chat, text, buttons=buttons or None)
+            ok, _ = await notifier.send_result(chat, text,
+                                               keyboard=keyboard or None)
             _last_global = time.time()
             _last_chat[chat] = _last_global
     return ok

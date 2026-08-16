@@ -112,6 +112,22 @@ ADMIN_ONLY_COMMANDS = {"stop", "restart"}
 _ADMIN_CACHE_TTL = 120.0
 
 
+# The screens that are just a read of something and can therefore be redrawn
+# in place: a Refresh button and a way to any of the others. Everything else —
+# the RSI and Market Cap panels, /stop, /restart — has its own buttons or is an
+# action rather than a view.
+_BUTTON_SCREENS = ("help", "start", "status", "services", "stats",
+                   "watching", "tokens", "alerts", "gas")
+
+
+def _screen_keyboard(cmd: str) -> list:
+    """The bar under a command reply. Nothing for a command that acts."""
+    from app import tgstyle
+    if cmd not in _BUTTON_SCREENS:
+        return []
+    return tgstyle.nav("" if cmd in ("help", "start") else cmd)
+
+
 def _fmt_dur(seconds: int) -> str:
     if seconds <= 0:
         return "—"
@@ -344,15 +360,33 @@ class TelegramCommands:
             self._offset = result[-1]["update_id"] + 1
         return result
 
-    async def _send(self, chat_id, text: str) -> bool:
+    async def _send(self, chat_id, text: str,
+                    keyboard: Optional[list] = None) -> bool:
         try:
-            r = await self._api("sendMessage", {
-                "chat_id": chat_id, "text": text,
-                "parse_mode": "HTML", "disable_web_page_preview": "true",
-            })
+            params = {"chat_id": chat_id, "text": text,
+                      "parse_mode": "HTML", "disable_web_page_preview": "true"}
+            if keyboard:
+                # This API is form-encoded, so the markup goes as JSON text.
+                params["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
+            r = await self._api("sendMessage", params)
             return bool(r.get("ok"))
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[CMD] send failed: {exc}")
+            return False
+
+    async def _edit(self, chat_id, message_id, text: str,
+                    keyboard: Optional[list] = None) -> bool:
+        """Redraw a screen in place. A Refresh button that posted a new copy
+        would turn the chat into a stack of near-identical screens."""
+        try:
+            params = {"chat_id": chat_id, "message_id": message_id, "text": text,
+                      "parse_mode": "HTML", "disable_web_page_preview": "true"}
+            if keyboard:
+                params["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
+            r = await self._api("editMessageText", params)
+            return bool(r.get("ok"))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[CMD] edit failed: {exc}")
             return False
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
@@ -398,7 +432,15 @@ class TelegramCommands:
         from .. import tgbuttons
         text, show_alert = "", False
         try:
-            text, show_alert = await tgbuttons.handle_callback(cb)
+            data = str(cb.get("data") or "")
+            if data.startswith("cmd:"):
+                # A command screen, redrawn in place. Handled here rather than
+                # in tgbuttons because rendering one needs this handler's own
+                # `_reply_for` — the same code path the typed command takes, so
+                # a button and a command can never show different answers.
+                text = await self._redraw(data[4:], cb)
+            else:
+                text, show_alert = await tgbuttons.handle_callback(cb)
         except Exception as exc:  # noqa: BLE001
             log.error(f"[CMD] button {cb.get('data')!r} failed: {exc}")
             text = "Could not do that"
@@ -410,6 +452,24 @@ class TelegramCommands:
             })
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[CMD] answerCallbackQuery failed: {exc}")
+
+    async def _redraw(self, cmd: str, cb: dict) -> str:
+        """Re-render a screen onto the message its button was pressed on."""
+        if cmd not in _BUTTON_SCREENS:
+            return "Unknown screen"
+        if not (await self._enabled_map()).get(cmd, True):
+            return f"/{cmd} is switched off"
+        message = cb.get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        user_id = (cb.get("from") or {}).get("id")
+        body = await self._reply_for(cmd, chat_id, user_id, "")
+        if not body:
+            return ""
+        await self._edit(chat_id, message.get("message_id"), body,
+                         _screen_keyboard(cmd))
+        # Empty toast: the screen itself changing is the feedback, and a popup
+        # saying "refreshed" on every press is noise.
+        return ""
 
     async def _handle(self, update: dict) -> None:
         msg = update.get("message") or {}
@@ -467,7 +527,8 @@ class TelegramCommands:
         started = time.perf_counter()
         try:
             reply = await self._reply_for(cmd, chat_id, user_id, text)
-            ok = await self._send(chat_id, reply) if reply else False
+            ok = (await self._send(chat_id, reply, _screen_keyboard(cmd))
+                  if reply else False)
         except Exception as exc:  # noqa: BLE001
             log.error(f"[CMD] /{cmd} failed: {exc}")
             ok = False
@@ -588,28 +649,34 @@ class TelegramCommands:
 
     async def _msg_help(self) -> str:
         enabled = await self._enabled_map()
-        lines = [
-            "🤖 <b>SightLine</b>\n",
-            "SOL→ETH and SOL→Robinhood cross-chain moves, premium Telegram "
-            "calls, and high-gas early buys on Ethereum.\n",
-            "<b>Commands:</b>",
-        ]
-        for name, menu, _cat in COMMAND_SPEC:
+        from app import tgstyle
+        # Grouped by the category each command declares, because a flat list of
+        # thirty is a wall — and the buttons below reach the six anybody
+        # actually presses, so this reads as reference rather than the way in.
+        by_cat: dict[str, list[str]] = {}
+        for name, menu, cat in COMMAND_SPEC:
             if enabled.get(name, True) and name != "start":
-                lines.append(f"/{name} — {menu}")
-        return "\n".join(lines)
+                by_cat.setdefault(cat, []).append(f"/{name} — {esc(menu)}")
+        lines = ["Cross-chain moves, Robinhood launches, premium calls and "
+                 "high-gas early buys — as they happen.", ""]
+        for cat, cmds in by_cat.items():
+            lines.append(f"<b>{esc(cat)}</b>")
+            lines.extend(cmds)
+            lines.append("")
+        return tgstyle.screen("SightLine", "🤖", lines,
+                              note="Tap a button below, or send any command.")
 
     async def _msg_status(self) -> str:
         from .. import db, supervisor
         workers = supervisor.diagnostics().get("workers", {})
         alive = [k for k, v in workers.items() if v]
-        return (
-            "📊 <b>Bot Status</b>\n\n"
-            f"<b>State:</b> 🟢 Running\n"
-            f"<b>Uptime:</b> {_fmt_dur(supervisor.uptime_seconds())}\n"
-            f"<b>Workers:</b> {', '.join(alive) if alive else 'none'}\n"
-            f"<b>Database:</b> {db.backend_name()}"
-        )
+        from app import tgstyle
+        return tgstyle.screen("Status", "📊", [
+            "🟢 <b>Running</b>",
+            f"⏱ up {_fmt_dur(supervisor.uptime_seconds())}",
+            f"⚙️ {len(alive)} of {len(workers)} workers alive",
+            f"🗄 database · {db.backend_name()}",
+        ])
 
     async def _msg_services(self) -> str:
         from .. import registry, supervisor
@@ -622,29 +689,33 @@ class TelegramCommands:
             out.setdefault(s["category"], []).append(
                 f"{icon.get(st, '❔')} {esc(s['label'])} — {st}"
             )
-        parts = ["🔀 <b>Services</b>"]
+        from app import tgstyle
+        lines: list[str] = []
         for cat, title in (("bot", "Bots"), ("chain", "Chains"), ("rpc", "RPCs")):
             if out.get(cat):
-                parts.append(f"\n<b>{title}</b>\n" + "\n".join(out[cat]))
-        return "\n".join(parts)
+                lines.append(f"<b>{title}</b>")
+                lines.extend(out[cat])
+                lines.append("")
+        return tgstyle.screen("Services", "🔀", lines)
 
     async def _msg_stats(self) -> str:
         day = time.time() - 86400
         tokens, alerts = _col("tokens"), _col("alerts")
         watch = await self._watchlist()
-        return (
-            "📈 <b>Stats</b>\n\n"
-            f"<b>Watching now:</b> {len(watch)}\n"
-            f"<b>Tokens found:</b> {await tokens.count_documents({})}"
-            f"  (24h: {await tokens.count_documents({'created_at': {'$gte': day}})})\n"
-            f"<b>Alerts:</b> {await alerts.count_documents({})}"
-            f"  (24h: {await alerts.count_documents({'created_at': {'$gte': day}})})\n"
-            f"<b>Cross-chain matches:</b> "
-            f"{await alerts.count_documents({'type': 'Cross-Chain Match'})}\n"
-            f"<b>High-gas buys:</b> {await _col('gas_alerts').count_documents({})}\n"
-            f"<b>Premium detections:</b> "
-            f"{await _col('premium_detections').count_documents({})}"
-        )
+        from app import tgstyle
+        return tgstyle.screen("Stats", "📈", [
+            f"👀 watching now · <b>{len(watch)}</b>",
+            f"🪙 tokens · <b>{await tokens.count_documents({})}</b>"
+            f" · {await tokens.count_documents({'created_at': {'$gte': day}})} in 24h",
+            f"🔔 alerts · <b>{await alerts.count_documents({})}</b>"
+            f" · {await alerts.count_documents({'created_at': {'$gte': day}})} in 24h",
+            f"⚡ cross-chain · "
+            f"<b>{await alerts.count_documents({'type': 'Cross-Chain Match'})}</b>",
+            f"⛽ high-gas buys · "
+            f"<b>{await _col('gas_alerts').count_documents({})}</b>",
+            f"🎯 premium calls · "
+            f"<b>{await _col('premium_detections').count_documents({})}</b>",
+        ])
 
     @staticmethod
     async def _watchlist() -> list:
@@ -652,62 +723,63 @@ class TelegramCommands:
         return await watchlist.active()
 
     async def _msg_watching(self) -> str:
+        from app import tgstyle
         wl = await self._watchlist()
         if not wl:
-            return "👀 <b>Watching Now</b>\n\nNothing being watched right now."
-        lines = [f"👀 <b>Watching Now</b>  ({len(wl)})\n"]
+            return tgstyle.screen("Watching now", "👀",
+                                  ["Nothing is being watched right now."])
         now = time.time()
+        lines = []
         for d in wl[:25]:
             rem = max(0, int((d.get("expires_at", 0) - now) / 60))
-            lines.append(
-                f"• <b>{esc(d.get('symbol'))}</b>  "
-                f"${float(d.get('mcap_usd') or 0):,.0f}  ·  {rem}m left"
-            )
-        if len(wl) > 25:
-            lines.append(f"…and {len(wl) - 25} more")
-        return "\n".join(lines)
+            lines.append(f"• <b>${esc(d.get('symbol'))}</b> · "
+                         f"{tgstyle.usd(float(d.get('mcap_usd') or 0))} · "
+                         f"{rem}m left")
+        note = f"and {len(wl) - 25} more" if len(wl) > 25 else ""
+        return tgstyle.screen(f"Watching now · {len(wl)}", "👀",
+                              lines, note=note)
 
     async def _msg_tokens(self) -> str:
+        from app import tgstyle
         docs = await _col("tokens").find({}).to_list(500)
         docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
         if not docs:
-            return "🪙 <b>Recent Tokens</b>\n\nNo tokens detected yet."
-        lines = ["🪙 <b>Recent Tokens</b>\n"]
-        for t in docs[:10]:
-            lines.append(
-                f"• <b>{esc(t.get('symbol'))}</b> · {esc((t.get('chain') or '').upper())}"
-                f" · {_ago(t.get('created_at'))} ago"
-            )
-        return "\n".join(lines)
+            return tgstyle.screen("Recent tokens", "🪙",
+                                  ["Nothing detected yet."])
+        return tgstyle.screen("Recent tokens", "🪙", [
+            f"• <b>${esc(t.get('symbol'))}</b> · "
+            f"{tgstyle.chain_label(t.get('chain') or '')} · "
+            f"{_ago(t.get('created_at'))} ago"
+            for t in docs[:10]
+        ])
 
     async def _msg_alerts(self) -> str:
+        from app import tgstyle
         docs = await _col("alerts").find({}).to_list(500)
         docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
         if not docs:
-            return "🔔 <b>Recent Alerts</b>\n\nNo alerts yet."
-        lines = ["🔔 <b>Recent Alerts</b>\n"]
-        for a in docs[:8]:
-            lines.append(
-                f"• <b>{esc(a.get('token_symbol') or a.get('type'))}</b> · "
-                f"{esc((a.get('chain') or '').upper())} · {_ago(a.get('created_at'))} ago"
-            )
-        return "\n".join(lines)
+            return tgstyle.screen("Recent alerts", "🔔", ["Nothing yet."])
+        return tgstyle.screen("Recent alerts", "🔔", [
+            f"• <b>{esc(a.get('token_symbol') or a.get('type'))}</b> · "
+            f"{tgstyle.chain_label(a.get('chain') or '')} · "
+            f"{_ago(a.get('created_at'))} ago"
+            for a in docs[:8]
+        ])
 
     async def _msg_gas(self) -> str:
+        from app import tgstyle
         docs = await _col("gas_alerts").find({}).to_list(200)
         docs.sort(key=lambda d: d.get("created_at", 0), reverse=True)
         if not docs:
-            return (
-                "⛽ <b>High-Gas Early Buys</b>\n\nNone caught yet.\n"
-                f"<i>Threshold: {config.MIN_FEE_ETH} ETH</i>"
-            )
-        lines = [f"⛽ <b>High-Gas Early Buys</b>  (threshold {config.MIN_FEE_ETH} ETH)\n"]
-        for g in docs[:8]:
-            lines.append(
-                f"• <b>{esc(g.get('symbol'))}</b> · {float(g.get('fee_eth') or 0):.6f} ETH"
-                f" · age {g.get('age_seconds', '?')}s · {_ago(g.get('created_at'))} ago"
-            )
-        return "\n".join(lines)
+            return tgstyle.screen(
+                "High-gas early buys", "⛽", ["None caught yet."],
+                note=f"Fires above {config.MIN_FEE_ETH} ETH of gas on one buy.")
+        return tgstyle.screen("High-gas early buys", "⛽", [
+            f"• <b>${esc(g.get('symbol'))}</b> · "
+            f"{float(g.get('fee_eth') or 0):.6f} ETH · "
+            f"age {g.get('age_seconds', '?')}s · {_ago(g.get('created_at'))} ago"
+            for g in docs[:8]
+        ], note=f"Fires above {config.MIN_FEE_ETH} ETH of gas on one buy.")
 
     # ── Bot control (admin-only, the only two commands that change state) ──────
     #

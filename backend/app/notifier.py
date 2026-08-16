@@ -92,7 +92,8 @@ async def close() -> None:
 
 
 async def send_to(chat_id, text: str, *, silent: bool = False,
-                  buttons: Optional[list[tuple[str, str]]] = None) -> bool:
+                  buttons: Optional[list[tuple[str, str]]] = None,
+                  keyboard: Optional[list[list[dict]]] = None) -> bool:
     """Send an HTML message to a specific chat. Never raises.
 
     `send` is the operational channel (ALERT_CHAT_ID); this is for features that
@@ -102,12 +103,14 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
     a button instead of text keeps it out of the message body, where it would
     otherwise sit as a bare URL under everything else.
     """
-    ok, _ = await send_result(chat_id, text, silent=silent, buttons=buttons)
+    ok, _ = await send_result(chat_id, text, silent=silent, buttons=buttons,
+                              keyboard=keyboard)
     return ok
 
 
 async def send_result(chat_id, text: str, *, silent: bool = False,
-                      buttons: Optional[list[tuple[str, str]]] = None
+                      buttons: Optional[list[tuple[str, str]]] = None,
+                      keyboard: Optional[list[list[dict]]] = None
                       ) -> tuple[bool, float]:
     """(sent, seconds to wait before trying this chat again).
 
@@ -125,7 +128,12 @@ async def send_result(chat_id, text: str, *, silent: bool = False,
         "disable_web_page_preview": True,
         "disable_notification": silent,
     }
-    if buttons:
+    # `keyboard` is rows already built (tgstyle.keyboard); `buttons` is the
+    # older one-row [(label, url)] shape, kept because plenty of callers still
+    # only ever want one row of links.
+    if keyboard:
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
+    elif buttons:
         payload["reply_markup"] = {
             "inline_keyboard": [[{"text": label, "url": url} for label, url in buttons]]
         }

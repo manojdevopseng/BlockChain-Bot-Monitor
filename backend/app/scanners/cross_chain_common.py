@@ -114,36 +114,31 @@ async def send_telegram(
 def format_immediate_lean_alert(
     sol_data: dict, tok: DetectedToken, spec: ChainSpec
 ) -> str:
-    symbol     = esc(sol_data["symbol"])
-    lp_display = esc(_launchpad_display(sol_data.get("launchpad") or ""))
-    sol_addr   = sol_data["address"]
-    dst_addr   = tok.address
-    dex_label  = _DEX_LABEL.get(tok.dex, tok.dex.upper())
+    """A cross-chain match, in the house style (see app/tgstyle.py).
 
-    expires_at  = sol_data.get("expires_at", 0)
-    remaining   = max(0, int((expires_at - time.time()) / 60))
-    trigger_str = (
-        time.strftime("%H:%M", time.localtime(sol_data["triggered_at"]))
-        if sol_data.get("triggered_at") else "?"
-    )
+    Two tokens in one message, so they get a block each rather than three facts
+    to a line. The destination address is the one that gets acted on, so it is
+    the one alone at the bottom; the SOL side is context and keeps its address
+    inline.
+    """
+    from app import tgstyle
 
-    dst_link = _token_link(spec, dst_addr)
+    expires_at = sol_data.get("expires_at", 0)
+    remaining = max(0, int((expires_at - time.time()) / 60))
+    lp_display = _launchpad_display(sol_data.get("launchpad") or "")
 
-    return (
-        f"⚡ <b>CROSS-CHAIN MATCH — {symbol}</b>  <i>({spec.name})</i>\n"
-        f"<i>On-chain new pair detected matching a watched SOL token!</i>\n\n"
-
-        f"🟣 <b>SOL — {symbol}</b>  <i>via {lp_display}</i>\n"
-        f"<b>Address:</b> <code>{sol_addr}</code>\n"
-        f"<b>MCap:</b> ${sol_data['mcap_usd']:,.0f}  |  "
-        f"<b>Fees:</b> {sol_data['fees_sol']:.3f} SOL\n"
-        f"<b>Holders:</b> {sol_data['holders']}  |  "
-        f"<b>Triggered:</b> {trigger_str}  |  "
-        f"<b>Watch left:</b> {remaining}m\n"
-        f'🔗 <a href="https://gmgn.ai/sol/token/{sol_addr}">View SOL on GMGN</a>\n\n'
-
-        f"🔵 <b>{spec.name} — {esc(tok.symbol)}</b>  <i>(new pair · {dex_label})</i>\n"
-        f"<b>Name:</b> {esc(tok.name)}\n"
-        f"<b>Address:</b> <code>{dst_addr}</code>\n"
-        f"{dst_link}"
-    )
+    lines = [
+        f"🟣 <b>on Solana</b> · {tgstyle.esc(lp_display)}",
+        f"   {tgstyle.usd(sol_data['mcap_usd'])} mcap · "
+        f"{sol_data['fees_sol']:.3f} SOL fees · {sol_data['holders']} holders",
+        f"   <code>{tgstyle.esc(sol_data['address'])}</code>",
+        "",
+        f"🔵 <b>now on {tgstyle.esc(spec.name)}</b> · "
+        f"{tgstyle.esc(_DEX_LABEL.get(tok.dex, tok.dex.upper()))} pair",
+        f"   watch has {remaining}m left",
+    ]
+    return tgstyle.card(
+        icon="⚡", kind="CROSS-CHAIN MATCH",
+        when=sol_data.get("triggered_at"),
+        symbol=sol_data["symbol"], name=tok.name or "",
+        lines=lines, address=tok.address)

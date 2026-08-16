@@ -368,30 +368,28 @@ class RsiTracker:
         if not chat_id:
             log.debug(f"[RSI] alert not sent for {token.get('symbol')}: {why}")
             return
-        import html
+        from app import tgstyle
         chain = token.get("chain", "")
         addr = (token.get("address") or "").lower()
-        head = "📉 <b>RSI OVERSOLD</b>" if turn == "oversold" else "📈 <b>RSI OVERBOUGHT</b>"
+        icon, kind = (("📉", "RSI OVERSOLD") if turn == "oversold"
+                      else ("📈", "RSI OVERBOUGHT"))
         bound = self.low if turn == "oversold" else self.high
         side = "below" if turn == "oversold" else "above"
-        text = (
-            f"{head} — {value:.1f}\n"
-            f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"🪙 <b>{html.escape(token.get('symbol') or '?')}</b>"
-            + (f" — {html.escape(token['name'])}" if token.get("name") else "") + "\n"
-            f"⛓ {chain.upper()} · {INTERVAL_LABELS.get(token.get('interval'), '')}\n"
-            f"📊 crossed {side} {bound:g}\n"
-            + (f"💵 {price:.12f} native\n" if price else "")
-            + f"\n<code>{addr}</code>"
-        )
-        buttons = [b for b in (("📊 GMGN", gmgn_url(chain, addr)),) if b[1]]
+        text = tgstyle.card(
+            icon=icon, kind=kind, chain=chain,
+            symbol=token.get("symbol") or "?", name=token.get("name") or "",
+            lines=[f"📊 RSI <b>{value:.1f}</b> · crossed {side} {bound:g}",
+                   f"⏱ {INTERVAL_LABELS.get(token.get('interval'), '')} candles",
+                   (f"💵 {price:.12f} native" if price else "")],
+            address=addr)
         # Through the dispatcher rather than straight at Telegram: it applies
         # the owner's quiet hours and shares one rate limiter with the fan-out.
         # Sending beside it instead of through it is how one bot token gets
         # rate-limited by its own two halves.
         from app import alert_dispatch
         sent, why = await alert_dispatch.send_personal(
-            token.get("user_id") or "", chat_id, text, buttons)
+            token.get("user_id") or "", chat_id, text,
+            tgstyle.keyboard(chain=chain, address=addr, mute=False))
         if not sent:
             log.info(f"[RSI] alert not delivered for {token.get('symbol')}: {why}")
 

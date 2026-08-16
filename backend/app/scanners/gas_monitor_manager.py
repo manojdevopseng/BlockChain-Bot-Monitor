@@ -25,7 +25,7 @@ from app.scanners import scfg as config
 from app.scanners.onchain_detector import DetectedToken
 from app.scanners.slog import get_logger
 from app.util import esc
-from app import heartbeat, outcomes, tgbuttons
+from app import heartbeat, outcomes
 from app.scanners import storage_repo as storage
 from app.scanners.swap_monitor import SwapMonitor
 from app.scanners.ws_provider import WSProvider
@@ -103,6 +103,7 @@ class GasMonitorManager:
             alert_dispatch.deliver(Event(
                 feed="gas", chain="eth",
                 text=_format_alert(token, fee_eth, age_seconds),
+                keyboard=_alert_keyboard(token),
                 address=token.address, symbol=token.symbol or ""))
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[GasMonitor] not queued for fan-out: {exc}")
@@ -153,8 +154,8 @@ class GasMonitorManager:
                 f"{TELEGRAM_API}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
                 json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
                       "disable_web_page_preview": True,
-                      "reply_markup": tgbuttons.keyboard(
-                          chain="eth", address=token.address, symbol=token.symbol)},
+                      "reply_markup": {
+                          "inline_keyboard": _alert_keyboard(token)}},
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status == 200:
@@ -167,20 +168,24 @@ class GasMonitorManager:
 
 
 def _format_alert(token: DetectedToken, fee_eth: float, age_seconds: int) -> str:
-    """The reference's alert body, unchanged."""
-    addr = token.address
-    pool_info = ""
-    if token.dex == "v4" and token.pool_id:
-        pool_info = f"\nPool ID: <code>{token.pool_id[:18]}…</code>"
+    """The high-gas alert, in the house style (see app/tgstyle.py).
 
-    return (
-        "🚨 <b>High Gas Early Activity</b>\n\n"
-        f"Token Name:\n<b>{esc(token.name)}</b>\n\n"
-        f"Symbol:\n<b>{esc(token.symbol)}</b>\n\n"
-        f"CA:\n<code>{addr}</code>\n\n"
-        f"DEX: <b>{token.dex.upper()}</b>{pool_info}\n\n"
-        f"Age:\n<b>{age_seconds}s</b>\n\n"
-        f"Latest Fee:\n<b>{fee_eth:.6f} ETH</b>\n\n"
-        f"🔗 <b>GMGN:</b>\n"
-        f"https://gmgn.ai/eth/token/{addr}"
-    )
+    Was nine paragraphs of "Token Name:" / value with a bare GMGN URL at the
+    end. The facts are the same; the fee leads, because paying this much gas on
+    a token this new IS the signal, and the URL is a button now.
+    """
+    from app import tgstyle
+    lines = [f"⛽ <b>{fee_eth:.6f} ETH</b> gas on one buy",
+             f"⏱ token is {age_seconds}s old",
+             f"🔀 {token.dex.upper()}"
+             + (f" · pool {token.pool_id[:10]}…"
+                if token.dex == "v4" and token.pool_id else "")]
+    return tgstyle.card(
+        icon="🚨", kind="HIGH GAS EARLY BUY", chain="eth",
+        symbol=token.symbol or "?", name=token.name or "",
+        lines=lines, address=token.address)
+
+
+def _alert_keyboard(token: DetectedToken) -> list[list[dict]]:
+    from app import tgstyle
+    return tgstyle.keyboard(chain="eth", address=token.address)
