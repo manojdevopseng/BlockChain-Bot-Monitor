@@ -208,7 +208,7 @@ export default function ProfilePage() {
           <CardContent>
             <p className="text-lg font-semibold text-text">{account?.plan_label}</p>
             <p className="mt-1 text-xs text-text-dim">{statusLine(account)}</p>
-            {account?.expires_at ? (
+            {account?.expires_at && !account.comped ? (
               <p className="mt-1 text-[11px] text-text-dim">
                 Until {new Date(account.expires_at * 1000).toLocaleDateString()}
               </p>

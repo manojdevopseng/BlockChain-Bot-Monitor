@@ -42,6 +42,8 @@ export type Account = {
   status: "trialing" | "active" | "expired" | "blocked" | "unverified";
   days_left: number;
   expires_at: number;
+  /** Kept working on the house — its expiry is a placeholder, not a date. */
+  comped: boolean;
   telegram_linked: boolean;
   usable: boolean;
   reason: string;
@@ -95,6 +97,9 @@ export function useAccount() {
 export function statusLine(a?: Account): string {
   if (!a) return "";
   if (a.role === "admin") return "admin";
+  // "27,148 days left" is a true sentence and a useless one. An account kept
+  // on the house has a placeholder expiry decades out; say what it means.
+  if (a.comped) return `${a.plan_label} — on the house, no expiry`;
   if (a.status === "trialing") return `Trial — ${a.days_left} day${a.days_left === 1 ? "" : "s"} left`;
   if (a.status === "active") return `${a.plan_label} — ${a.days_left} day${a.days_left === 1 ? "" : "s"} left`;
   if (a.status === "unverified") return "Email not confirmed";

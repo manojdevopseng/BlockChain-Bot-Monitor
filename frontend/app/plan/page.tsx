@@ -142,6 +142,19 @@ export default function PlanPage() {
 
       {error && <p className="text-xs text-accent-red">{error}</p>}
 
+      {/* Said before the plan cards, not after: an account that already runs
+          for ever should know that before it picks one, not while reading the
+          small print under the button. */}
+      {account?.comped && (
+        <Card className="border-accent-amber/40">
+          <CardContent className="pt-4 text-sm">
+            Your account is on the house and does not expire — you do not need
+            to buy anything. If you pay anyway, the plan you choose starts today
+            and replaces the free one, so only do it if that is what you want.
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader><CardTitle>How paying works</CardTitle></CardHeader>
         <CardContent>

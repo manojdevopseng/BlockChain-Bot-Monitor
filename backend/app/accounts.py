@@ -142,6 +142,10 @@ def public(doc: dict) -> dict:
         "days_left": state.days_left,
         "expires_at": state.expires_at,
         "telegram_linked": bool(doc.get("telegram_chat_id")),
+        # An account from before subscriptions existed, kept working on the
+        # house. Its expiry is a placeholder decades out, so the UI has to be
+        # told not to print it as if it were a real date.
+        "comped": bool(doc.get("comped")),
         "created_at": doc.get("created_at"),
         "limits": {
             "rsi_tokens": plan.rsi_tokens,
@@ -286,13 +290,20 @@ async def activate(username: str, plan_id: str,
     doc = await _col().find_one({"username": username})
     if plan is None or doc is None:
         return None
-    base = max(_now(), float(doc.get("plan_ends_at") or 0))
-    await _col().update_one(
-        {"username": username},
-        {"$set": {"plan": plan.id, "plan_started_at": _now(),
-                  "plan_ends_at": base + plan.days * 86400,
-                  "last_activation": {"plan": plan.id, "at": _now(),
-                                      "source": source}}})
+    # A comped account (see migrations._keep_existing_accounts) carries an
+    # expiry decades out, so extending from it would bury the days just paid
+    # for under a date nobody will live to see — one real payment came out as
+    # "runs to 31/01/2101". Paying turns the comp into a real subscription
+    # instead, starting now, and the comp is dropped so it cannot happen twice.
+    comped = bool(doc.get("comped"))
+    base = _now() if comped else max(_now(), float(doc.get("plan_ends_at") or 0))
+    ops: dict = {"$set": {"plan": plan.id, "plan_started_at": _now(),
+                          "plan_ends_at": base + plan.days * 86400,
+                          "last_activation": {"plan": plan.id, "at": _now(),
+                                              "source": source}}}
+    if comped:
+        ops["$unset"] = {"comped": "", "comped_reason": ""}
+    await _col().update_one({"username": username}, ops)
     return await _col().find_one({"username": username})
 
 

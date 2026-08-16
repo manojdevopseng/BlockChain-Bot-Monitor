@@ -46,6 +46,9 @@ export default function OrderPage() {
 
   const open = order.status === "awaiting_payment";
   const done = order.status === "activated";
+  // Paid but not yet applied still counts as settled for the page's purpose:
+  // the money has arrived, so asking for it again is wrong either way.
+  const settled = done || order.status === "paid";
 
   async function cancel() {
     setBusy(true);
@@ -94,6 +97,31 @@ export default function OrderPage() {
         </div>
       )}
 
+      {/* Once an order has settled, "Pay exactly this" and its QR are
+          instructions for something that already happened — and a live payment
+          address on a finished order is an invitation to send money twice. A
+          receipt replaces them. */}
+      {settled ? (
+        <Card>
+          <CardHeader><CardTitle>Receipt</CardTitle></CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <Fact label="Paid" value={`${order.amount_seen ?? order.amount} ${order.symbol}`} />
+            <Fact label="On" value={order.asset_label} />
+            <Fact label="Plan" value={order.plan_label} />
+            <Fact label="Settled"
+                  value={order.paid_at
+                    ? new Date(order.paid_at * 1000).toLocaleString() : "—"} />
+            <div className="sm:col-span-2">
+              <p className="text-[11px] text-text-dim">
+                Kept as the record of this payment. Nothing else is owed on this
+                order — if something looks wrong,{" "}
+                <Link href="/support" className="text-brand-soft hover:underline">
+                  open a support request</Link>.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -159,7 +187,9 @@ export default function OrderPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
+      {!settled && (
       <Card>
         <CardHeader><CardTitle>What happens next</CardTitle></CardHeader>
         <CardContent>
@@ -174,6 +204,16 @@ export default function OrderPage() {
           </p>
         </CardContent>
       </Card>
+      )}
+    </div>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wider text-text-dim">{label}</p>
+      <p className="mt-0.5 text-sm text-text">{value}</p>
     </div>
   );
 }
