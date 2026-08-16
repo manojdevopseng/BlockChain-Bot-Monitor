@@ -37,6 +37,12 @@ async def get_rules(owner: dict = Depends(security.require_customer)):
     """The rules, plus everything the page needs to draw itself."""
     sub = await alert_subs.get(owner["username"])
     plan = accounts.plan_of(owner)
+    # Shown already capped by the plan, the same way the dispatcher applies it.
+    # A number set under a bigger plan would otherwise sit on the page looking
+    # like it was in force long after the plan that allowed it ended.
+    cap = _plan_cap(owner)
+    if cap:
+        sub["daily_cap"] = min(int(sub.get("daily_cap") or cap), cap)
     return {
         "rules": sub,
         "feeds": [{"id": key, "label": label} for key, label in FEEDS.items()],

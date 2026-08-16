@@ -202,6 +202,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <div className="animate-fade-in">
               <RoleGate>{children}</RoleGate>
             </div>
+            {/* Once, at the foot of every page inside the app, rather than
+                pasted onto the eight panels that show signals. What is on
+                those pages is a reading of a chain, never a recommendation,
+                and the person acting on it should not have to have read the
+                marketing site to know that. */}
+            <p className="mx-auto mt-8 max-w-3xl text-center text-[11px] leading-relaxed text-text-dim">
+              SightLine reports what is happening on chain and on X. It is not
+              financial advice and nothing here is a recommendation to buy or
+              sell. Most tokens go to zero —{" "}
+              <a href="/legal/terms" className="underline hover:text-text-muted">terms</a>.
+            </p>
           </main>
           <StatusBar backend={backend} />
         </div>

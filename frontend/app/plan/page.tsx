@@ -155,6 +155,17 @@ export default function PlanPage() {
           <p className="mt-3 text-[11px] text-text-dim">
             Current status: {statusLine(account) || "—"}
           </p>
+          {/* Said here rather than only in the policy page: a crypto payment
+              cannot be reversed by us once it has confirmed, and somebody
+              about to send one should read that on the way, not after. */}
+          <p className="mt-3 text-[11px] leading-relaxed text-text-dim">
+            A confirmed on-chain payment cannot be reversed by us. What we can
+            and cannot put right is in the{" "}
+            <a href="/legal/refund" className="text-brand-soft hover:underline">refund policy</a>,
+            and paying is subject to the{" "}
+            <a href="/legal/terms" className="text-brand-soft hover:underline">terms</a>.
+            We never ask for a private key or a seed phrase.
+          </p>
         </CardContent>
       </Card>
     </div>

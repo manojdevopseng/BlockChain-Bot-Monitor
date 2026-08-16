@@ -96,6 +96,17 @@ export default function RegisterPage() {
           {busy ? <Loader2 size={14} className="animate-spin" /> : "Create account"}
         </Button>
 
+        {/* Under the button, not behind a tick box: consent nobody read is
+            not consent, and one line they cannot miss is more honest than a
+            checkbox everybody clicks. */}
+        <p className="mt-3 text-center text-[11px] leading-relaxed text-text-dim">
+          By creating an account you agree to the{" "}
+          <Link href="/legal/terms" className="text-brand-soft hover:underline">Terms</Link>
+          {" "}and the{" "}
+          <Link href="/legal/privacy" className="text-brand-soft hover:underline">Privacy Policy</Link>.
+          SightLine is a monitoring tool, not financial advice.
+        </p>
+
         <p className="mt-4 text-center text-[11px] text-text-dim">
           Already have one? <Link href="/login" className="text-brand-soft hover:underline">Sign in</Link>
         </p>
