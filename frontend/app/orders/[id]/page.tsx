@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/CopyButton";
+import { Receipt } from "./_components/Receipt";
 
 /* One order: pay this exact figure to this address, and watch it settle.
  *
@@ -102,25 +103,7 @@ export default function OrderPage() {
           address on a finished order is an invitation to send money twice. A
           receipt replaces them. */}
       {settled ? (
-        <Card>
-          <CardHeader><CardTitle>Receipt</CardTitle></CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            <Fact label="Paid" value={`${order.amount_seen ?? order.amount} ${order.symbol}`} />
-            <Fact label="On" value={order.asset_label} />
-            <Fact label="Plan" value={order.plan_label} />
-            <Fact label="Settled"
-                  value={order.paid_at
-                    ? new Date(order.paid_at * 1000).toLocaleString() : "—"} />
-            <div className="sm:col-span-2">
-              <p className="text-[11px] text-text-dim">
-                Kept as the record of this payment. Nothing else is owed on this
-                order — if something looks wrong,{" "}
-                <Link href="/support" className="text-brand-soft hover:underline">
-                  open a support request</Link>.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <Receipt orderId={String(id)} />
       ) : (
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -205,15 +188,11 @@ export default function OrderPage() {
         </CardContent>
       </Card>
       )}
-    </div>
-  );
-}
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[11px] uppercase tracking-wider text-text-dim">{label}</p>
-      <p className="mt-0.5 text-sm text-text">{value}</p>
+      {/* An unpaid order has a receipt too — it says AWAITING PAYMENT, which is
+          exactly what somebody needs when the person paying is not the person
+          who chose the plan. */}
+      {!settled && <Receipt orderId={String(id)} />}
     </div>
   );
 }

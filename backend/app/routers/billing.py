@@ -8,9 +8,9 @@ answers 404 rather than showing somebody else's payment.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 
-from .. import accounts, orders, payments, security
+from .. import accounts, invoice, orders, payments, security
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
@@ -63,6 +63,45 @@ async def one_order(order_id: str, doc: dict = Depends(security.account)):
     out["pay_uri"] = _pay_uri(row)
     out["qr_svg"] = _qr(out["pay_uri"] or row.get("address", ""))
     return out
+
+
+@router.get("/orders/{order_id}/receipt")
+async def receipt(order_id: str, doc: dict = Depends(security.account)):
+    """What the bill says, as data — the page draws this.
+
+    The same call the PDF is drawn from, so what somebody reads on screen and
+    what they download cannot drift apart.
+    """
+    row = await orders.get(order_id, doc["username"])
+    if row is None:
+        raise HTTPException(404, "No such order")
+    return invoice.fields(orders.public(row), doc)
+
+
+@router.get("/orders/{order_id}/receipt.pdf")
+async def receipt_pdf(order_id: str, doc: dict = Depends(security.account)):
+    """The bill as a file, for whoever has to keep one.
+
+    Available before payment as well as after: an unpaid order's receipt says
+    AWAITING PAYMENT on it, which is a perfectly good thing to send to whoever
+    approves the spend.
+    """
+    row = await orders.get(order_id, doc["username"])
+    if row is None:
+        raise HTTPException(404, "No such order")
+    public = orders.public(row)
+    try:
+        body = invoice.pdf(public, doc)
+    except RuntimeError as exc:
+        # A missing library is ours to fix, and saying so beats a 500 with a
+        # stack trace on the one page somebody wanted a document from.
+        raise HTTPException(503, f"The receipt cannot be built right now "
+                                 f"({exc}). Everything else about this order "
+                                 f"is unaffected.")
+    return Response(
+        content=body, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{invoice.filename(public)}"'})
 
 
 @router.post("/orders/{order_id}/cancel")

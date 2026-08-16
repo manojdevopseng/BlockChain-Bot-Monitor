@@ -339,6 +339,18 @@ class Settings(BaseSettings):
     # Where a new order or a support ticket is emailed. Blank = SMTP_FROM.
     admin_email: str = ""
 
+    # ── What the receipt says about the seller ───────────────────────────────
+    # The one thing on a bill the code cannot work out for itself. Blank is
+    # handled: the receipt prints the product name and simply leaves the legal
+    # block off rather than inventing a company. Fill these in before selling
+    # anywhere that expects an invoice with an entity on it — and note that a
+    # *tax* invoice needs a registered entity and usually a tax number, which
+    # is what INVOICE_TAX_ID is for.
+    invoice_business_name: str = ""
+    invoice_address: str = ""
+    invoice_email: str = ""
+    invoice_tax_id: str = ""
+
     # ── Taking payment (USDT / USDC) ─────────────────────────────────────────
     # One receiving address per chain — yours, not ours, and never a key. A
     # blank address closes that rail: it disappears from the checkout instead

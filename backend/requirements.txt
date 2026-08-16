@@ -27,6 +27,9 @@ curl_cffi>=0.7.0
 # ── Payments ───────────────────────────────────────────────────
 # QR codes as inline SVG. Pure python: no Pillow, no system libraries.
 segno>=1.6.0
+# The receipt PDF. Chosen for the same reason segno was: pure python, no
+# Pillow, no cairo, nothing to apt-get on the box.
+fpdf2>=2.7.0
 
 # ── Telegram (used from Phase 3+) ──────────────────────────────
 telethon>=1.36.0

@@ -68,6 +68,10 @@ def public(row: dict) -> dict:
         "paid_at": row.get("paid_at"),
         "activated_at": row.get("activated_at"),
         "plan_until": row.get("plan_until"),
+        # What actually landed, which is not always what was quoted — the
+        # receipt prints the figure that arrived, not the one we asked for.
+        "amount_seen": row.get("amount_seen"),
+        "email": row.get("email"),
         "seconds_left": max(0, int(float(row.get("expires_at") or 0) - time.time()))
         if row.get("status") == OPEN else 0,
     }

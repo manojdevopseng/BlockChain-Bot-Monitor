@@ -84,6 +84,39 @@ export async function apiGet<T = any>(path: string): Promise<T> {
   return res.json();
 }
 
+/** Fetch a file the API only hands to the signed-in owner, and save it.
+ *
+ * A plain <a href> cannot carry the Authorization header, and putting the
+ * token in the query string would put it in the server log — so the file is
+ * fetched, turned into a blob and handed to a link that lasts one click.
+ */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, { headers: headers() });
+  if (res.status === 401) {
+    onUnauthorized();
+    throw new Error("Not authenticated");
+  }
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch {}
+    throw new Error(detail || `Could not download that file (${res.status})`);
+  }
+  // The server names the file; the caller's name is only the fallback.
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const named = /filename="?([^"]+)"?/.exec(disposition)?.[1];
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = named || fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on the next tick: revoking immediately can beat the click in
+  // Safari and hand the user an empty file.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function apiSend<T = any>(
   path: string,
   method: "POST" | "PATCH" | "PUT" | "DELETE",
