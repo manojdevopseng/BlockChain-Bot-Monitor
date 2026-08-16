@@ -658,11 +658,11 @@ class TelegramCommands:
             if enabled.get(name, True) and name != "start":
                 by_cat.setdefault(cat, []).append(f"/{name} — {esc(menu)}")
         lines = ["Cross-chain moves, Robinhood launches, premium calls and "
-                 "high-gas early buys — as they happen.", ""]
+                 "high-gas early buys — as they happen.", tgstyle.SPACER]
         for cat, cmds in by_cat.items():
             lines.append(f"<b>{esc(cat)}</b>")
             lines.extend(cmds)
-            lines.append("")
+            lines.append(tgstyle.SPACER)
         return tgstyle.screen("SightLine", "🤖", lines,
                               note="Tap a button below, or send any command.")
 
@@ -695,7 +695,7 @@ class TelegramCommands:
             if out.get(cat):
                 lines.append(f"<b>{title}</b>")
                 lines.extend(out[cat])
-                lines.append("")
+                lines.append(tgstyle.SPACER)
         return tgstyle.screen("Services", "🔀", lines)
 
     async def _msg_stats(self) -> str:

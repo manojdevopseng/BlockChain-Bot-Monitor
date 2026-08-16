@@ -34,6 +34,11 @@ from typing import Iterable, Optional
 
 RULE = "━━━━━━━━━━━━━━━━━━━━"
 
+# A blank line a caller actually wants. Empty strings are dropped so a line can
+# be written conditionally without minding the joins, which would otherwise
+# swallow a deliberate gap between two blocks.
+SPACER = " "
+
 # What each chain is called in the places a button has to point at.
 _GMGN = {"eth": "eth", "ethereum": "eth", "rbh": "robinhood",
          "robinhood": "robinhood", "sol": "sol", "solana": "sol",

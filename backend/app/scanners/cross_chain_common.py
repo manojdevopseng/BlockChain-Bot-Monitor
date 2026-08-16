@@ -132,7 +132,7 @@ def format_immediate_lean_alert(
         f"   {tgstyle.usd(sol_data['mcap_usd'])} mcap · "
         f"{sol_data['fees_sol']:.3f} SOL fees · {sol_data['holders']} holders",
         f"   <code>{tgstyle.esc(sol_data['address'])}</code>",
-        "",
+        tgstyle.SPACER,
         f"🔵 <b>now on {tgstyle.esc(spec.name)}</b> · "
         f"{tgstyle.esc(_DEX_LABEL.get(tok.dex, tok.dex.upper()))} pair",
         f"   watch has {remaining}m left",

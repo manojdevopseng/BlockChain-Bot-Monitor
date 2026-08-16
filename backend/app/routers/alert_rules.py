@@ -188,17 +188,18 @@ async def send_test(owner: dict = Depends(security.require_customer)):
     sub = await alert_subs.get(owner["username"])
     on = [FEEDS[f] for f, want in (sub.get("feeds") or {}).items()
           if want and f in FEEDS]
-    text = (
-        "🔔 <b>SightLine test alert</b>\n"
-        "➖➖➖➖➖➖➖➖➖➖\n"
-        "This chat is connected and your rules are live.\n\n"
-        + ("<b>Feeds on:</b> " + ", ".join(on) + "\n" if on else
-           "<b>No feed is switched on yet</b> — nothing will arrive until one is.\n")
-        + f"<b>Chains:</b> {', '.join(CHAINS.get(c, c) for c in (sub.get('chains') or [])) or 'none'}\n"
-        + (f"<b>Quiet:</b> {sub['quiet_from']} – {sub['quiet_to']} IST\n"
-           if sub.get("quiet_from") and sub.get("quiet_to") else "")
-        + f"<b>Daily cap:</b> {sub.get('daily_cap')}"
-    )
+    from .. import tgstyle
+    text = tgstyle.screen("SightLine test alert", "🔔", [
+        "This chat is connected and your rules are live.",
+        tgstyle.SPACER,
+        ("<b>Feeds on:</b> " + ", ".join(on) if on else
+         "<b>No feed is switched on yet</b> — nothing will arrive until one is."),
+        "<b>Chains:</b> " + (", ".join(CHAINS.get(c, c)
+                                       for c in (sub.get("chains") or [])) or "none"),
+        (f"<b>Quiet:</b> {sub['quiet_from']} – {sub['quiet_to']} IST"
+         if sub.get("quiet_from") and sub.get("quiet_to") else ""),
+        f"<b>Daily cap:</b> {sub.get('daily_cap')}",
+    ])
     if not await notifier.send_to(chat, text):
         raise HTTPException(502, "Telegram would not take the message — "
                                  "try again in a minute.")
