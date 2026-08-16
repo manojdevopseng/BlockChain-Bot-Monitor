@@ -39,17 +39,25 @@ def _money(value) -> str:
         return "—"
 
 
+# The typography this codebase writes in, and what a PDF core font can draw.
+# fpdf2 refuses an em dash outright rather than substituting one, so every one
+# of these is mapped before it reaches the page — an exception on the one page
+# somebody wanted a document from is the worst possible outcome here.
+_PLAIN = {"—": "-", "–": "-", "‘": "'", "’": "'",
+          "“": '"', "”": '"', "…": "...", " ": " ",
+          "₹": "INR ", "Ξ": "ETH"}
+
+
 def _ansi(text: str) -> str:
     """Text a PDF core font can actually draw.
 
-    The core fonts are WinAnsi (cp1252), not Latin-1 — the difference matters
-    here because the em dash, the middot and curly quotes all live in that gap,
-    and encoding to Latin-1 turned every "Yearly — SightLine" into "Yearly ?".
-
-    Anything outside even cp1252 becomes '?', which is ugly and honest: the
-    alternative is a 500 on the one page somebody wanted a document from.
+    Anything still outside Latin-1 after the mapping becomes '?' — ugly and
+    honest, and far better than refusing to produce the receipt at all.
     """
-    return str(text or "").encode("cp1252", "replace").decode("cp1252")
+    out = str(text or "")
+    for fancy, plain in _PLAIN.items():
+        out = out.replace(fancy, plain)
+    return out.encode("latin-1", "replace").decode("latin-1")
 
 
 def number(order: dict) -> str:
