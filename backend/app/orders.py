@@ -195,8 +195,19 @@ async def settle(order: dict, seen: float) -> Optional[dict]:
         f"{order['plan_label']} is active",
         f"Payment received. Your plan runs to {row['expires_on']}.",
         f"/orders/{order['id']}")
+    # The receipt travels with the mail. Best-effort on purpose: a PDF that
+    # will not build must not stop the "you're in" message, and the same
+    # document is on the order page either way.
+    receipt = None
+    try:
+        from . import invoice
+        settled_row = await _col().find_one({"id": order["id"]}) or order
+        pub = public(settled_row)
+        receipt = (invoice.filename(pub), invoice.pdf(pub, doc))
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[ORDER] {order['id']} receipt not built: {exc}")
     await mailer.send_order_activated(order.get("email", ""),
-                                      order["user_id"], row)
+                                      order["user_id"], row, receipt)
     await mailer.notify_admin(
         f"Payment received — {order['plan_label']} ({order['id']})",
         f"{order['user_id']} <{order.get('email', '')}> paid "

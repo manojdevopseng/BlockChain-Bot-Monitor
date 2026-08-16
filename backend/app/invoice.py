@@ -81,7 +81,9 @@ def fields(order: dict, account: Optional[dict] = None) -> dict:
         "order_id": order.get("id") or "",
         "issued_on": _date(order.get("created_at")),
         "paid_on": _date(paid_at) if paid_at else "",
-        "status": "PAID" if settled else str(order.get("status") or "").upper(),
+        "status": ("PAID" if settled
+                   else str(order.get("status") or "")
+                   .replace("_", " ").upper()),
         "settled": settled,
 
         "seller": {
