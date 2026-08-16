@@ -24,7 +24,8 @@ OWNED = ("mcap_tokens", "rsi_tokens")
 
 
 async def run() -> None:
-    for step in (_grandfather_accounts, _adopt_orphans, _stamp_cadence):
+    for step in (_grandfather_accounts, _adopt_orphans, _stamp_cadence,
+                 _number_old_orders):
         try:
             await step()
         except Exception as exc:  # noqa: BLE001
@@ -83,3 +84,25 @@ async def _stamp_cadence() -> None:
     if res.modified_count:
         log.info(f"[MIGRATE] mcap_tokens: {res.modified_count} row(s) given the "
                  f"default cadence")
+
+
+async def _number_old_orders() -> None:
+    """Give every order made before the series existed its place in it.
+
+    In the order they were created, so the numbers run the same way the orders
+    did — and the counter is left pointing past the highest one, so the next
+    real order cannot collide with a backfilled one.
+
+    Idempotent: an order that already has a number is skipped, so this can run
+    on every boot without ever renumbering anything.
+    """
+    from . import orders
+    col = db.get_collection("orders")
+    rows = await col.find({"invoice_no": {"$exists": False}})                     .sort("created_at", 1).to_list(5000)
+    if not rows:
+        return
+    for row in rows:
+        seq = await orders.next_invoice_seq()
+        await col.update_one({"id": row["id"]},
+                             {"$set": {"invoice_no": orders._invoice_no(seq)}})
+    log.info(f"[MIGRATE] orders: {len(rows)} numbered into the receipt series")

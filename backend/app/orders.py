@@ -48,11 +48,38 @@ def _id() -> str:
     return "ORD-" + "".join(secrets.choice(_ALPHABET) for _ in range(8))
 
 
+# The receipt number. Separate from the order id on purpose: the id is random
+# so it cannot be guessed from a URL, and a receipt number has to be sequential
+# so a run of them can be seen to have no holes in it.
+INVOICE_PREFIX = "SL"
+_INVOICE_PAD = 5
+
+
+def _invoice_no(seq: int) -> str:
+    return f"{INVOICE_PREFIX}-{int(seq):0{_INVOICE_PAD}d}"
+
+
+async def next_invoice_seq() -> int:
+    """The next number in the series, taken atomically.
+
+    One document, one $inc, one round trip — so two orders placed in the same
+    instant cannot be handed the same number however many workers are running.
+    A number is spent whether or not the order is ever paid: a series with gaps
+    in it is worse than a series where some entries say CANCELLED, because a
+    gap cannot be told apart from a missing record.
+    """
+    doc = await db.get_collection("counters").find_one_and_update(
+        {"_id": "invoice_no"}, {"$inc": {"seq": 1}},
+        upsert=True, return_document=True)
+    return int((doc or {}).get("seq") or 1)
+
+
 def public(row: dict) -> dict:
     """An order as its buyer sees it."""
     asset = payments.asset_by_id(row.get("asset_id", ""))
     return {
         "id": row.get("id"),
+        "invoice_no": row.get("invoice_no"),
         "status": row.get("status"),
         "plan": row.get("plan"),
         "plan_label": row.get("plan_label"),
@@ -102,6 +129,10 @@ async def create(account: dict, plan_id: str, asset_id: str) -> dict:
     now = time.time()
     row = {
         "id": _id(),
+        # Taken here rather than at payment: every attempt to buy gets a
+        # number, so the series covers cancelled and expired orders as well as
+        # paid ones and can be read straight through.
+        "invoice_no": _invoice_no(await next_invoice_seq()),
         "user_id": account["username"],
         "email": account.get("email", ""),
         "plan": plan.id,

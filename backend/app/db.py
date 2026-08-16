@@ -131,6 +131,17 @@ class _MemCollection:
                                   "upserted_id": new.get("_id")})()
         return type("R", (), {"matched_count": 0, "modified_count": 0})()
 
+    async def find_one_and_update(self, flt: dict, update: dict,
+                                  upsert: bool = False,
+                                  return_document=None, **_):
+        """Enough of Mongo's for the counters and daily-usage rows.
+
+        Always returns the document AFTER the update, which is what every
+        caller in this app asks for.
+        """
+        await self.update_one(flt, update, upsert=upsert)
+        return await self.find_one(flt)
+
     async def count_documents(self, flt: dict | None = None):
         return sum(1 for d in self._docs if _matches(d, flt or {}))
 
@@ -354,6 +365,12 @@ async def ensure_indexes() -> None:
         ("users",              "telegram_chat_id"),
         ("orders",             [("user_id", 1), ("status", 1)]),
         ("orders",             "id"),
+        # The receipt series. Unique so a double-assignment shows up as a
+        # write that fails rather than as two receipts with one number, and
+        # sparse so orders written before the series existed do not all
+        # collide on a missing field before the migration numbers them.
+        ("orders",             {"keys": [("invoice_no", 1)],
+                                "unique": True, "sparse": True}),
         ("orders",             [("status", 1), ("asset_id", 1)]),
         ("payment_rails",      "asset_id"),
         ("contact_messages",   [("handled", 1), ("at", -1)]),
@@ -374,7 +391,12 @@ async def ensure_indexes() -> None:
     ]
     for coll, keys in plan:
         try:
-            await get_collection(coll).create_index(keys)
+            # A dict entry carries options — unique, sparse — beside its keys.
+            if isinstance(keys, dict):
+                spec = dict(keys)
+                await get_collection(coll).create_index(spec.pop("keys"), **spec)
+            else:
+                await get_collection(coll).create_index(keys)
         except Exception as exc:  # noqa: BLE001
             # Named per collection: a silent failure here shows up much later
             # as an unexplained slow query.

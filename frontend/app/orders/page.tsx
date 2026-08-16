@@ -58,7 +58,15 @@ export default function OrdersPage() {
                 <Link key={o.id} href={`/orders/${o.id}`}
                       className="block rounded-lg border border-border-soft px-3 py-2.5 hover:bg-bg-hover/40">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-text">{o.id}</span>
+                    {/* The receipt number leads: it is the one somebody has
+                        on a document they filed. The order id stays beside it
+                        because that is what support asks for. */}
+                    <span className="font-mono text-xs font-semibold text-text">
+                      {o.invoice_no ?? o.id}
+                    </span>
+                    {o.invoice_no ? (
+                      <span className="font-mono text-[11px] text-text-dim">{o.id}</span>
+                    ) : null}
                     <span className="text-sm text-text">{o.plan_label}</span>
                     <Badge variant={TONE[o.status] ?? "gray"}>{SAID[o.status] ?? o.status}</Badge>
                     <span className="ml-auto font-mono text-sm text-text">

@@ -60,10 +60,14 @@ def _ansi(text: str) -> str:
 
 
 def number(order: dict) -> str:
-    """The invoice number. Derived from the order id rather than a counter:
-    a counter needs a lock and a migration, and this is already unique, already
-    printed on the order page, and already what support will be asked about."""
-    return f"SL-{str(order.get('id') or '').replace('ORD-', '')}"
+    """The receipt number: sequential, assigned when the order was made.
+
+    Falls back to the order id for anything written before the series existed,
+    so an old order still produces a document rather than a blank line where
+    its number should be.
+    """
+    return (str(order.get("invoice_no") or "")
+            or f"SL-{str(order.get('id') or '').replace('ORD-', '')}")
 
 
 def fields(order: dict, account: Optional[dict] = None) -> dict:

@@ -59,7 +59,9 @@ export default function OrderPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title={`Order ${order.id}`} subtitle={order.plan_label} />
+      <PageHeader title={`Order ${order.id}`}
+                  subtitle={[order.plan_label, order.invoice_no]
+                    .filter(Boolean).join(" · ")} />
 
       {done && (
         <div className="flex items-center gap-2 rounded-xl border border-accent-green/30 bg-accent-green/10 px-4 py-3">
