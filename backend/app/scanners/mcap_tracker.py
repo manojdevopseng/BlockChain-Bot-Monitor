@@ -358,5 +358,10 @@ class McapTracker:
             + f"\n<code>{address}</code>"
         )
         buttons = [b for b in (("📊 GMGN", gmgn_url(chain, address)),) if b[1]]
-        if not await notifier.send_to(chat_id, text, buttons=buttons):
-            log.warning(f"[MCAP] alert not delivered for {token.get('symbol')}")
+        # Same road as the RSI tracker and the fan-out: quiet hours applied,
+        # one rate limiter for everything this bot sends a customer.
+        from app import alert_dispatch
+        sent, why = await alert_dispatch.send_personal(
+            token.get("user_id") or "", chat_id, text, buttons)
+        if not sent:
+            log.info(f"[MCAP] alert not delivered for {token.get('symbol')}: {why}")

@@ -15,23 +15,31 @@ const STEPS = [
     body: "The 7-day trial starts when you open the link in that email, not when you sign up — so nothing is running down while you read this.",
   },
   {
-    n: "2", title: "Connect Telegram (paid plans)",
-    body: "Profile → Connect Telegram → open the link and press Start. Alerts then arrive in your own chat with the bot. Nobody else's alerts land there, and yours land in nobody else's.",
+    n: "2", title: "Connect Telegram",
+    body: "Profile → Connect Telegram → open the link and press Start. Alerts then arrive in your own chat with the bot. Nobody else's alerts land there, and yours land in nobody else's. The trial gets them too — 25 a day, each 45 seconds behind live.",
   },
   {
-    n: "3", title: "Open Detections and watch the Launchpad Monitor",
+    n: "3", title: "Set your Alert Rules — this is the important one",
+    body: "Alert Rules → turn on the feeds you want, then narrow them: chains, launchpads, a follower floor, X account only, Strong-Signal dev buys only, your own keywords, your own watch and skip lists. Every feed starts off, so nothing arrives until you say what you want — the launch feed alone is a few hundred a day. Send a test when you are done.",
+  },
+  {
+    n: "4", title: "Choose when, and how many",
+    body: "On the same page: one message per launch or a digest every 5–60 minutes, quiet hours in IST, and a ceiling on how many can arrive in a day. Anything over the ceiling still waits on the dashboard.",
+  },
+  {
+    n: "5", title: "Open Detections and watch the Launchpad Monitor",
     body: "Every launch on the Robinhood launchpads, newest first. The Account column is the one to read: a profile link is a claim, a 🔒 is a signed proof, and an empty one means nobody was named.",
   },
   {
-    n: "4", title: "Add the accounts you care about to the Watch list",
+    n: "6", title: "Add the accounts you care about to the Watch list",
     body: "When one of them launches again you are told immediately — with the token, the bio, and whether that bio quotes the contract address.",
   },
   {
-    n: "5", title: "Set a market cap on anything you are holding",
+    n: "7", title: "Set a market cap on anything you are holding",
     body: "RSI nav → Market Cap Alert → chain, address, target. One message when it gets there. A target above where it is now fires on the way up; below, on the way down.",
   },
   {
-    n: "6", title: "If something looks wrong, say so in two taps",
+    n: "8", title: "If something looks wrong, say so in two taps",
     body: "Support → tick what happened. The page you were on, your plan and whether the part behind it was running are attached for you.",
   },
 ];

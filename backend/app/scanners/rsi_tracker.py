@@ -385,8 +385,15 @@ class RsiTracker:
             + f"\n<code>{addr}</code>"
         )
         buttons = [b for b in (("📊 GMGN", gmgn_url(chain, addr)),) if b[1]]
-        if not await notifier.send_to(chat_id, text, buttons=buttons):
-            log.warning(f"[RSI] alert not delivered for {token.get('symbol')}")
+        # Through the dispatcher rather than straight at Telegram: it applies
+        # the owner's quiet hours and shares one rate limiter with the fan-out.
+        # Sending beside it instead of through it is how one bot token gets
+        # rate-limited by its own two halves.
+        from app import alert_dispatch
+        sent, why = await alert_dispatch.send_personal(
+            token.get("user_id") or "", chat_id, text, buttons)
+        if not sent:
+            log.info(f"[RSI] alert not delivered for {token.get('symbol')}: {why}")
 
 
 def _key(token: dict) -> str:

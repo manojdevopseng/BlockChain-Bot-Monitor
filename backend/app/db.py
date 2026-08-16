@@ -346,6 +346,10 @@ async def ensure_indexes() -> None:
         ("users",              "verify_token"),
         ("users",              "reset_token"),
         ("usage_daily",        [("user_id", 1), ("day", 1)]),
+        # One document per account, read whole by the fan-out every 30s and by
+        # its owner on the Alert Rules page. Small either way, but the owner
+        # lookup is the hot one.
+        ("alert_subs",         [("user_id", 1)]),
         ("telegram_links",     "token"),
         ("users",              "telegram_chat_id"),
         ("orders",             [("user_id", 1), ("status", 1)]),

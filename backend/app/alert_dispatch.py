@@ -55,6 +55,9 @@ _PER_CHAT_GAP = 1.2         # slower to one chat than the limit allows
 # How often the subscriber list is re-read. Matching happens in memory — a
 # database query per subscriber per event would be thousands a minute.
 _RELOAD_SECONDS = 30
+# Most a digest holds in memory. The summary prints 25 and says how many there
+# were, so anything older than that is a count and not a line.
+_DIGEST_KEEP = 60
 
 _last_global = 0.0
 _last_chat: dict[int, float] = {}
@@ -164,8 +167,14 @@ async def _fan_out(event: Event) -> None:
         if alert_subs.in_quiet_hours(sub):
             continue
         if str(sub.get("mode")) == "digest":
-            _digests.setdefault(username, []).append(
-                (time.time(), event, alert_subs.hit_keywords(sub, event)))
+            waiting = _digests.setdefault(username, [])
+            waiting.append((time.time(), event,
+                            alert_subs.hit_keywords(sub, event)))
+            # An hourly digest on a busy feed is hundreds of events held in
+            # memory to print twenty-five of them. Keep the newest and count
+            # the rest — the summary already says how many there were.
+            if len(waiting) > _DIGEST_KEEP:
+                del waiting[:-_DIGEST_KEEP]
             continue
         delay = float((sub.get("plan") or {}).get("delay_seconds") or 0)
         if delay > 0:
@@ -212,6 +221,45 @@ async def _send_one(sub: dict, event: Event) -> None:
         text = f"🟢 <b>Your keyword:</b> {html.escape(mine)}\n" + text
     if await _paced(chat, text, event.buttons):
         await _note_sent(username)
+
+
+async def send_personal(username: str, chat, text: str,
+                        buttons: Optional[list] = None) -> tuple[bool, str]:
+    """One alert about a token this account picked itself — RSI, Market Cap.
+
+    Not part of the fan-out: nobody subscribed to these, they are the answer to
+    a question the account asked by adding the token. So the daily cap does not
+    apply — there are at most as many of them as the plan allows tokens, and
+    capping a target somebody set by hand would be refusing the thing they paid
+    for.
+
+    Two things do apply, and did not before this existed: quiet hours, which are
+    about the person and not the feed, and the pacing — these used to go
+    straight to Telegram beside a fan-out that was carefully rationing itself,
+    which is how one bot token gets rate-limited by its own halves.
+
+    Returns (sent, why not).
+    """
+    if not chat:
+        return False, "no chat"
+    try:
+        sub = next((s for s in _subs if str(s.get("user_id")) == username), None)
+        if sub is None:
+            sub = await alert_subs.get(username)
+        if not sub.get("enabled", True):
+            return False, "alerts switched off in Alert Rules"
+        if alert_subs.in_quiet_hours(sub):
+            return False, "inside quiet hours"
+    except Exception as exc:  # noqa: BLE001
+        # Rules unreadable is not a reason to swallow somebody's alert.
+        log.debug(f"[FANOUT] rules unreadable for {username}: {exc}")
+    if await _paced(chat, text, buttons):
+        # The operator's own alerts carry no username and are not an account's
+        # usage — counting them would make a row keyed on nobody.
+        if username:
+            await _note_sent(username)
+        return True, ""
+    return False, "Telegram refused it"
 
 
 async def _paced(chat, text: str, buttons: Optional[list] = None) -> bool:

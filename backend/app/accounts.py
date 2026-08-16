@@ -357,6 +357,42 @@ async def count_owned(collection: str, username: str) -> int:
         {"user_id": username})
 
 
+# What a deleted account leaves behind that must go with it. Two different
+# reasons, and both matter:
+#
+#   rsi_tokens / mcap_tokens   they cost money. The trackers read every watched
+#                              token every cadence and never ask whose it is,
+#                              so a deleted account's tokens would be polled
+#                              for ever — a bill with nobody attached to it.
+#   the rest                   they are that person's, and keeping them after
+#                              the account is gone is keeping data we have no
+#                              reason to hold.
+_OWNED_COLLECTIONS = ("rsi_tokens", "mcap_tokens", "alert_subs",
+                      "notifications", "usage_daily")
+# Same idea, different key: the bind tokens are filed under `username`.
+_OWNED_BY_USERNAME = ("telegram_links",)
+
+
+async def purge_account_data(username: str) -> dict:
+    """Delete everything an account owned. Returns what went, per collection.
+
+    Orders and tickets are deliberately NOT here. An order is the record of
+    money that moved and a ticket is correspondence about it; both have to
+    outlive the login, and neither costs anything to keep.
+    """
+    gone: dict[str, int] = {}
+    for name, key in ([(c, "user_id") for c in _OWNED_COLLECTIONS]
+                      + [(c, "username") for c in _OWNED_BY_USERNAME]):
+        try:
+            res = await db.get_collection(name).delete_many({key: username})
+            if res.deleted_count:
+                gone[name] = res.deleted_count
+        except Exception:  # noqa: BLE001
+            # One unreadable collection must not leave the rest behind.
+            continue
+    return gone
+
+
 async def check_room(doc: dict, what: str) -> Usage:
     """Whether this account may add one more of `what` (rsi | mcap)."""
     plan = plan_of(doc)

@@ -129,6 +129,25 @@ async def contact(request: Request, payload: dict = Body(...)):
 # What changed, newest first. Kept in code so it ships with the change it
 # describes — a changelog maintained somewhere else is a changelog that lags.
 CHANGELOG: list[dict] = [
+    {"date": "2026-08-17", "title": "Alert Rules — the alerts became yours",
+     "items": ["Every feed a launch can come from now reaches your own "
+               "Telegram, not just RSI and Market Cap",
+               "Your own keywords, watch list and skip list, matched on the "
+               "account's bio",
+               "Filter by chain, launchpad, follower count, X account and "
+               "Strong-Signal dev buys",
+               "Quiet hours, a daily ceiling, and a digest instead of one "
+               "message each",
+               "The trial now gets real Telegram alerts — 25 a day, 45 seconds "
+               "behind live",
+               "\"Why am I not getting alerts?\" answers itself from the "
+               "launches that actually happened",
+               "AI fact-check works on any plan, with its own daily allowance"]},
+    {"date": "2026-08-16", "title": "Strong Signal on a big dev buy",
+     "items": ["A deployer buying more than 0.199 Ξ of their own launch is "
+               "marked on the row and leads the Telegram alert",
+               "Gas fees are now watched for 30 minutes after the first buy, "
+               "not four"]},
     {"date": "2026-08-14", "title": "Accounts, plans and payment",
      "items": ["Sign up, 7-day trial, and per-account data throughout",
                "USDT and USDC on Solana, BNB Chain and Ethereum",

@@ -65,4 +65,10 @@ async def update_user(username: str, payload: dict = Body(...)):
 async def delete_user(username: str):
     if not await users.delete(username):
         raise HTTPException(404, f"no user '{username}'")
-    return {"username": username, "deleted": True}
+    # And everything that account owned. The watched tokens are the reason this
+    # cannot wait for a tidy-up job: the RSI and Market Cap trackers read every
+    # row on their lists every cadence without asking whose it is, so tokens
+    # left behind by a deleted account are polled for ever.
+    from .. import accounts
+    gone = await accounts.purge_account_data(username)
+    return {"username": username, "deleted": True, "purged": gone}
