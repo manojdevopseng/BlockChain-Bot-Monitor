@@ -9,10 +9,9 @@ Who the seller is comes from .env (INVOICE_*), because it is the one thing on
 here this code cannot know. Blank is handled: the invoice prints the product
 name and leaves the legal block out rather than inventing a company.
 
-Deliberately called a receipt for a payment, not a tax invoice. A tax invoice
-needs a registered entity, a jurisdiction and usually a tax number; if those
-are set in .env they appear, and until then this document does not claim to be
-something it is not.
+Deliberately a receipt for a payment and not a tax invoice — one product, one
+fixed price, paid in stablecoin — so it carries no tax number and does not
+present itself as something it is not.
 """
 
 from __future__ import annotations
@@ -91,7 +90,6 @@ def fields(order: dict, account: Optional[dict] = None) -> dict:
             "tagline": "MultiChain Monitor",
             "address": settings.invoice_address or "",
             "email": settings.invoice_email or settings.admin_email or "",
-            "tax_id": settings.invoice_tax_id or "",
         },
         "buyer": {
             "name": order.get("user_id") or account.get("username") or "",
@@ -244,9 +242,7 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
         doc.ln(1)
 
     seller = f["seller"]
-    tail = " · ".join(x for x in (seller["address"], seller["email"],
-                                  (f"Tax ID {seller['tax_id']}"
-                                   if seller["tax_id"] else "")) if x)
+    tail = " · ".join(x for x in (seller["address"], seller["email"]) if x)
     if tail:
         doc.ln(2)
         doc.multi_cell(0, 4.5, _ansi(tail))

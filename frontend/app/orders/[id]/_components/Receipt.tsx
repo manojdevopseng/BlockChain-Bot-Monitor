@@ -133,10 +133,9 @@ export function Receipt({ orderId }: { orderId: string }) {
             {(data.notes ?? []).map((n: string) => (
               <p key={n} className="text-[11px] leading-relaxed text-text-dim">{n}</p>
             ))}
-            {data.seller?.address || data.seller?.email || data.seller?.tax_id ? (
+            {data.seller?.address || data.seller?.email ? (
               <p className="pt-1 text-[11px] text-text-dim">
-                {[data.seller.address, data.seller.email,
-                  data.seller.tax_id ? `Tax ID ${data.seller.tax_id}` : ""]
+                {[data.seller.address, data.seller.email]
                   .filter(Boolean).join(" · ")}
               </p>
             ) : null}
