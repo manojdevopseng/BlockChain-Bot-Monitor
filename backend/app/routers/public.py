@@ -39,6 +39,7 @@ async def plans():
              "days": p.days, "note": p.note,
              "rsi_tokens": p.rsi_tokens, "mcap_tokens": p.mcap_tokens,
              "mcap_checks_per_day": p.mcap_checks_per_day,
+             "ai_checks_per_day": p.ai_checks_per_day,
              "min_cadence": p.min_cadence, "min_interval": p.min_interval,
              "telegram_alerts": p.telegram_alerts,
              "support_hours": p.support_hours}

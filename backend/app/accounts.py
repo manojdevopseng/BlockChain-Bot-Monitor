@@ -63,6 +63,10 @@ class Plan:
     # on 1 Sec is 3,600 reads an hour, one on 5 Min is twelve.
     min_interval: int
     telegram_alerts: bool
+    # AI fact-checks a day. Its own allowance rather than sharing the market-cap
+    # one, because it is a different bill: a market cap check is an RPC call,
+    # a fact-check is a model call and costs real money per press.
+    ai_checks_per_day: int = 10
     support_hours: int = 48
     note: str = ""
 
@@ -71,22 +75,22 @@ PLANS: dict[str, Plan] = {
     "trial": Plan("trial", "7-day Trial", 0.0, TRIAL_DAYS,
                   rsi_tokens=3, mcap_tokens=3, mcap_checks_per_day=25,
                   min_cadence=300, min_interval=300,
-                  telegram_alerts=False, support_hours=72,
+                  telegram_alerts=False, ai_checks_per_day=10, support_hours=72,
                   note="Everything readable, a few tokens of your own, "
                        "dashboard-only alerts."),
     "monthly": Plan("monthly", "Monthly", 29.99, 30,
                     rsi_tokens=25, mcap_tokens=25, mcap_checks_per_day=300,
                     min_cadence=15, min_interval=60,
-                    telegram_alerts=True, support_hours=24),
+                    telegram_alerts=True, ai_checks_per_day=100, support_hours=24),
     "half": Plan("half", "6 Months", 149.99, 182,
                  rsi_tokens=50, mcap_tokens=50, mcap_checks_per_day=600,
                  min_cadence=15, min_interval=15,
-                 telegram_alerts=True, support_hours=24,
+                 telegram_alerts=True, ai_checks_per_day=250, support_hours=24,
                  note="Five months' price for six."),
     "yearly": Plan("yearly", "Yearly", 299.99, 365,
                    rsi_tokens=100, mcap_tokens=100, mcap_checks_per_day=1500,
                    min_cadence=15, min_interval=5,
-                   telegram_alerts=True, support_hours=12,
+                   telegram_alerts=True, ai_checks_per_day=600, support_hours=12,
                    note="Ten months' price for twelve."),
 }
 
@@ -95,7 +99,7 @@ PLANS: dict[str, Plan] = {
 ADMIN_PLAN = Plan("admin", "Admin", 0.0, 36500,
                   rsi_tokens=10_000, mcap_tokens=10_000,
                   mcap_checks_per_day=100_000, min_cadence=15, min_interval=1,
-                  telegram_alerts=True, support_hours=0)
+                  telegram_alerts=True, ai_checks_per_day=100_000, support_hours=0)
 
 
 def _col():
@@ -128,6 +132,7 @@ def public(doc: dict) -> dict:
             "rsi_tokens": plan.rsi_tokens,
             "mcap_tokens": plan.mcap_tokens,
             "mcap_checks_per_day": plan.mcap_checks_per_day,
+            "ai_checks_per_day": plan.ai_checks_per_day,
             "min_cadence": plan.min_cadence,
             "min_interval": plan.min_interval,
             "telegram_alerts": plan.telegram_alerts,
@@ -344,24 +349,32 @@ async def check_room(doc: dict, what: str) -> Usage:
                  limit=limit, field=what)
 
 
-async def note_check(username: str) -> int:
-    """Record one on-demand market cap check; returns today's total.
+async def note_check(username: str, what: str = "mcap") -> int:
+    """Record one on-demand check; returns today's total for that kind.
 
     Counted per IST day in one document per account, so the daily allowance is
-    a lookup rather than a scan of anything.
+    a lookup rather than a scan of anything. `what` picks the counter — market
+    cap checks and AI fact-checks share the document and not the allowance,
+    because they are two different bills.
     """
     from .util import ist_date_str
+    field = _CHECK_FIELDS[what]
     day = ist_date_str(_now())
     res = await db.get_collection("usage_daily").find_one_and_update(
         {"user_id": username, "day": day},
-        {"$inc": {"mcap_checks": 1}, "$set": {"updated_at": _now()}},
+        {"$inc": {field: 1}, "$set": {"updated_at": _now()}},
         upsert=True, return_document=True,
     )
-    return int((res or {}).get("mcap_checks") or 1)
+    return int((res or {}).get(field) or 1)
 
 
-async def checks_today(username: str) -> int:
+async def checks_today(username: str, what: str = "mcap") -> int:
     from .util import ist_date_str
     doc = await db.get_collection("usage_daily").find_one(
         {"user_id": username, "day": ist_date_str(_now())}) or {}
-    return int(doc.get("mcap_checks") or 0)
+    return int(doc.get(_CHECK_FIELDS[what]) or 0)
+
+
+# The counter each kind of check increments. `mcap_checks` keeps its name from
+# when it was the only one, so no existing row needs migrating.
+_CHECK_FIELDS = {"mcap": "mcap_checks", "ai": "ai_checks"}

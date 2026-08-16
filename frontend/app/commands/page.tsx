@@ -11,6 +11,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { AdminOnly } from "@/components/AdminOnly";
 import { DataTable, type Column } from "@/components/DataTable";
 import { fmtNum, timeAgo } from "@/lib/utils";
 
@@ -64,8 +65,16 @@ export default function CommandsPage() {
     { key: "last_used", header: "Last used", render: (r) => (
       <span className="text-text-muted">{r.last_used ? timeAgo(r.last_used) : "never"}</span>
     )},
+    // The switch is the operator's: these are one bot's commands, not a copy
+    // per account. A customer sees what the state is, not a control that would
+    // answer 403 — and would be turning the command off for everybody if it
+    // did not.
     { key: "enabled", header: "Enabled", render: (r) => (
-      <Switch checked={!!r.enabled} onCheckedChange={(v) => toggle(r.command, v)} />
+      <AdminOnly fallback={
+        <Badge variant={r.enabled ? "green" : "gray"}>{r.enabled ? "on" : "off"}</Badge>
+      }>
+        <Switch checked={!!r.enabled} onCheckedChange={(v) => toggle(r.command, v)} />
+      </AdminOnly>
     )},
   ];
 

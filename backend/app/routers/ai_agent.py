@@ -6,22 +6,40 @@ you can see what it threw away.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from .. import ai_agent, db, pump_mcap
+from .. import accounts, ai_agent, db, pump_mcap, security
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 
 @router.post("/factcheck")
 async def factcheck(address: str = Query(..., min_length=32, max_length=64),
-                    force: bool = False):
+                    force: bool = False,
+                    owner: dict = Depends(security.require_customer)):
     """Is the post behind this launch real? One token, on a click.
 
     A POST because it spends a model call. The answer is stored on the
     decision, so asking again is free unless `force` says to ask afresh.
+
+    Which is also why it has a daily allowance: this is the one button on the
+    read-only side of the app that costs money every time it is pressed. A
+    cached answer is not charged — only a real model call is.
     """
-    return await ai_agent.fact_check(address, force=force)
+    plan = accounts.plan_of(owner)
+    used = await accounts.checks_today(owner["username"], "ai")
+    if used >= plan.ai_checks_per_day:
+        raise HTTPException(
+            402, f"That is {used} fact-checks today — the {plan.label} plan "
+                 f"allows {plan.ai_checks_per_day} a day.")
+    result = await ai_agent.fact_check(address, force=force)
+    # Only a fresh, successful call is counted. Reading back an answer already
+    # stored on the decision costs nothing, and neither does a model that could
+    # not be reached — charging for either is charging for nothing.
+    if (result or {}).get("ok") and not (result or {}).get("cached"):
+        used = await accounts.note_check(owner["username"], "ai")
+    return {**(result or {}), "checks_today": used,
+            "checks_allowed": plan.ai_checks_per_day}
 
 
 @router.get("/mcap")

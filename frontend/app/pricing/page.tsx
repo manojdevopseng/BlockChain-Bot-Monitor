@@ -55,7 +55,8 @@ export default function PricingPage() {
               {[
                 `${p.rsi_tokens} RSI tokens`,
                 `${p.mcap_tokens} market cap alerts`,
-                `${p.mcap_checks_per_day} checks a day`,
+                `${p.mcap_checks_per_day} market cap checks a day`,
+                `${p.ai_checks_per_day} AI fact-checks a day`,
                 `checks every ${every(p.min_cadence)}`,
                 `RSI down to ${every(p.min_interval)}`,
                 p.telegram_alerts ? "alerts on Telegram" : "alerts on the dashboard",

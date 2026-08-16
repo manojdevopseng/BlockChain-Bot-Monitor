@@ -11,6 +11,10 @@ import { Button } from "@/components/ui/button";
 // answer straight away and asking again is deliberate rather than accidental.
 export function FactCheck({ row }: { row: any }) {
   const [fact, setFact] = useState<any>(row.fact ?? null);
+  // What the plan has left today, as the server counted it. Only shown after a
+  // check has actually been made — a number nobody asked for, in a column, is
+  // noise until it is nearly spent.
+  const [used, setUsed] = useState<{ today: number; allowed: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
@@ -23,6 +27,9 @@ export function FactCheck({ row }: { row: any }) {
         `/api/ai/factcheck?address=${encodeURIComponent(row.address)}${force ? "&force=true" : ""}`,
         "POST",
       );
+      if (r.checks_allowed != null) {
+        setUsed({ today: r.checks_today ?? 0, allowed: r.checks_allowed });
+      }
       if (r.ok) { setFact(r); setOpen(true); } else { setError(r.error || "no answer"); }
     } catch (e: any) {
       setError(e?.message || "request failed");
@@ -41,6 +48,12 @@ export function FactCheck({ row }: { row: any }) {
         {error ? (
           <div className="mt-1 max-w-[200px] text-[11px] text-accent-amber">{error}</div>
         ) : null}
+          {used && used.allowed - used.today <= 5 ? (
+            <div className="mt-1 text-[11px] text-text-dim">
+              {Math.max(0, used.allowed - used.today)} fact-check
+              {used.allowed - used.today === 1 ? "" : "s"} left today
+            </div>
+          ) : null}
       </div>
     );
   }
@@ -67,6 +80,12 @@ export function FactCheck({ row }: { row: any }) {
           </Button>
           {error ? (
             <div className="mt-1 text-[11px] text-accent-amber">{error}</div>
+          ) : null}
+          {used && used.allowed - used.today <= 5 ? (
+            <div className="mt-1 text-[11px] text-text-dim">
+              {Math.max(0, used.allowed - used.today)} fact-check
+              {used.allowed - used.today === 1 ? "" : "s"} left today
+            </div>
           ) : null}
         </div>
       ) : null}

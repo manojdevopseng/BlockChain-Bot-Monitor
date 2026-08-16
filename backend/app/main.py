@@ -159,7 +159,12 @@ app.add_middleware(
 #   operator  the controls. Admin only, whatever the method — these are hidden
 #             from a customer rather than greyed out, and the rule is here so
 #             the hiding is a courtesy and not the control.
-_PRODUCT = (rsi, mcap)
+#           AI Narrative is here rather than in `shared` for one endpoint:
+#           fact-check is a POST, and under the shared rule every non-GET is
+#           admin-only — which left the main button of a paid feature answering
+#           403 to the people paying for it. Its writes are its own allowance
+#           instead, checked at the endpoint.
+_PRODUCT = (rsi, mcap, ai_router)
 # Billing is its own rule: an account with an ended subscription must be able to
 # buy one, so this needs a login and nothing more.
 # Reporting a problem is not a product feature to be paywalled: an account
@@ -167,7 +172,7 @@ _PRODUCT = (rsi, mcap)
 # that needs to say so.
 _ACCOUNT = (billing, support, notif_router)
 _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
-           chat_lookup, outcomes_router, ai_router, rbhx, launchpad)
+           chat_lookup, outcomes_router, rbhx, launchpad)
 _OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router,
              admin_router)
 

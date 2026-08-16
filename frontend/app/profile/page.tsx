@@ -235,6 +235,9 @@ export default function ProfilePage() {
             <Meter label="Market Cap checks today"
                    used={account?.usage?.mcap_checks_today ?? 0}
                    limit={Number(limits.mcap_checks_per_day ?? 0)} />
+            <Meter label="AI fact-checks today"
+                   used={account?.usage?.ai_checks_today ?? 0}
+                   limit={Number(limits.ai_checks_per_day ?? 0)} />
             <p className="text-[11px] text-text-dim">
               Limits are per account and reset with the plan; checks reset daily.
             </p>

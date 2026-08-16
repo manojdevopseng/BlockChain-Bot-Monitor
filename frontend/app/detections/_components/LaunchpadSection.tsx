@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
 import { HandleList } from "@/components/HandleList";
+import { AdminOnly } from "@/components/AdminOnly";
 import { fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 
 /* Robinhood Launchpad Monitor.
@@ -151,10 +152,12 @@ export function LaunchpadSection() {
         <Button size="sm" variant="outline" onClick={() => mutate(key)} title="Refresh now">
           <RefreshCw size={13} />
         </Button>
-        <Button size="sm" variant={lists ? "primary" : "outline"}
-                onClick={() => setLists((v) => !v)} title="Skip and watch lists">
-          <Eye size={13} /> Lists
-        </Button>
+        <AdminOnly>
+          <Button size="sm" variant={lists ? "primary" : "outline"}
+                  onClick={() => setLists((v) => !v)} title="Skip and watch lists">
+            <Eye size={13} /> Lists
+          </Button>
+        </AdminOnly>
       </>}
     >
       <p className="mb-3 text-xs text-text-dim">
@@ -302,15 +305,17 @@ export function LaunchpadSection() {
                   </span>
                 </td>
                 <td className="px-3 py-3">
-                  <button
-                    title="Remove this row"
-                    onClick={async () => {
-                      await apiSend(`/api/launchpad/tokens/${r.address}`, "DELETE");
-                      mutate(key);
-                    }}
-                    className="grid h-6 w-6 place-items-center rounded text-text-dim hover:bg-bg-hover hover:text-accent-red">
-                    <Trash2 size={12} />
-                  </button>
+                  <AdminOnly>
+                    <button
+                      title="Remove this row"
+                      onClick={async () => {
+                        await apiSend(`/api/launchpad/tokens/${r.address}`, "DELETE");
+                        mutate(key);
+                      }}
+                      className="grid h-6 w-6 place-items-center rounded text-text-dim hover:bg-bg-hover hover:text-accent-red">
+                      <Trash2 size={12} />
+                    </button>
+                  </AdminOnly>
                 </td>
               </tr>
             ))}

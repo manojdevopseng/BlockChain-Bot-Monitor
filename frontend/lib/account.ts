@@ -46,7 +46,8 @@ export type Account = {
   usable: boolean;
   reason: string;
   limits: Record<string, number | boolean>;
-  usage: { rsi_tokens: number; mcap_tokens: number; mcap_checks_today: number };
+  usage: { rsi_tokens: number; mcap_tokens: number; mcap_checks_today: number;
+           ai_checks_today: number };
   plans: Plan[];
 };
 
