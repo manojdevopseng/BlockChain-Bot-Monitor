@@ -39,14 +39,17 @@ def _money(value) -> str:
         return "—"
 
 
-def _ascii(text: str) -> str:
-    """PDF core fonts are Latin-1. A name outside it must not break the bill.
+def _ansi(text: str) -> str:
+    """Text a PDF core font can actually draw.
 
-    Anything unrepresentable becomes '?', which is ugly and honest — the
-    alternative is a 500 on the one page somebody is trying to keep for their
-    records.
+    The core fonts are WinAnsi (cp1252), not Latin-1 — the difference matters
+    here because the em dash, the middot and curly quotes all live in that gap,
+    and encoding to Latin-1 turned every "Yearly — SightLine" into "Yearly ?".
+
+    Anything outside even cp1252 becomes '?', which is ugly and honest: the
+    alternative is a 500 on the one page somebody wanted a document from.
     """
-    return str(text or "").encode("latin-1", "replace").decode("latin-1")
+    return str(text or "").encode("cp1252", "replace").decode("cp1252")
 
 
 def number(order: dict) -> str:
@@ -135,15 +138,15 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
     # ── head ────────────────────────────────────────────────────────────────
     doc.set_font(_FONT, "B", 20)
     doc.set_text_color(*ink)
-    doc.cell(100, 9, _ascii(f["seller"]["name"]))
+    doc.cell(100, 9, _ansi(f["seller"]["name"]))
     doc.set_font(_FONT, "B", 14)
     doc.set_text_color(*faint)
     doc.cell(0, 9, "RECEIPT", align="R", new_x="LMARGIN", new_y="NEXT")
 
     doc.set_font(_FONT, "", 9)
-    doc.cell(100, 5, _ascii(f["seller"]["tagline"]))
+    doc.cell(100, 5, _ansi(f["seller"]["tagline"]))
     doc.set_font(_FONT, "", 9)
-    doc.cell(0, 5, _ascii(f["number"]), align="R", new_x="LMARGIN", new_y="NEXT")
+    doc.cell(0, 5, _ansi(f["number"]), align="R", new_x="LMARGIN", new_y="NEXT")
     doc.ln(6)
 
     # ── who / when ──────────────────────────────────────────────────────────
@@ -153,11 +156,11 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
     doc.cell(90, 5, "BILLED TO", new_x="LMARGIN", new_y="NEXT")
     doc.set_font(_FONT, "", 10)
     doc.set_text_color(*ink)
-    doc.cell(90, 5, _ascii(f["buyer"]["name"]), new_x="LMARGIN", new_y="NEXT")
+    doc.cell(90, 5, _ansi(f["buyer"]["name"]), new_x="LMARGIN", new_y="NEXT")
     if f["buyer"]["email"]:
         doc.set_font(_FONT, "", 9)
         doc.set_text_color(*faint)
-        doc.cell(90, 5, _ascii(f["buyer"]["email"]), new_x="LMARGIN", new_y="NEXT")
+        doc.cell(90, 5, _ansi(f["buyer"]["email"]), new_x="LMARGIN", new_y="NEXT")
     left_end = doc.get_y()
 
     doc.set_xy(110, top)
@@ -171,7 +174,7 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
         doc.cell(24, 5, label)
         doc.set_font(_FONT, "B" if label == "Status" else "", 9)
         doc.set_text_color(*(green if label == "Status" and f["settled"] else ink))
-        doc.cell(0, 5, _ascii(value), new_x="LMARGIN", new_y="NEXT")
+        doc.cell(0, 5, _ansi(value), new_x="LMARGIN", new_y="NEXT")
     doc.set_y(max(left_end, doc.get_y()) + 6)
 
     # ── the line ────────────────────────────────────────────────────────────
@@ -188,14 +191,14 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
 
     doc.set_font(_FONT, "B", 11)
     doc.set_text_color(*ink)
-    doc.cell(120, 6, _ascii(f["item"]["title"]))
-    doc.cell(0, 6, _ascii(f["total_usd"]), align="R", new_x="LMARGIN", new_y="NEXT")
+    doc.cell(120, 6, _ansi(f["item"]["title"]))
+    doc.cell(0, 6, _ansi(f["total_usd"]), align="R", new_x="LMARGIN", new_y="NEXT")
 
     doc.set_font(_FONT, "", 9)
     doc.set_text_color(*faint)
-    doc.cell(0, 5, _ascii(f["item"]["detail"]), new_x="LMARGIN", new_y="NEXT")
+    doc.cell(0, 5, _ansi(f["item"]["detail"]), new_x="LMARGIN", new_y="NEXT")
     if f["item"]["period"]:
-        doc.cell(0, 5, _ascii(f"Covers {f['item']['period']}"),
+        doc.cell(0, 5, _ansi(f"Covers {f['item']['period']}"),
                  new_x="LMARGIN", new_y="NEXT")
     doc.ln(2)
 
@@ -207,20 +210,19 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
     doc.set_font(_FONT, "B", 11)
     doc.set_text_color(*ink)
     doc.cell(120, 7, "Total")
-    doc.cell(0, 7, _ascii(f["total_usd"]), align="R", new_x="LMARGIN", new_y="NEXT")
+    doc.cell(0, 7, _ansi(f["total_usd"]), align="R", new_x="LMARGIN", new_y="NEXT")
 
     if f["paid"]["amount"]:
         doc.set_font(_FONT, "", 9)
         doc.set_text_color(*faint)
-        doc.cell(120, 6, _ascii(f"Settled in {f['paid']['symbol']} "
-                                f"on {f['paid']['rail']}"))
+        doc.cell(120, 6, _ansi(f"Settled on {f['paid']['rail']}"))
         doc.set_text_color(*ink)
-        doc.cell(0, 6, _ascii(f"{f['paid']['amount']} {f['paid']['symbol']}"),
+        doc.cell(0, 6, _ansi(f"{f['paid']['amount']} {f['paid']['symbol']}"),
                  align="R", new_x="LMARGIN", new_y="NEXT")
         if f["paid"]["address"]:
             doc.set_font(_FONT, "", 7.5)
             doc.set_text_color(*faint)
-            doc.cell(0, 5, _ascii(f"Paid to {f['paid']['address']}"),
+            doc.cell(0, 5, _ansi(f"Paid to {f['paid']['address']}"),
                      new_x="LMARGIN", new_y="NEXT")
     doc.ln(6)
 
@@ -228,7 +230,7 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
     doc.set_font(_FONT, "", 8)
     doc.set_text_color(*faint)
     for note in f["notes"]:
-        doc.multi_cell(0, 4.5, _ascii(note))
+        doc.multi_cell(0, 4.5, _ansi(note))
         doc.ln(1)
 
     seller = f["seller"]
@@ -237,7 +239,7 @@ def pdf(order: dict, account: Optional[dict] = None) -> bytes:
                                    if seller["tax_id"] else "")) if x)
     if tail:
         doc.ln(2)
-        doc.multi_cell(0, 4.5, _ascii(tail))
+        doc.multi_cell(0, 4.5, _ansi(tail))
 
     out = doc.output()
     return bytes(out) if not isinstance(out, (bytes, bytearray)) else bytes(out)

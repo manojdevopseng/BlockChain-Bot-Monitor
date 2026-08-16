@@ -111,8 +111,10 @@ export function Receipt({ orderId }: { orderId: string }) {
             {data.paid?.amount ? (
               <>
                 <div className="flex items-baseline justify-between gap-3">
+                  {/* The rail label already names the coin — "in USDT on
+                      USDT on BNB Chain" is how that reads otherwise. */}
                   <span className="text-xs text-text-dim">
-                    Settled in {data.paid.symbol} on {data.paid.rail}
+                    Settled on {data.paid.rail}
                   </span>
                   <span className="shrink-0 font-mono text-xs text-text tabular-nums">
                     {data.paid.amount} {data.paid.symbol}
