@@ -80,12 +80,17 @@ _HISTORY_CANDLES = 500
 # and comes back — a price bouncing on the 30 line would otherwise ring twice a
 # minute.
 _ALERT_COOLDOWN = 900.0
-# How many steps in the series must actually have moved before an RSI is worth
-# alerting on. Measured on live tokens: AIB moved 16 times in 499 five-minute
-# candles and read 3.60 "oversold" — the reading of a pool nobody is trading,
-# not of a token being sold. Ten is low enough that a quiet but real token
-# still fires and high enough that pure padding never does.
+# How alive a series has to be before its RSI is worth alerting on.
+#
+# Both, because either alone is wrong. A count alone lets padding through: AIB
+# moved 16 times in 499 five-minute candles — over any sane count, and still
+# 3.2% of the series, which read 3.60 "oversold" for a pool nobody was trading.
+# A percentage alone is noise on a young token with fifteen candles.
+#
+# Real tokens are nowhere near these lines. Measured the same day: LOCK 94%,
+# DATBOI 100%, the BSC token 99.8%, ETH V4 96.4%.
 _MIN_MOVES = 10
+_MIN_MOVED_PCT = 10.0
 # Concurrent price reads. The endpoint is shared with the rest of the app.
 _READ_GATE = asyncio.Semaphore(6)
 
@@ -98,6 +103,18 @@ def _col(name: str):
 def _utc_now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
+
+
+def _thin(moved: int, steps: int) -> bool:
+    """Is this series too flat for its RSI to mean anything?
+
+    A padded run of identical closes produces a real number — 0 or 100 — that
+    is indistinguishable from a token in freefall unless you also know how
+    often the price actually changed.
+    """
+    if steps <= 0:
+        return True
+    return moved < _MIN_MOVES or (moved / steps * 100.0) < _MIN_MOVED_PCT
 
 
 def bucket(ts: float, interval: str) -> int:
@@ -325,7 +342,7 @@ class RsiTracker:
                   "period": period, "interval": interval, "checked_at": now,
                   "source": source, "moved": moved,
                   "moved_pct": round(moved / steps * 100, 1),
-                  "thin": moved < _MIN_MOVES,
+                  "thin": _thin(moved, steps),
                   "day": ist_date_str(now), "dt": _utc_now()}
         # Back to neutral is what re-arms the next alert — recorded even while
         # a cooldown is running, because it is not an announcement.
@@ -338,9 +355,10 @@ class RsiTracker:
         # A series that barely moved has no RSI worth sending. Padding turns
         # into 0 or 100, and those are the two values most likely to look like
         # the alert of the day. The panel still shows the number, marked thin.
-        if moved < _MIN_MOVES:
+        if _thin(moved, steps):
             log.info(f"[RSI] {token.get('symbol') or addr[:10]} {turn} not sent — "
-                     f"only {moved} of {steps} steps moved ({source})")
+                     f"only {moved} of {steps} steps moved "
+                     f"({moved / steps * 100:.1f}%, {source})")
             return
         await _col("rsi_state").update_one(
             {"chain": chain, "address": addr},
