@@ -89,6 +89,42 @@ function BioText({ text, address, keywords }: {
   return <>{parts}</>;
 }
 
+/* How many tokens have come from this X account.
+ *
+ * Measured over fifteen days of live rows when this was written: 2,365 accounts
+ * had launched more than once, and the busiest had eighty-one. So the number is
+ * coloured rather than just printed — one launch is nothing, three is worth a
+ * glance, and eighty-one is a factory. */
+function DuplicateCount({ seq, total, handle, symbols }: {
+  seq?: number; total?: number; handle?: string; symbols?: string[];
+}) {
+  if (!handle) return <span className="text-xs text-text-dim">—</span>;
+  const n = Number(seq ?? 0);
+  // No sequence and no total means the handle came from a post link, which is
+  // deliberately not counted — that is information, not a gap.
+  if (!n && !total) return <span className="text-xs text-text-dim">—</span>;
+  if (n <= 1 && (total ?? 1) <= 1) {
+    return <span className="text-xs text-text-dim" title="First launch from this account">first</span>;
+  }
+  const worst = Math.max(n, total ?? 0);
+  const tone = worst >= 25 ? "text-accent-red"
+             : worst >= 10 ? "text-accent-amber"
+             : "text-text-muted";
+  const tip = [
+    n > 1 ? `This was launch #${n} from @${handle}` : `@${handle}`,
+    total ? `${total} launches from this account so far` : "",
+    symbols?.length ? `Recent tickers: ${symbols.join(", ")}` : "",
+  ].filter(Boolean).join("\n");
+  return (
+    <span className={cn("font-mono text-xs font-semibold", tone)} title={tip}>
+      ×{n || total}
+      {total && n && total > n ? (
+        <span className="ml-1 font-normal text-text-dim">of {total}</span>
+      ) : null}
+    </span>
+  );
+}
+
 export function LaunchpadSection() {
   const [pad, setPad] = useState("all");
   const [q, setQ] = useState("");
@@ -218,6 +254,10 @@ export function LaunchpadSection() {
               <th className="px-3 py-2.5 font-medium">Token</th>
               <th className="px-3 py-2.5 font-medium">Age</th>
               <th className="px-3 py-2.5 font-medium">Account</th>
+              <th className="px-3 py-2.5 font-medium"
+                  title="How many tokens this X account has launched. Counted from a profile link only — a link to somebody's post is not that account launching.">
+                Duplicated
+              </th>
               <th className="px-3 py-2.5 font-medium">Followers</th>
               <th className="px-3 py-2.5 font-medium">Dev Buy</th>
               <th className="px-3 py-2.5 font-medium" title="The X account's bio">Text</th>
@@ -227,7 +267,7 @@ export function LaunchpadSection() {
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
+              <tr><td colSpan={10} className="px-3 py-10 text-center text-text-dim">
                 {query ? "Nothing matches this search"
                   : date ? `No launches on ${date}`
                   : withX ? "No launch here carries an X account"
@@ -294,6 +334,14 @@ export function LaunchpadSection() {
                       )}
                     </>
                   ) : <span className="text-xs text-text-dim">—</span>}
+                </td>
+                {/* The row's own place in the series, not the account's
+                    current total: this launch was the Nth, and that stays true
+                    however many come after it. The total is in the tooltip,
+                    because it is the thing that keeps changing. */}
+                <td className="px-3 py-3">
+                  <DuplicateCount seq={r.handle_seq} total={r.handle_launches}
+                                  handle={r.handle} symbols={r.handle_symbols} />
                 </td>
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text">

@@ -334,6 +334,13 @@ async def ensure_indexes() -> None:
         # document per token, so it is bounded by that list rather than by time.
         ("mcap_tokens",        [("chain", 1), ("address", 1)]),
         ("mcap_state",         [("chain", 1), ("address", 1)]),
+        # Counting an account's launches, and the column that shows it. There
+        # was no index on handle at all before this.
+        ("launchpad_tokens",   [("handle", 1), ("open_timestamp", -1)]),
+        # The tally itself is keyed by _id (the lower-case handle), so only the
+        # "busiest accounts" sort needs an index. Deliberately absent from
+        # _TTL_COLLECTIONS: a count that expires is not a count.
+        ("x_accounts",         [("launches", -1)]),
         ("launchpad_skip",     "handle"),
         ("launchpad_watch",    "handle"),
     ]

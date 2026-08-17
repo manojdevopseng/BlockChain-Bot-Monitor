@@ -99,6 +99,17 @@ async def lifespan(app: FastAPI):
     await db.ensure_indexes()
     await registry.seed()
     await seed.seed_all()
+    # Count the launches already on file before anything reads the tally.
+    # Without it every account reads as its first launch on the day this
+    # ships, which is wrong for the thousands that already have more than one.
+    # Fills in only accounts it has never seen, so it is safe on every boot.
+    try:
+        from . import x_accounts
+        seeded = await x_accounts.backfill()
+        if seeded:
+            print(f"[startup] counted {seeded} X account(s) from the launches on file")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] X account tally not seeded (continuing): {exc}")
     await supervisor.start()
     _heartbeat_task = asyncio.create_task(_heartbeat())
     # Alerting must never be able to stop the bot from starting.

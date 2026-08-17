@@ -638,6 +638,16 @@ class RbhXMonitor:
                    "website": (launch.website if launch is not None else ""),
                    "image": (launch.image if launch is not None else "")}
             if not pad_skipped:
+                # Which launch this is from that account. Taken here rather
+                # than counted at read time because the row has to keep saying
+                # "the 3rd" for ever — the launch rows expire after fifteen
+                # days and a count made from them would reset with them.
+                from app import x_accounts
+                if x_accounts.counts_towards(handle, handle_source or ""):
+                    seq = await x_accounts.note(handle, row.get("symbol") or "",
+                                                pad.id, now)
+                    if seq:
+                        row["handle_seq"] = seq
                 await _col("launchpad_tokens").update_one({"address": addr},
                                                           {"$set": row}, upsert=True)
                 from app.ws_hub import hub
@@ -788,6 +798,15 @@ class RbhXMonitor:
             }
             update["matched_keywords"] = keyword_match(
                 self._keywords, update["excerpt"])
+            # The account arrived after the launch, so this is where it gets
+            # counted. Without this every late-socials launchpad — Virtuals is
+            # one — would never appear in the tally at all.
+            from app import x_accounts
+            if x_accounts.counts_towards(launch.handle, update["handle_source"]):
+                seq = await x_accounts.note(launch.handle, row.get("symbol") or "",
+                                            pad.id, row.get("open_timestamp"))
+                if seq:
+                    update["handle_seq"] = seq
             await _col("launchpad_tokens").update_one({"address": addr},
                                                       {"$set": update})
             merged = {**row, **update}
@@ -1028,6 +1047,21 @@ def _mentions_address(texts: list[str], address: str) -> bool:
                for text in texts for m in _ADDRESS_RE.finditer(text or ""))
 
 
+# Where a repeat stops being "again" and starts being a factory. Measured over
+# fifteen days of live rows: 2,365 accounts launched more than once, and the
+# busiest — @clockincoin at 81, @vaultedrh at 73 — are plainly automated.
+_SERIAL_LAUNCHES = 10
+
+
+def _ordinal(n: int) -> str:
+    """3 -> 3rd. Spelled out rather than "x3" because the banner is a sentence."""
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def _strong_dev_buy(row: dict) -> float:
     """The dev buy on this row, when it is big enough to be worth saying twice.
 
@@ -1056,10 +1090,15 @@ def _pad_alert_text(row: dict) -> str:
     # rest of the message.
     matched = str(row.get("matched_keywords") or "")
     handle, source = row.get("handle"), row.get("handle_source")
+    # Which launch this is from that account. Only ever above one when the
+    # handle came from a profile — a post link is somebody else's tweet and is
+    # deliberately not counted (see app/x_accounts.py).
+    seq = int(row.get("handle_seq") or 0)
     if handle:
         who = (f"👤 @{html.escape(handle)}"
                + (" ✅" if row.get("verified") else "")
                + (" 🔒" if row.get("proved") else "")
+               + (f" · {seq} launches" if seq > 1 else "")
                + (" · from a post" if source == "post" else "") + "\n"
                + (f"👥 {row['followers']:,} followers\n"
                   if row.get("followers") else ""))
@@ -1073,6 +1112,14 @@ def _pad_alert_text(row: dict) -> str:
         # the reason to stop scrolling, and the amount is the whole of it —
         # which is why the ordinary dev-buy line below stands down for it.
         + (f"🟢 <b>Strong Signal</b> — dev bought {strong:.3f} Ξ\n" if strong else "")
+        # A repeat from the same account belongs up here with the other reasons
+        # to look. The wording changes above _SERIAL_LAUNCHES because "the 3rd"
+        # and "the 81st" are not the same fact: one is a project having another
+        # go, the other is a factory.
+        + ("" if seq < 2 else
+           f"⚠️ <b>{_ordinal(seq)} launch from this account</b> — serial launcher\n"
+           if seq >= _SERIAL_LAUNCHES else
+           f"🔁 <b>{_ordinal(seq)} launch from this account</b>\n")
         + (headline + "\n" if headline
            else "👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
         + f"🚀 <b>{pad.upper()} LAUNCH</b>\n"
