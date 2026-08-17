@@ -175,6 +175,13 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "BSC endpoints", "chain": "bnb", "enabled": True},
     {"id": "rsi_rpc_sol",  "category": RSI, "group": "RPC Endpoints",
      "label": "SOL endpoints", "chain": "sol", "enabled": False},
+    # Where the candles come from on ETH, BSC and SOL. On, one request brings
+    # the whole history and a token added a minute ago has an RSI immediately;
+    # off, every token builds its own candles by reading its pool once an
+    # interval, which is what happened before and what still happens on
+    # Robinhood Chain either way — it is on no aggregator at all.
+    {"id": "rsi_gmgn", "category": RSI, "group": "Tracker",
+     "label": "Candles from GMGN (ETH/BSC/SOL)", "chain": None, "enabled": True},
 
     # ── Market Cap Alert ───────────────────────────────────────────────────
     # Same three blocks as the RSI tracker above and for the same reason: is it

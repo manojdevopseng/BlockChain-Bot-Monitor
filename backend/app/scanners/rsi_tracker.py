@@ -29,6 +29,7 @@ import aiohttp
 
 from app import notifier, rsi_math
 from app.scanners import scfg as config
+from app.scanners import rsi_klines
 from app.scanners.rsi_price import PriceReader, chains
 from app.scanners.slog import get_logger
 from app.util import gmgn_url, ist_date_str
@@ -79,6 +80,12 @@ _HISTORY_CANDLES = 500
 # and comes back — a price bouncing on the 30 line would otherwise ring twice a
 # minute.
 _ALERT_COOLDOWN = 900.0
+# How many steps in the series must actually have moved before an RSI is worth
+# alerting on. Measured on live tokens: AIB moved 16 times in 499 five-minute
+# candles and read 3.60 "oversold" — the reading of a pool nobody is trading,
+# not of a token being sold. Ten is low enough that a quiet but real token
+# still fires and high enough that pure padding never does.
+_MIN_MOVES = 10
 # Concurrent price reads. The endpoint is shared with the rest of the app.
 _READ_GATE = asyncio.Semaphore(6)
 
@@ -110,11 +117,27 @@ class RsiTracker:
         # token key -> when its next sample is due, so the one-second tick is a
         # dictionary lookup rather than a database query.
         self._due: dict[str, float] = {}
+        # The shared GMGN client, handed over by the supervisor. None means the
+        # candle source is simply unavailable and every token builds its own,
+        # which is exactly the behaviour that existed before it.
+        self._gmgn = None
 
     # ── switches and settings ────────────────────────────────────────────────
 
     def apply_toggles(self, enabled: dict[str, bool]) -> None:
         self._enabled = dict(enabled)
+
+    def use_gmgn(self, client) -> None:
+        """The shared GMGN client, so candles can come from there."""
+        self._gmgn = client
+
+    def _from_gmgn(self, token: dict) -> bool:
+        """Does this token's series come from GMGN rather than from our own
+        readings? One switch turns the whole thing off, and the chain and the
+        interval both have to be ones GMGN actually serves."""
+        return (self._on("rsi_gmgn", True) and self._gmgn is not None
+                and rsi_klines.serves(token.get("chain", ""),
+                                      token.get("interval") or DEFAULT_INTERVAL))
 
     def _on(self, service: str, default: bool = True) -> bool:
         return bool(self._enabled.get(service, default))
@@ -178,8 +201,12 @@ class RsiTracker:
                 if not self._on("rsi_tracker"):
                     continue
                 now = time.time()
+                # A token served by GMGN is not sampled at all: its candles
+                # arrive whole, so reading the pool once an interval would cost
+                # requests to produce a second, worse copy of the same series.
                 due = [t for t in self._tokens
                        if self._chain_on(t.get("chain", ""))
+                       and not self._from_gmgn(t)
                        and now >= self._due.get(_key(t), 0.0)]
                 if due:
                     await asyncio.gather(*(self._sample(t, now) for t in due))
@@ -252,16 +279,33 @@ class RsiTracker:
                      or period_of(int(self._settings.get("default_candles")
                                       or DEFAULT_CANDLES)))
 
-        # Every candle we have, not just the last period+1. Wilder's RSI smooths
-        # the previous average forward, so a fresh 15-candle window and a long
-        # series give different numbers for the same prices — measured on BUY,
-        # which read 82.1 over the last 15 candles and 49.8 over all 91. The
-        # chart said 49.55. The window was the whole disagreement.
-        candles = await _col("rsi_candles").find(
-            {"chain": chain, "address": addr, "interval": interval},
-            {"_id": 0, "ts": 1, "close": 1},
-        ).sort("ts", -1).limit(_HISTORY_CANDLES).to_list(_HISTORY_CANDLES)
-        closes = [c["close"] for c in reversed(candles)]
+        # Where the series comes from. GMGN for the chains and intervals it
+        # serves — one request, the whole history, so a token added a minute
+        # ago has an RSI immediately instead of after fifteen hours of 1 Hour
+        # candles. Our own readings everywhere else, which is the only option
+        # on Robinhood Chain and stays the fallback when GMGN cannot answer.
+        source = "chain"
+        moved = 0
+        closes: list[float] = []
+        if self._from_gmgn(token):
+            got, moved = await rsi_klines.closes(self._gmgn, chain, addr, interval)
+            if got:
+                closes, source = got, "gmgn"
+
+        if not closes:
+            # Every candle we have, not just the last period+1. Wilder's RSI
+            # smooths the previous average forward, so a fresh 15-candle window
+            # and a long series give different numbers for the same prices —
+            # measured on BUY, which read 82.1 over the last 15 candles and
+            # 49.8 over all 91. The chart said 49.55. The window was the whole
+            # disagreement.
+            candles = await _col("rsi_candles").find(
+                {"chain": chain, "address": addr, "interval": interval},
+                {"_id": 0, "ts": 1, "close": 1},
+            ).sort("ts", -1).limit(_HISTORY_CANDLES).to_list(_HISTORY_CANDLES)
+            closes = [c["close"] for c in reversed(candles)]
+            moved = sum(1 for i in range(1, len(closes))
+                        if closes[i] != closes[i - 1])
         value = rsi_math.rsi(closes, period)
 
         state = await _col("rsi_state").find_one({"chain": chain, "address": addr}) or {}
@@ -271,8 +315,17 @@ class RsiTracker:
         now = time.time()
         cooling = now - float(state.get("last_alert_at") or 0) < _ALERT_COOLDOWN
 
+        # `moved` is the number of steps in the series where the price
+        # actually changed. It is recorded because the RSI alone cannot tell a
+        # real extreme from a dead pool: GMGN pads a quiet candle with the
+        # previous close, and a run of identical closes turns into RSI 0 or
+        # 100 — which looks exactly like a token in freefall.
+        steps = max(1, len(closes) - 1)
         update = {"rsi": value, "zone": here, "samples": len(closes),
                   "period": period, "interval": interval, "checked_at": now,
+                  "source": source, "moved": moved,
+                  "moved_pct": round(moved / steps * 100, 1),
+                  "thin": moved < _MIN_MOVES,
                   "day": ist_date_str(now), "dt": _utc_now()}
         # Back to neutral is what re-arms the next alert — recorded even while
         # a cooldown is running, because it is not an announcement.
@@ -282,6 +335,13 @@ class RsiTracker:
                                            {"$set": update}, upsert=True)
         if not turn or cooling:
             return          # still due: `announced_zone` is deliberately unchanged
+        # A series that barely moved has no RSI worth sending. Padding turns
+        # into 0 or 100, and those are the two values most likely to look like
+        # the alert of the day. The panel still shows the number, marked thin.
+        if moved < _MIN_MOVES:
+            log.info(f"[RSI] {token.get('symbol') or addr[:10]} {turn} not sent — "
+                     f"only {moved} of {steps} steps moved ({source})")
+            return
         await _col("rsi_state").update_one(
             {"chain": chain, "address": addr},
             {"$set": {"last_alert_at": now, "announced_zone": turn}})

@@ -289,6 +289,9 @@ async def _start_worker(name: str) -> None:
         from .scanners.rsi_tracker import RsiTracker
         inst = RsiTracker()
         inst.apply_toggles(await registry.enabled_map())
+        # The same client the SOL scanner uses, so its rate limit and its
+        # Cloudflare-passing fingerprint are shared rather than doubled.
+        inst.use_gmgn(_client)
         _instances["rsi"] = inst
         _tasks["rsi"] = asyncio.create_task(inst.run(), name="rsi-tracker")
         return
