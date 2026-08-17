@@ -15,8 +15,10 @@ Measured before this was written, on all three chains:
     1s 5s 1m 5m 15m 30m 1h 1d   served, and the bucket size is what it says
     10m                          NOT served — zero rows everywhere
 
-so a token on 10 Min keeps building its own candles. `serves()` is the only
-thing that decides, and everything downstream falls back on its own.
+So a token on 10 Min keeps building its own candles, and so does one on 1s or 5s
+— those two are served but not used, for the reason under FINE_INTERVALS.
+`serves()` is the only thing that decides, and everything downstream falls back
+on its own.
 
 Two things this deliberately does not do:
 
@@ -44,9 +46,30 @@ log = get_logger(__name__)
 # nothing for it, and a silent fallback to the nearest size would quietly
 # compute a different indicator than the one the user chose.
 RESOLUTIONS: dict[str, str] = {
-    "1s": "1s", "5s": "5s", "1m": "1m", "5m": "5m",
-    "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d",
+    "1m": "1m", "5m": "5m", "15m": "15m",
+    "30m": "30m", "1h": "1h", "1d": "1d",
 }
+
+# 1s and 5s are served by GMGN and deliberately not used.
+#
+# Two reasons, and the second is the one that matters. A one-second series has
+# to be re-fetched every few seconds to be worth anything, which is twelve
+# requests a minute for a single token — half of the whole GMGN budget. And our
+# own sampler already reads the pool every second at those settings, which is
+# not a worse copy of the same series but a better one: no padding, and no
+# dependency on how quickly somebody else's cache updates.
+FINE_INTERVALS = ("1s", "5s")
+
+# The most requests a minute the RSI tracker may make of GMGN.
+#
+# The client is shared with the SOL scanner, which is the primary detection
+# feed and polls every 5s — twelve requests a minute of a budget of twenty-four
+# (GMGN_SCAN_RATE 0.4). Without a cap of its own, twenty tokens on 1 Min would
+# ask for sixty a minute, and the limiter would serve them by making SOL wait.
+# Over this line the answer is whatever is in the cache, however stale, and
+# failing that the token builds its own candles for that pass.
+MAX_PER_MINUTE = 8
+_recent: list[float] = []
 
 # Chains GMGN carries, in the slugs it uses — which happen to be ours. RBH is
 # not here and cannot be: probed as robinhood / rbh / rhc / robinhoodchain, all
@@ -63,9 +86,20 @@ WANT = 500
 # candle is the most that can be stale without the reading being wrong: inside
 # one candle the close is still moving anyway.
 def _ttl(interval: str) -> float:
-    step = {"1s": 1, "5s": 5, "1m": 60, "5m": 300,
-            "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400}.get(interval, 60)
-    return max(5.0, min(step / 3.0, 120.0))
+    step = _STEPS.get(interval, 60)
+    return max(15.0, min(step / 3.0, 120.0))
+
+
+_STEPS = {"1m": 60, "5m": 300, "15m": 900,
+          "30m": 1800, "1h": 3600, "1d": 86400}
+
+
+def _budget_left() -> bool:
+    """Is there room for another request this minute?"""
+    cutoff = time.time() - 60.0
+    while _recent and _recent[0] < cutoff:
+        _recent.pop(0)
+    return len(_recent) < MAX_PER_MINUTE
 
 
 _cache: dict[tuple[str, str, str], tuple[float, list[float], int]] = {}
@@ -97,8 +131,17 @@ async def closes(client, chain: str, token: str, interval: str,
     if hit and now - hit[0] < _ttl(interval):
         return hit[1], hit[2]
 
-    step = {"1s": 1, "5s": 5, "1m": 60, "5m": 300,
-            "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400}[interval]
+    if not _budget_left():
+        # Stale beats starving the SOL scanner. An RSI a minute old is still
+        # the right shape; a detection feed that stopped polling is not.
+        if hit:
+            return hit[1], hit[2]
+        log.debug(f"[RSI] GMGN budget spent — {token[:10]}… falls back to "
+                  f"its own candles this pass")
+        return None, 0
+
+    step = _STEPS[interval]
+    _recent.append(now)
     try:
         got = await client._web_get(
             f"/defi/quotation/v1/tokens/kline/{chain}/{token}",
