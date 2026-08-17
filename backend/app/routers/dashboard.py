@@ -114,6 +114,30 @@ _LAUNCH_SIGNAL = {"$or": [
 ]}
 
 
+def _take(wanted: str, limit: int) -> dict[str, int]:
+    """How many rows each source may contribute.
+
+    One source asked for by name gets the whole page. Otherwise the quotas are
+    scaled to fit the limit, with a floor of one each — because a section that
+    silently drops a whole source is worse than one that shows a single row from
+    it, and a caller passing a small limit should not be able to defeat the
+    reservation by accident.
+    """
+    if wanted in _QUOTAS:
+        return {k: (limit if k == wanted else 0) for k in _QUOTAS}
+    total = sum(_QUOTAS.values())
+    if limit >= total:
+        return dict(_QUOTAS)
+    share = {k: max(1, round(v / total * limit)) for k, v in _QUOTAS.items()}
+    # Rounding up three ways can overshoot; take the excess off the biggest.
+    while sum(share.values()) > limit:
+        biggest = max(share, key=lambda k: share[k])
+        if share[biggest] <= 1:
+            break
+        share[biggest] -= 1
+    return share
+
+
 def _ago(*values):
     """The first timestamp that is actually set."""
     for v in values:
@@ -132,10 +156,10 @@ async def feed(source: str = "all", limit: int = 28):
     from ..util import gmgn_url
 
     wanted = source if source in _QUOTAS else "all"
-    take = {k: (limit if wanted == k else v) for k, v in _QUOTAS.items()}
+    take = _take(wanted, limit)
     out: list[dict] = []
 
-    if wanted in ("all", "calls"):
+    if take["calls"]:
         rows = await db.get_collection("premium_detections").find({}).sort(
             "created_at", -1).limit(take["calls"]).to_list(take["calls"])
         for r in rows:
@@ -151,7 +175,7 @@ async def feed(source: str = "all", limit: int = 28):
                 "keyword": r.get("keyword") or "",
             })
 
-    if wanted in ("all", "launches"):
+    if take["launches"]:
         rows = await db.get_collection("launchpad_tokens").find(
             _LAUNCH_SIGNAL).sort("open_timestamp", -1).limit(
                 take["launches"]).to_list(take["launches"])
@@ -170,7 +194,7 @@ async def feed(source: str = "all", limit: int = 28):
                 "dev_buy_eth": r.get("dev_buy_eth"),
             })
 
-    if wanted in ("all", "gas"):
+    if take["gas"]:
         rows = await db.get_collection("gas_alerts").find({}).sort(
             "created_at", -1).limit(take["gas"]).to_list(take["gas"])
         for r in rows:
@@ -185,7 +209,11 @@ async def feed(source: str = "all", limit: int = 28):
     for row in out:
         row["gmgn_url"] = gmgn_url(row["chain"], row["address"])
     out.sort(key=lambda r: r["at"], reverse=True)
-    return {"items": clean_list(out[:limit]),
+    # No trim here. `_take` has already decided how many of each source may
+    # appear, and cutting the merged list would undo it: at a limit of 12 that
+    # left eleven launches, one gas alert and no calls at all — exactly the
+    # crowding the quotas exist to prevent.
+    return {"items": clean_list(out),
             "quotas": _QUOTAS,
             "strong_dev_buy_eth": _strong_floor(),
             # Said out loud so the section can explain itself rather than
