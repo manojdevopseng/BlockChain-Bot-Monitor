@@ -85,3 +85,115 @@ async def overview():
 async def activity(limit: int = 8):
     docs = await db.get_collection("alerts").find({}).sort("created_at", -1).limit(limit).to_list(limit)
     return clean_list(docs)
+
+
+# ── The mixed feed ───────────────────────────────────────────────────────────
+#
+# One section showing what the three detection panels found, so the interesting
+# rows can be read without scrolling three of them. Nothing new is stored: this
+# reads the same collections Detections already writes, and the retention on
+# them is unchanged.
+#
+# Quotas per source rather than one newest-first list, and that is the whole
+# design. Measured over 24 hours on the live box: 2,865 launchpad rows, 36 gas
+# alerts, 0 premium calls. Merged straight by time, launchpad is 98.8% of the
+# feed and the rare valuable row — a premium call, a handful a day — is pushed
+# off the screen within minutes by the cheapest one. With a quota each, a call
+# from 17:53 is still there at 18:30, because only a NEWER CALL can displace it.
+_QUOTAS = {"calls": 8, "gas": 8, "launches": 12}
+
+# A launchpad row only joins the mix if it carries a reason. All 2,865 a day
+# would bury everything else; these four cut it to about 640, which is roughly
+# 27 an hour and sits sensibly beside the gas feed. Each is a thing somebody
+# actually acts on.
+_LAUNCH_SIGNAL = {"$or": [
+    {"matched_keywords": {"$nin": [None, ""]}},      # ~417/day
+    {"watched": True},                                # ~7/day
+    {"dev_buy_eth": {"$gt": 0.199}},                  # ~157/day
+    {"followers": {"$gte": 500}},                     # ~222/day
+]}
+
+
+def _ago(*values):
+    """The first timestamp that is actually set."""
+    for v in values:
+        if v:
+            return float(v)
+    return 0.0
+
+
+@router.get("/feed")
+async def feed(source: str = "all", limit: int = 28):
+    """Premium calls, launchpad launches and high-gas buys in one list.
+
+    `source` filters to one of them, which is what the tabs do — and asking for
+    one source gives the whole quota for it rather than a third of the page.
+    """
+    from ..util import gmgn_url
+
+    wanted = source if source in _QUOTAS else "all"
+    take = {k: (limit if wanted == k else v) for k, v in _QUOTAS.items()}
+    out: list[dict] = []
+
+    if wanted in ("all", "calls"):
+        rows = await db.get_collection("premium_detections").find({}).sort(
+            "created_at", -1).limit(take["calls"]).to_list(take["calls"])
+        for r in rows:
+            out.append({
+                "source": "calls", "at": _ago(r.get("created_at"), r.get("ts")),
+                "chain": r.get("chain") or "", "symbol": r.get("symbol") or "",
+                "name": r.get("name") or "", "address": r.get("address") or "",
+                # The group chips the Detections table already draws, with the
+                # colours set in Forwarder → Premium Groups.
+                "groups": r.get("group_entries") or [
+                    {"name": g} for g in (r.get("groups") or [])],
+                "calls": r.get("count"),
+                "keyword": r.get("keyword") or "",
+            })
+
+    if wanted in ("all", "launches"):
+        rows = await db.get_collection("launchpad_tokens").find(
+            _LAUNCH_SIGNAL).sort("open_timestamp", -1).limit(
+                take["launches"]).to_list(take["launches"])
+        for r in rows:
+            out.append({
+                "source": "launches",
+                "at": _ago(r.get("open_timestamp"), r.get("found_at")),
+                "chain": "rbh", "symbol": r.get("symbol") or "",
+                "name": r.get("name") or "", "address": r.get("address") or "",
+                "launchpad": r.get("launchpad_label") or r.get("launchpad") or "",
+                "handle": r.get("handle") or "", "link": r.get("link") or "",
+                "followers": r.get("followers") or 0,
+                "handle_seq": r.get("handle_seq"),
+                "matched_keywords": r.get("matched_keywords") or "",
+                "watched": bool(r.get("watched")),
+                "dev_buy_eth": r.get("dev_buy_eth"),
+            })
+
+    if wanted in ("all", "gas"):
+        rows = await db.get_collection("gas_alerts").find({}).sort(
+            "created_at", -1).limit(take["gas"]).to_list(take["gas"])
+        for r in rows:
+            out.append({
+                "source": "gas", "at": _ago(r.get("created_at")),
+                "chain": r.get("chain") or "eth", "symbol": r.get("symbol") or "",
+                "name": r.get("name") or "", "address": r.get("address") or "",
+                "fee_eth": r.get("fee_eth"), "age_seconds": r.get("age_seconds"),
+                "dex": (r.get("dex") or "").upper(),
+            })
+
+    for row in out:
+        row["gmgn_url"] = gmgn_url(row["chain"], row["address"])
+    out.sort(key=lambda r: r["at"], reverse=True)
+    return {"items": clean_list(out[:limit]),
+            "quotas": _QUOTAS,
+            "strong_dev_buy_eth": _strong_floor(),
+            # Said out loud so the section can explain itself rather than
+            # looking like it is dropping rows: it is, on purpose.
+            "note": "Launches are filtered to those carrying a keyword, a "
+                    "watched account, 500+ followers or a strong dev buy."}
+
+
+def _strong_floor() -> float:
+    from ..scanners import scfg
+    return float(getattr(scfg, "RBHX_DEV_BUY_STRONG_ETH", 0.199) or 0.199)

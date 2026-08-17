@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/DataTable";
 import { Donut } from "@/components/features/Charts";
 import { cn, fmtEth, fmtUsd, timeAgo } from "@/lib/utils";
+import { LiveFeed } from "./_components/LiveFeed";
 
 const ICONS: Record<string, any> = { total_alerts: Bell, total_tokens: Coins, eth_gas: Fuel, watchlist: Eye };
 const TONE: Record<string, any> = { total_alerts: "red", total_tokens: "amber", eth_gas: "blue", watchlist: "cyan" };
@@ -40,6 +41,10 @@ export default function Dashboard() {
             delta={c.delta} icon={ICONS[c.key] || Activity} tone={TONE[c.key] || "purple"} />
         ))}
       </div>
+
+      {/* The three detection feeds in one list, above everything else: it is
+          what the page is opened to look at. */}
+      <LiveFeed />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* recent alerts */}

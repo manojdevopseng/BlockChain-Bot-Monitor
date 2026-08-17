@@ -20,7 +20,11 @@ const EVENT_KEYS: Record<string, string[]> = {
   alert: ["/api/alerts", "/api/dashboard", "/api/rpc", "/api/tokens"],
   log: ["/api/logs"],
   service_changed: ["/api/settings/services", "/api/chains", "/api/rpc", "/api/system", "/api/dashboard"],
-  premium_detection: ["/api/forwarder"],
+  // All three also feed the dashboard's Live Activity section, so it fills in
+  // as things happen rather than on the next poll.
+  premium_detection: ["/api/forwarder", "/api/dashboard/feed"],
+  launchpad_token: ["/api/launchpad", "/api/dashboard/feed"],
+  gas_alert: ["/api/dashboard", "/api/tokens"],
   // One token, pushed the moment the X feed finds it. Revalidating the section
   // on the event is what makes rows arrive one at a time instead of a poll at a
   // time.
