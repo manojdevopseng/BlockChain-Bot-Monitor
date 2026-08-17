@@ -1,22 +1,29 @@
 """Candles from GMGN, for the chains it serves.
 
-The tracker builds its own candles by reading a pool once per interval and
-writing down the close. That is the only way on Robinhood Chain, which is on no
-aggregator at all — but on Ethereum, BNB Chain and Solana it means a new token
-has no RSI until enough intervals have passed. On the 1 Hour setting that is
-fifteen hours of waiting for a number a chart shows immediately.
+The tracker can build its own candles by reading a pool once per interval and
+writing down the close, and for a while that was the only way on Robinhood
+Chain. It is a poor way: a token that trades a few times an hour gets the same
+mid-price written twenty times over, and no chart will ever agree with the RSI
+that comes out of it. Measured on STONKBANKERS — 293 one-minute candles, 27
+distinct prices.
 
-GMGN answers the same question in one request: up to 3000 candles, at the
-resolution asked for, going back as far as the token has traded. So on those
-three chains the series comes from here and the pool is not read at all.
+GMGN answers the same question properly, in one request: the newest N candles
+with real OHLC, at the resolution asked for, on all four chains including
+Robinhood. So the series comes from here and the pool is not read at all.
 
 Measured before this was written, on all three chains:
 
-    1s 5s 1m 5m 15m 30m 1h 1d   served, and the bucket size is what it says
-    10m                          NOT served — zero rows everywhere
+    1m 5m 15m 30m 1h 1d   served on eth, bsc, sol AND robinhood, and each
+                          bucket is the size it claims
+    10m                   not served anywhere
+    1s 5s                 answered, but the buckets are not the size asked for
+                          — on a thin token they come back trade-spaced (5s
+                          returning 225s buckets on Robinhood, 130s on BSC), so
+                          they are unusable whatever the request said
 
 So a token on 10 Min keeps building its own candles, and so does one on 1s or 5s
-— those two are served but not used, for the reason under FINE_INTERVALS.
+— for those two the measured bucket sizes are the reason, not just the cost
+under FINE_INTERVALS.
 `serves()` is the only thing that decides, and everything downstream falls back
 on its own.
 
@@ -71,10 +78,11 @@ FINE_INTERVALS = ("1s", "5s")
 MAX_PER_MINUTE = 8
 _recent: list[float] = []
 
-# Chains GMGN carries, in the slugs it uses — which happen to be ours. RBH is
-# not here and cannot be: probed as robinhood / rbh / rhc / robinhoodchain, all
-# four answer with nothing.
-CHAINS = ("eth", "bsc", "sol")
+# Our chain key -> the slug GMGN uses. Robinhood is in here, and finding that
+# out took two goes: the older /defi/quotation/v1/tokens/kline/ endpoint answers
+# "network not supported" for it, which looks exactly like a chain GMGN does not
+# carry. It does carry it — on /api/v1/token_candles/, which serves all four.
+CHAINS = {"eth": "eth", "bsc": "bsc", "sol": "sol", "rbh": "robinhood"}
 
 # One request is up to 3000 candles; this is what the tracker actually needs.
 # Wilder's RSI keeps smoothing forward, so a longer series is a different (and
@@ -140,17 +148,24 @@ async def closes(client, chain: str, token: str, interval: str,
                   f"its own candles this pass")
         return None, 0
 
-    step = _STEPS[interval]
     _recent.append(now)
     try:
+        # `limit`, not from/to: this endpoint ignores a time range and answers
+        # with the newest `limit` candles. Asked for 500 on 1m it returns 500,
+        # spanning about 27 hours.
         got = await client._web_get(
-            f"/defi/quotation/v1/tokens/kline/{chain}/{token}",
-            {"resolution": RESOLUTIONS[interval],
-             "from": int(now) - want * step, "to": int(now)})
+            f"/api/v1/token_candles/{CHAINS[chain]}/{token}",
+            {"resolution": RESOLUTIONS[interval], "limit": want})
     except Exception as exc:  # noqa: BLE001
         log.debug(f"[RSI] GMGN candles for {token[:10]}… ({chain} {interval}): {exc}")
         return None, 0
 
+    # This surface reports failure in the body rather than the status: a chain
+    # it does not know answers 200 with a non-zero code and an empty list.
+    if isinstance(got, dict) and got.get("code") not in (0, None):
+        log.debug(f"[RSI] GMGN candles for {token[:10]}… ({chain} {interval}): "
+                  f"{got.get('message') or got.get('msg')}")
+        return None, 0
     data = (got or {}).get("data") if isinstance(got, dict) else None
     rows = data.get("list") if isinstance(data, dict) else data
     if not isinstance(rows, list) or not rows:
