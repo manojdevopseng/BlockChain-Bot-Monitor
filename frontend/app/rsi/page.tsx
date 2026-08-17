@@ -313,13 +313,14 @@ export default function RsiPage() {
                             alert is sent for these, and the row says why. */}
                         {r.thin && (
                           <div className="mt-0.5 text-[10px] text-accent-amber"
-                               title={`Only ${r.moved ?? 0} of the last candles changed price — no alert is sent on a series this flat`}>
-                            barely traded · {r.moved_pct ?? 0}% moved
+                               title={`Only ${r.moved_recent ?? 0} of the last ${r.moved_window ?? 0} candles changed price — no alert is sent on a series this flat. Over the whole series: ${r.moved_pct ?? 0}%.`}>
+                            barely traded · {r.moved_recent_pct ?? r.moved_pct ?? 0}% moved
                           </div>
                         )}
                         {r.source === "gmgn" && !r.thin && (
-                          <div className="mt-0.5 text-[10px] text-text-dim">
-                            {r.moved_pct}% moved
+                          <div className="mt-0.5 text-[10px] text-text-dim"
+                               title={`Of the last ${r.moved_window ?? 0} candles. Whole series: ${r.moved_pct ?? 0}%.`}>
+                            {r.moved_recent_pct ?? r.moved_pct}% moved
                           </div>
                         )}
                       </div>

@@ -152,6 +152,12 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
                # rather than showing 3.60 "oversold" as if it were a signal.
                "source": st.get("source") or "",
                "moved": st.get("moved"), "moved_pct": st.get("moved_pct"),
+               # The decisive figure is the recent window, not the whole
+               # series — a token that traded an hour ago and has been flat
+               # since reads healthy over 300 candles and dead over the last 60.
+               "moved_recent": st.get("moved_recent"),
+               "moved_recent_pct": st.get("moved_recent_pct"),
+               "moved_window": st.get("moved_window"),
                "thin": bool(st.get("thin")),
                "checked_at": st.get("checked_at"), "updated_at": st.get("updated_at"),
                "last_alert_at": st.get("last_alert_at"),

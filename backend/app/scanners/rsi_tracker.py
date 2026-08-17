@@ -89,8 +89,17 @@ _ALERT_COOLDOWN = 900.0
 #
 # Real tokens are nowhere near these lines. Measured the same day: LOCK 94%,
 # DATBOI 100%, the BSC token 99.8%, ETH V4 96.4%.
-_MIN_MOVES = 10
+_MIN_MOVES = 5
 _MIN_MOVED_PCT = 10.0
+# And measured over the END of the series, not all of it.
+#
+# This is the bug STONKBANKERS found. Its whole series read 8.9% moved, which
+# scraped past the line — but the last fifty candles held THREE distinct prices,
+# 4.1% moved, and it was those that produced the 6.2 the alert went out with.
+# Wilder's RSI is dominated by its recent candles, so the liveness test has to
+# look at the same ones. A token that traded early and then went quiet passes a
+# whole-series check for hours after it stopped being worth reading.
+_MOVE_WINDOW = 60
 # Concurrent price reads. The endpoint is shared with the rest of the app.
 _READ_GATE = asyncio.Semaphore(6)
 
@@ -103,6 +112,15 @@ def _col(name: str):
 def _utc_now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
+
+
+def _moves(closes: list[float], window: int = 0) -> tuple[int, int]:
+    """(steps where the price changed, steps looked at) over the last `window`."""
+    seq = closes[-window:] if window else closes
+    if len(seq) < 2:
+        return 0, 0
+    return (sum(1 for i in range(1, len(seq)) if seq[i] != seq[i - 1]),
+            len(seq) - 1)
 
 
 def _thin(moved: int, steps: int) -> bool:
@@ -321,8 +339,9 @@ class RsiTracker:
                 {"_id": 0, "ts": 1, "close": 1},
             ).sort("ts", -1).limit(_HISTORY_CANDLES).to_list(_HISTORY_CANDLES)
             closes = [c["close"] for c in reversed(candles)]
-            moved = sum(1 for i in range(1, len(closes))
-                        if closes[i] != closes[i - 1])
+            moved, _ = _moves(closes)
+        # The liveness of the part that actually decides the reading.
+        live, live_steps = _moves(closes, _MOVE_WINDOW)
         value = rsi_math.rsi(closes, period)
 
         state = await _col("rsi_state").find_one({"chain": chain, "address": addr}) or {}
@@ -340,9 +359,13 @@ class RsiTracker:
         steps = max(1, len(closes) - 1)
         update = {"rsi": value, "zone": here, "samples": len(closes),
                   "period": period, "interval": interval, "checked_at": now,
-                  "source": source, "moved": moved,
-                  "moved_pct": round(moved / steps * 100, 1),
-                  "thin": _thin(moved, steps),
+                  "source": source,
+                  # Whole series, for context…
+                  "moved": moved, "moved_pct": round(moved / steps * 100, 1),
+                  # …and the last _MOVE_WINDOW candles, which is what decides.
+                  "moved_recent": live, "moved_window": live_steps,
+                  "moved_recent_pct": round(live / max(1, live_steps) * 100, 1),
+                  "thin": _thin(live, live_steps),
                   "day": ist_date_str(now), "dt": _utc_now()}
         # Back to neutral is what re-arms the next alert — recorded even while
         # a cooldown is running, because it is not an announcement.
@@ -355,10 +378,10 @@ class RsiTracker:
         # A series that barely moved has no RSI worth sending. Padding turns
         # into 0 or 100, and those are the two values most likely to look like
         # the alert of the day. The panel still shows the number, marked thin.
-        if _thin(moved, steps):
+        if _thin(live, live_steps):
             log.info(f"[RSI] {token.get('symbol') or addr[:10]} {turn} not sent — "
-                     f"only {moved} of {steps} steps moved "
-                     f"({moved / steps * 100:.1f}%, {source})")
+                     f"only {live} of the last {live_steps} steps moved "
+                     f"({live / max(1, live_steps) * 100:.1f}%, {source})")
             return
         await _col("rsi_state").update_one(
             {"chain": chain, "address": addr},
