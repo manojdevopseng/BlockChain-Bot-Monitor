@@ -146,6 +146,13 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
         row = {**row,
                "rsi": st.get("rsi"), "zone": st.get("zone") or "",
                "price": st.get("price"), "samples": st.get("samples") or 0,
+               # Where the candles came from, and how much of the series
+               # actually moved. A reading off a padded run is a real number
+               # and a meaningless one; the page has to be able to say so
+               # rather than showing 3.60 "oversold" as if it were a signal.
+               "source": st.get("source") or "",
+               "moved": st.get("moved"), "moved_pct": st.get("moved_pct"),
+               "thin": bool(st.get("thin")),
                "checked_at": st.get("checked_at"), "updated_at": st.get("updated_at"),
                "last_alert_at": st.get("last_alert_at"),
                "interval_label": INTERVAL_LABELS.get(row.get("interval"), ""),

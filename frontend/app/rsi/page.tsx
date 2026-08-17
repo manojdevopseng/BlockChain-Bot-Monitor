@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
 import { ExternalLink } from "lucide-react";
-import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
+import { cn, fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
 import { MarketCapSection } from "./_components/MarketCapSection";
 import { MarketCapCheck } from "./_components/MarketCapCheck";
 
@@ -295,9 +295,33 @@ export default function RsiPage() {
                         warming up {r.samples ?? 0}/{r.candles ?? 15}
                       </span>
                     ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-sm text-text">{r.rsi.toFixed(1)}</span>
-                        {r.zone && <Badge variant={ZONE_TONE[r.zone] || "gray"}>{r.zone}</Badge>}
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn("font-mono text-sm",
+                                              r.thin ? "text-text-dim" : "text-text")}>
+                            {r.rsi.toFixed(1)}
+                          </span>
+                          {r.zone && (
+                            <Badge variant={r.thin ? "gray" : (ZONE_TONE[r.zone] || "gray")}>
+                              {r.zone}
+                            </Badge>
+                          )}
+                        </div>
+                        {/* A reading off a series that barely moved is a real
+                            number and a meaningless one — 0 or 100 out of a run
+                            of identical closes reads exactly like a crash. No
+                            alert is sent for these, and the row says why. */}
+                        {r.thin && (
+                          <div className="mt-0.5 text-[10px] text-accent-amber"
+                               title={`Only ${r.moved ?? 0} of the last candles changed price — no alert is sent on a series this flat`}>
+                            barely traded · {r.moved_pct ?? 0}% moved
+                          </div>
+                        )}
+                        {r.source === "gmgn" && !r.thin && (
+                          <div className="mt-0.5 text-[10px] text-text-dim">
+                            {r.moved_pct}% moved
+                          </div>
+                        )}
                       </div>
                     )}
                   </td>
