@@ -125,8 +125,21 @@ def serves(chain: str, interval: str) -> bool:
     return chain in CHAINS and interval in RESOLUTIONS
 
 
+def _key_of(chain: str, token: str) -> str:
+    """The address as GMGN wants it.
+
+    Folded to lower case on the EVM chains, where it is hex and case carries
+    nothing. NOT on Solana: a mint is base58 and case is part of it, so
+    lowercasing turns So111…112 into an address that does not exist — which
+    comes back as an empty answer and reads exactly like "GMGN has no data for
+    this token".
+    """
+    return token if chain == "sol" else (token or "").lower()
+
+
 def forget(chain: str, token: str) -> None:
-    for key in [k for k in _cache if k[0] == chain and k[1] == token.lower()]:
+    who = _key_of(chain, token)
+    for key in [k for k in _cache if k[0] == chain and k[1] == who]:
         _cache.pop(key, None)
 
 
@@ -139,7 +152,7 @@ async def closes(client, chain: str, token: str, interval: str,
     """
     if not serves(chain, interval) or client is None:
         return None, 0
-    token = token.lower()
+    token = _key_of(chain, token)
     key = (chain, token, interval)
     hit = _cache.get(key)
     now = time.time()

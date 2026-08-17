@@ -314,16 +314,22 @@ class RsiTracker:
                      or period_of(int(self._settings.get("default_candles")
                                       or DEFAULT_CANDLES)))
 
-        # Where the series comes from. GMGN for the chains and intervals it
-        # serves — one request, the whole history, so a token added a minute
-        # ago has an RSI immediately instead of after fifteen hours of 1 Hour
-        # candles. Our own readings everywhere else, which is the only option
-        # on Robinhood Chain and stays the fallback when GMGN cannot answer.
+        # Where the series comes from. GMGN on every chain and interval it
+        # serves — one request, the whole history with real OHLC, so a token
+        # added a minute ago has an RSI immediately and it is made of trades
+        # rather than of the same pool price read over and over. Our own
+        # sampling is the fallback for what it does not serve (1s, 5s, 10m) and
+        # for any pass where it cannot answer.
+        #
+        # The ADDRESS AS STORED, not the lower-cased key: a Solana mint is
+        # base58 and case is part of it, so `addr` would ask GMGN about a token
+        # that does not exist and get an empty answer back.
         source = "chain"
         moved = 0
         closes: list[float] = []
         if self._from_gmgn(token):
-            got, moved = await rsi_klines.closes(self._gmgn, chain, addr, interval)
+            got, moved = await rsi_klines.closes(
+                self._gmgn, chain, token.get("address") or addr, interval)
             if got:
                 closes, source = got, "gmgn"
 
