@@ -73,9 +73,11 @@ FINE_INTERVALS = ("1s", "5s")
 # feed and polls every 5s — twelve requests a minute of a budget of twenty-four
 # (GMGN_SCAN_RATE 0.4). Without a cap of its own, twenty tokens on 1 Min would
 # ask for sixty a minute, and the limiter would serve them by making SOL wait.
+# Ten leaves two spare after SOL's twelve, and covers the ten tokens tracked
+# today with room: measured demand at these intervals is 6.2 a minute.
 # Over this line the answer is whatever is in the cache, however stale, and
 # failing that the token builds its own candles for that pass.
-MAX_PER_MINUTE = 8
+MAX_PER_MINUTE = 10
 _recent: list[float] = []
 
 # Our chain key -> the slug GMGN uses. Robinhood is in here, and finding that
@@ -89,13 +91,18 @@ CHAINS = {"eth": "eth", "bsc": "bsc", "sol": "sol", "rbh": "robinhood"}
 # steadier) number — 500 is where it stops moving in the third decimal.
 WANT = 500
 
-# How long an answer is reused. The evaluator runs every cadence (10s at the
-# fastest) and would otherwise ask GMGN once per token per pass. A third of the
-# candle is the most that can be stale without the reading being wrong: inside
-# one candle the close is still moving anyway.
+# How long an answer is reused. The evaluator runs every cadence and would
+# otherwise ask GMGN once per token per pass.
+#
+# Half the candle rather than a third. Inside one candle the close is still
+# moving, so a reading from halfway through it is the same candle either way —
+# and the difference matters: at a third, two tokens on 1 Min alone wanted six
+# requests a minute of a budget of ten. At a half they want four, and the ten
+# tracked tokens fit inside the ceiling instead of half of them falling back to
+# sampling every pass.
 def _ttl(interval: str) -> float:
     step = _STEPS.get(interval, 60)
-    return max(15.0, min(step / 3.0, 120.0))
+    return max(15.0, min(step / 2.0, 120.0))
 
 
 _STEPS = {"1m": 60, "5m": 300, "15m": 900,
