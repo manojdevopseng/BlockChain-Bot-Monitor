@@ -95,11 +95,12 @@ async def activity(limit: int = 8):
 # them is unchanged.
 #
 # Quotas per source rather than one newest-first list, and that is the whole
-# design. Measured over 24 hours on the live box: 2,865 launchpad rows, 36 gas
-# alerts, 0 premium calls. Merged straight by time, launchpad is 98.8% of the
-# feed and the rare valuable row — a premium call, a handful a day — is pushed
-# off the screen within minutes by the cheapest one. With a quota each, a call
-# from 17:53 is still there at 18:30, because only a NEWER CALL can displace it.
+# design. Measured over 24 hours on the live box: 2,865 launchpad rows, 48
+# premium calls, 36 gas alerts. Merged straight by time, launchpad is 97% of the
+# feed and the two feeds worth reading closely — roughly one call and one gas
+# alert every half hour — are pushed off the screen within minutes by the
+# cheapest one. With a quota each, a call from 17:53 is still there at 18:30,
+# because only a NEWER CALL can displace it.
 _QUOTAS = {"calls": 8, "gas": 8, "launches": 12}
 
 # A launchpad row only joins the mix if it carries a reason. All 2,865 a day
@@ -160,11 +161,15 @@ async def feed(source: str = "all", limit: int = 28):
     out: list[dict] = []
 
     if take["calls"]:
+        # `ts`, not `created_at` — that field does not exist on this collection,
+        # and sorting by a missing one silently returns an arbitrary eight
+        # rather than the newest eight. The Detections panel next door has
+        # always sorted by ts; this was the odd one out.
         rows = await db.get_collection("premium_detections").find({}).sort(
-            "created_at", -1).limit(take["calls"]).to_list(take["calls"])
+            "ts", -1).limit(take["calls"]).to_list(take["calls"])
         for r in rows:
             out.append({
-                "source": "calls", "at": _ago(r.get("created_at"), r.get("ts")),
+                "source": "calls", "at": _ago(r.get("ts"), r.get("created_at")),
                 "chain": r.get("chain") or "", "symbol": r.get("symbol") or "",
                 "name": r.get("name") or "", "address": r.get("address") or "",
                 # The group chips the Detections table already draws, with the
