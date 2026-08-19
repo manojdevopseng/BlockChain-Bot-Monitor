@@ -22,6 +22,7 @@ from typing import Dict
 import aiohttp
 
 from app.scanners import scfg as config
+from app.scanners.bounded_set import BoundedSet
 from app.scanners.onchain_detector import DetectedToken
 from app.scanners.slog import get_logger
 from app.util import esc
@@ -42,6 +43,19 @@ class GasMonitorManager:
     def __init__(self, provider: WSProvider) -> None:
         self._provider = provider
         self._monitors: Dict[str, SwapMonitor] = {}   # token address -> monitor
+        # Tokens that have already produced an alert.
+        #
+        # `_monitors` alone does not cover this. It is keyed by token, so a
+        # second pool is skipped while the first monitor is running — but a
+        # monitor stops when it fires, `_reap` drops it, and the next pool for
+        # the same token then starts a fresh one. FOLD made eighteen V4 pools
+        # in half an hour and sent three alerts that way, which is three
+        # notifications for one thing happening.
+        #
+        # Bounded rather than cleared on a timer: the point is "have we already
+        # said this", and after a few thousand other tokens the answer stops
+        # mattering.
+        self._alerted = BoundedSet(4000)
         self._session: aiohttp.ClientSession | None = None
 
     async def close(self) -> None:
@@ -66,6 +80,8 @@ class GasMonitorManager:
         self._reap()                            # drop finished monitors first
         if key in self._monitors:
             return                              # already watching
+        if key in self._alerted:
+            return                              # already reported — see _alerted
         if len(self._monitors) >= config.MAX_GAS_MONITORS:
             log.warning(
                 f"[GasMonitor] cap reached ({config.MAX_GAS_MONITORS}) — "
@@ -90,6 +106,10 @@ class GasMonitorManager:
 
     async def _fire(self, token: DetectedToken, fee_eth: float,
                     age_seconds: int, tx_hash: str) -> None:
+        # Marked before the alert goes out, not after: storing and sending both
+        # await, and another pool for the same token landing in between is
+        # exactly the case this exists to stop.
+        self._alerted.add(token.address.lower())
         await self._store(token, fee_eth, age_seconds, tx_hash)
         await self._send_telegram(token, fee_eth, age_seconds)
 
