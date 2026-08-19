@@ -78,6 +78,35 @@ async def _source_title(event, bare: int) -> str:
     return f"group {bare}"
 
 
+# Subscriber counts, cached per chat. Telethon's cached entity usually has no
+# participants_count — only a full-channel request carries it — and asking
+# Telegram for one on every message would be an API call per post in every
+# group we watch. It changes by the hour at most, so it is asked for once and
+# reused until it goes stale.
+_FOLLOWERS: dict[int, tuple[float, int | None]] = {}
+_FOLLOWERS_TTL = 6 * 3600
+
+
+async def _followers(client, chat, bare: int) -> int | None:
+    import time as _t
+    hit = _FOLLOWERS.get(bare)
+    if hit and _t.time() - hit[0] < _FOLLOWERS_TTL:
+        return hit[1]
+    count = getattr(chat, "participants_count", None)
+    if not count:
+        try:
+            from telethon.tl.functions.channels import GetFullChannelRequest
+            full = await client(GetFullChannelRequest(chat))
+            count = getattr(full.full_chat, "participants_count", None)
+        except Exception:  # noqa: BLE001
+            # Basic groups, or a channel we cannot ask about. Cached as None so
+            # the failure is not retried on every single message.
+            count = None
+    count = int(count) if count else None
+    _FOLLOWERS[bare] = (_t.time(), count)
+    return count
+
+
 async def _call_context(event, bare: int, group: str, username, want_media: bool) -> dict:
     """Everything the Second Dashboard shows, read off the message once.
 
@@ -100,9 +129,7 @@ async def _call_context(event, bare: int, group: str, username, want_media: bool
     }
     try:
         chat = await event.get_chat()
-        count = getattr(chat, "participants_count", None)
-        if count:
-            ctx["followers"] = int(count)
+        ctx["followers"] = await _followers(event.client, chat, bare)
     except Exception:  # noqa: BLE001
         pass
 
