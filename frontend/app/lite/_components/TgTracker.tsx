@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink, CornerUpLeft, Users } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowUp, ExternalLink, CornerUpLeft, Users } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { Badge, Variant } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
@@ -78,6 +79,69 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
   const boxes: ChipMap | undefined = styleData?.tracker;
   const items: Entry[] = data?.items ?? [];
 
+  const scroller = useRef<HTMLDivElement>(null);
+  const [away, setAway] = useState(false);   // scrolled down far enough to offer a way back
+  const [fresh, setFresh] = useState(0);     // new messages since you last saw the top
+  // The newest message the reader has actually been shown. Not the newest in
+  // the list — those are the ones being counted.
+  const seen = useRef<number | null>(null);
+  // Measured before the list repaints, so the growth can be cancelled out.
+  const before = useRef<{ height: number; top: number } | null>(null);
+
+  const newest = items.length ? Math.max(...items.map((e) => e.ts || 0)) : 0;
+
+  // Captured during render, i.e. while the DOM still holds the previous list.
+  if (scroller.current) {
+    before.current = { height: scroller.current.scrollHeight,
+                       top: scroller.current.scrollTop };
+  }
+
+  // Runs before paint, which is the only moment the old and new heights are
+  // both knowable. New messages arrive at the top and push everything down —
+  // the browser keeps scrollTop where it was, so the line being read slides
+  // away. Adding the growth back holds the reader still.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const prev = before.current;
+    before.current = null;
+    if (!el || !prev) return;
+    if (prev.top <= 4) return;                 // at the top: let it grow naturally
+    const grew = el.scrollHeight - prev.height;
+    if (grew > 0) el.scrollTop = prev.top + grew;
+  }, [items]);
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (!newest) return;
+    if (seen.current === null) { seen.current = newest; return; }
+    if (newest <= seen.current) return;
+    if (el && el.scrollTop <= 4) {
+      // Already looking at the top — these are not news, they are simply here.
+      seen.current = newest;
+      setFresh(0);
+      return;
+    }
+    setFresh(items.filter((e) => (e.ts || 0) > seen.current!).length);
+  }, [newest, items]);
+
+  function onScroll() {
+    const el = scroller.current;
+    if (!el) return;
+    const far = el.scrollTop > 300;
+    // Only when it flips: this fires on every pixel of every scroll.
+    setAway((v) => (v === far ? v : far));
+    if (el.scrollTop <= 4 && (fresh || seen.current !== newest)) {
+      seen.current = newest;
+      setFresh(0);
+    }
+  }
+
+  function toTop() {
+    scroller.current?.scrollTo({ top: 0, behavior: "smooth" });
+    seen.current = newest;
+    setFresh(0);
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-bg-card/60">
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
@@ -92,7 +156,9 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
       {/* Each message is its own box. A rule between them is not enough: a
           caller's post is often several lines with blank lines of its own, and
           a single line cannot say where one post ends and the next begins. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
+      <div className="relative min-h-0 flex-1">
+      <div ref={scroller} onScroll={onScroll}
+           className="flex h-full flex-col gap-2 overflow-y-auto p-2">
         {items.length === 0 ? (
           <p className="px-3 py-10 text-center text-xs text-text-dim">
             Nothing yet. Every message from a premium caller appears here as it
@@ -217,6 +283,27 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
             </article>
           );
         })}
+      </div>
+
+      {/* One control, two jobs. Both scroll to the top; the difference is what
+          it says and, when there are new messages, that clicking clears them.
+          With nothing new and nothing to scroll back from, it stays hidden —
+          there would be nothing for it to do. */}
+      {(fresh > 0 || away) && (
+        <button
+          onClick={toTop}
+          className={`absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full
+                      border px-3 py-1.5 text-[11px] font-medium shadow-lg backdrop-blur
+                      transition-colors ${
+            fresh > 0
+              ? "border-brand/40 bg-brand/90 text-white hover:bg-brand"
+              : "border-border bg-bg-card/90 text-text-muted hover:text-text"
+          }`}
+        >
+          <ArrowUp size={13} />
+          {fresh > 0 ? `${fresh > 9 ? "9+" : fresh} New TG MSG` : "Top"}
+        </button>
+      )}
       </div>
     </div>
   );
