@@ -78,6 +78,9 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         # bare id -> (title, username). The hot path reads the name from here
         # instead of asking Telethon for the chat on every single message.
         self._group_meta: dict = {}
+        # Strong references to background tasks. Without them asyncio can
+        # collect a task mid-flight — see HandlersMixin._spawn.
+        self._bg: set = set()
         self._call_keywords: list = []
         self._buybot_keywords: list = []
         self._method_ids: set = set()

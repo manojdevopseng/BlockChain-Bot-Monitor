@@ -235,12 +235,29 @@ async def _enrich(event, bare: int, chat, want_media: bool) -> dict:
                                 or ("image/jpeg" if kind == "photo" else "video/mp4"))
                         out["media_id"] = await calls.save_media(raw, mime, cap)
                 except Exception as exc:  # noqa: BLE001
-                    log.debug(f"[CALLS] {kind} download failed for "
-                              f"{bare}/{event.id}: {exc}")
+                    # Was debug, which is below the Logs page's floor — a clip
+                    # that silently never appears is the hardest kind of gap to
+                    # explain.
+                    log.warning(f"[CALLS] {kind} download failed for "
+                                f"{bare}/{event.id}: {type(exc).__name__}: {exc}")
     return out
 
 
 class HandlersMixin:
+    def _spawn(self, coro) -> None:
+        """Run something in the background and keep hold of it.
+
+        asyncio only keeps a weak reference to a task, so a bare
+        create_task(...) whose result nobody stores can be collected while it
+        is still running. A photo download finishes in a tenth of a second and
+        survives that; a video download takes seconds and does not — which is
+        exactly the shape of the bug this was written for. Photos were being
+        stored and clips never were.
+        """
+        task = asyncio.create_task(coro)
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
     async def _enrich_message(self, event, bare: int, ctx: dict) -> None:
         """Fill in the round-trip parts of a tracker row, after it is on screen."""
         try:
@@ -361,7 +378,7 @@ class HandlersMixin:
         heartbeat.beat("premium_msg")
         # Write-back, not a dependency: nothing below waits on the title, and
         # on a group's first message this asks Telegram for the chat.
-        asyncio.create_task(self._learn_group_name(event, bare))
+        self._spawn(self._learn_group_name(event, bare))
         unique_id = f"{event.chat_id}_{event.id}"
         if unique_id in self._processed:
             return
@@ -414,7 +431,7 @@ class HandlersMixin:
             # The reply handle, the subscriber count and the picture are all
             # round trips. They land on the row afterwards rather than holding
             # the message off the screen until they arrive.
-            asyncio.create_task(self._enrich_message(event, bare, ctx))
+            self._spawn(self._enrich_message(event, bare, ctx))
 
         sol_addrs = set(SOL_RE.findall(raw)) if (sol_on or calls_on) else set()
         eth_match = ETH_RE.search(message)
@@ -426,19 +443,19 @@ class HandlersMixin:
             if sol_key not in self._detection_seen:
                 self._detection_seen.add(sol_key)
                 if sol_on:
-                    asyncio.create_task(self._record_sol_detection(
+                    self._spawn(self._record_sol_detection(
                         sol_addr, bare, source_name, raw,
                         username=source_uname, msg_id=event.id,
                         raw_chat_id=event.chat_id, call_ctx=ctx if calls_on else None,
                     ))
                 elif calls_on:
-                    asyncio.create_task(self._record_call_only(sol_addr, ctx))
+                    self._spawn(self._record_call_only(sol_addr, ctx))
             elif calls_on:
                 # Same group, same token, later message. The panel deliberately
                 # ignores this — its count is groups, not posts — but it is
                 # exactly what the Second Dashboard exists to show, so it gets
                 # its own row. No RPC: the chain was settled the first time.
-                asyncio.create_task(self._record_call_only(sol_addr, ctx))
+                self._spawn(self._record_call_only(sol_addr, ctx))
 
         # ── ETH/RBH panel detection — independent of GATE_PREMIUM ────────────
         if eth_address:
@@ -447,7 +464,7 @@ class HandlersMixin:
             if cap_key not in self._detection_seen:
                 self._detection_seen.add(cap_key)
                 if chain_checks:
-                    asyncio.create_task(self._record_eth_detection(
+                    self._spawn(self._record_eth_detection(
                         eth_address, bare, source_name, raw,
                         username=source_uname, msg_id=event.id,
                         check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
@@ -455,9 +472,9 @@ class HandlersMixin:
                         call_ctx=ctx if calls_on else None,
                     ))
                 elif calls_on:
-                    asyncio.create_task(self._record_call_only(eth_address, ctx))
+                    self._spawn(self._record_call_only(eth_address, ctx))
             elif calls_on:
-                asyncio.create_task(self._record_call_only(eth_address, ctx))
+                self._spawn(self._record_call_only(eth_address, ctx))
 
         # ── mirrors, after ───────────────────────────────────────────────────
         if premium_on and DEST_PREMIUM_ALL:
