@@ -280,6 +280,11 @@ class HandlersMixin:
                 )
 
     async def _premium_handler(self, event) -> None:
+        # Stamped before anything at all, so "how late was the update handed to
+        # us" can be told apart from "how long did we then take". They are
+        # different problems with different fixes, and only one of them is ours.
+        import time as _t0mod
+        _t0 = _t0mod.time()
         # Four independent switches share this handler:
         #   GATE_PREMIUM      — the premium-all mirror + the caller signal sent
         #                       to each chain's own group (DEST_PREMIUM_*)
@@ -342,11 +347,11 @@ class HandlersMixin:
             try:
                 await calls.record_message(**ctx)
                 if ctx.get("tg_ts"):
-                    # Kept: this is the number that says whether the ordering
-                    # above is still doing its job.
-                    import time as _t
-                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} "
-                             f"stored {_t.time() - ctx['tg_ts']:.2f}s after Telegram")
+                    # Two numbers, not one: delivery is Telegram to us, ours is
+                    # everything after that.
+                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} — "
+                             f"delivery {_t0 - ctx['tg_ts']:.2f}s, "
+                             f"ours {_t0mod.time() - _t0:.3f}s")
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"[TRACKER] could not record {bare}/{event.id}: {exc}")
             # The reply handle, the subscriber count and the picture are all
