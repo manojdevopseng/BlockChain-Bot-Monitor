@@ -53,7 +53,9 @@ export function AuthImage(
   if (!url) {
     // Reserve the space rather than letting the row jump when the picture
     // lands — a feed that reflows as you read it is unreadable.
-    return <span className={`mt-2 block h-24 w-40 animate-pulse rounded-lg bg-bg-soft ${className ?? ""}`} />;
+    return (
+      <span className="mt-2 block h-24 w-40 shrink-0 animate-pulse rounded-lg bg-bg-soft" />
+    );
   }
 
   return <img src={url} alt={alt} loading="lazy" className={className} />;
