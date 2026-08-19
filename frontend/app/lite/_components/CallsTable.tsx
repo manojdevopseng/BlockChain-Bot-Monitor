@@ -46,11 +46,11 @@ function When({ ts }: { ts?: number }) {
 }
 
 export function CallsTable(
-  { items, showChain = true, maxHeight }:
-  { items: Call[]; showChain?: boolean; maxHeight?: number | false },
+  { items, showChain = true, maxHeight, fill = false }:
+  { items: Call[]; showChain?: boolean; maxHeight?: number | false; fill?: boolean },
 ) {
   return (
-    <TableScroll maxHeight={maxHeight}>
+    <TableScroll maxHeight={maxHeight} fill={fill}>
       <table className="w-full min-w-[760px] text-sm">
         <thead>
           <tr className={`${STICKY_HEAD} border-b border-border`}>

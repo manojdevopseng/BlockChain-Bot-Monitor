@@ -66,15 +66,21 @@ export default function LiteDashboard() {
         <TopbarActions connected={connected} />
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5">
-        <AddPremiumGroup className="mb-4" />
+      {/* The window itself never scrolls — the two panels do, each inside its
+          own frame. Below xl they stack and the page scrolls instead, because
+          two full-height panels on a phone would leave neither of them usable. */}
+      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-4
+                       sm:px-6 sm:py-5 xl:overflow-hidden">
+        <AddPremiumGroup className="shrink-0" />
 
         {/* Two panels, not a stack: the tracker is read alongside the table,
-            not after it. Below xl they stack, because side by side at that
-            width leaves neither of them readable. */}
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-          <section className="overflow-hidden rounded-xl border border-border bg-bg-card/60">
-            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2.5">
+            not after it. Equal height by the grid, not by numbers either of
+            them carries — so they stay level whatever the screen is. */}
+        <div className="grid gap-4 xl:min-h-0 xl:flex-1
+                        xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+          <section className="flex min-h-[420px] flex-col overflow-hidden rounded-xl
+                              border border-border bg-bg-card/60 xl:min-h-0">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2.5">
               <h2 className="mr-auto text-sm font-semibold text-text">
                 Premium Calls
                 <span className="ml-2 text-xs font-normal text-text-dim">
@@ -89,10 +95,12 @@ export default function LiteDashboard() {
               <DownloadCsv path={`/api/calls/export.csv?${params}`}
                            filename={`calls-${chain}.csv`} />
             </div>
-            <CallsTable items={items} showChain={chain === "all"} maxHeight={720} />
+            <div className="min-h-0 flex-1">
+              <CallsTable items={items} showChain={chain === "all"} fill />
+            </div>
           </section>
 
-          <div className="min-h-[420px] xl:h-[calc(100vh-13rem)]">
+          <div className="min-h-[420px] xl:min-h-0">
             <TgTracker chain={chain} q={query} />
           </div>
         </div>

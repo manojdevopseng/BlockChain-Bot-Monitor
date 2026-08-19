@@ -12,14 +12,19 @@
 export function TableScroll({
   children,
   maxHeight = 420,
+  fill = false,
 }: {
   children: React.ReactNode;
   maxHeight?: number | false;   // false = no cap (short, fixed-size tables)
+  // Take the height the parent gives instead of capping at a number. For a
+  // panel that fills a screen and scrolls inside itself, where a fixed cap
+  // would leave the table short of the panel's own bottom edge.
+  fill?: boolean;
 }) {
   return (
     <div
-      className="overflow-x-auto overflow-y-auto"
-      style={maxHeight === false ? undefined : { maxHeight }}
+      className={`overflow-x-auto overflow-y-auto${fill ? " h-full" : ""}`}
+      style={fill || maxHeight === false ? undefined : { maxHeight }}
     >
       {children}
     </div>
