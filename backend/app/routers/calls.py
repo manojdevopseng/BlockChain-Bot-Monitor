@@ -119,43 +119,39 @@ async def export_csv(chain: str = Query("all", pattern=CHAINS),
 async def tracker(
     chain: str = Query("all", pattern=CHAINS),
     q: str | None = None,
-    limit: int = Query(60, le=200),
+    only_tokens: bool = False,
+    limit: int = Query(80, le=300),
 ):
-    """One entry per message, newest first.
+    """Every premium message, newest first.
 
-    Read wide and collapsed here rather than with an aggregation, because the
-    grouping key is a pair and the collection is small enough that the round
-    trip costs less than the pipeline would.
+    Not only the ones carrying a token: the mirror group shows all of them and
+    the point of this panel is to read what a caller is saying around the call,
+    which includes the posts either side of it. Tokens, where a message has
+    them, arrive as chips on the row a moment after the text — that is the
+    chain check finishing, and it is why the text does not wait for it.
+
+    `chain` filters to messages that resolved on that chain, which necessarily
+    means messages with a token; "all" is the unfiltered feed.
     """
-    col = db.get_collection("premium_calls")
-    docs = await col.find(_flt(chain)).sort("ts", -1).to_list(min(_SCAN_CAP, limit * 12))
-    if q:
-        docs = [d for d in docs if _match(d, q)]
+    col = db.get_collection("premium_messages")
+    flt: dict = {}
+    if chain != "all":
+        flt["tokens.chain"] = chain
+    elif only_tokens:
+        flt["tokens.0"] = {"$exists": True}
 
-    out: list[dict] = []
-    seen: dict[tuple, int] = {}
-    for d in docs:
-        key = (d.get("chat_id"), d.get("msg_id"))
-        token = {"chain": d.get("chain"), "symbol": d.get("symbol"),
-                 "address": d.get("address"), "gmgn_url": d.get("gmgn_url")}
-        idx = seen.get(key)
-        if idx is not None:
-            # Same message, second chain. One entry, two chips.
-            out[idx]["tokens"].append(token)
-            continue
-        seen[key] = len(out)
-        out.append({
-            "chat_id": d.get("chat_id"), "msg_id": d.get("msg_id"),
-            "group": d.get("group"), "username": d.get("username"),
-            "followers": d.get("followers"),
-            "post_url": d.get("post_url"), "text": d.get("text"),
-            "reply_to": d.get("reply_to"), "reply_text": d.get("reply_text"),
-            "media_id": d.get("media_id"), "ts": d.get("ts"),
-            "tokens": [token],
-        })
-        if len(out) >= limit:
-            break
-    return {"total": len(out), "items": out}
+    docs = await col.find(flt).sort("ts", -1).to_list(
+        limit if not q else min(_SCAN_CAP, limit * 20))
+    if q:
+        needle = q.lower()
+        docs = [d for d in docs
+                if needle in (d.get("text") or "").lower()
+                or needle in (d.get("group") or "").lower()
+                or needle in (d.get("username") or "").lower()
+                or any(needle in str(t.get(k) or "").lower()
+                       for t in (d.get("tokens") or [])
+                       for k in ("symbol", "address"))][:limit]
+    return {"total": len(docs), "items": clean_list(docs)}
 
 
 @router.get("/media/{mid}")

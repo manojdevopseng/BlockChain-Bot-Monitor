@@ -136,13 +136,7 @@ async def record(
     # not a feed. Only on a real insert: an upsert that matched an existing row
     # is the same call arriving twice and has nothing to announce.
     if getattr(res, "upserted_id", None) is not None:
-        try:
-            from .ws_hub import hub
-            await hub.broadcast("premium_call",
-                                {k: v for k, v in doc.items() if k != "dt"})
-        except Exception:  # noqa: BLE001
-            # A missed push costs one poll interval, not the row.
-            pass
+        await _push("premium_call", {k: v for k, v in doc.items() if k != "dt"})
 
 
 async def known_chains(address: str) -> list[dict]:
@@ -179,3 +173,79 @@ async def record_all(hits: list[dict], **ctx) -> None:
             symbol=hit.get("symbol", ""), name=hit.get("name", ""),
             keyword=hit.get("keyword", ""), **ctx,
         )
+
+
+# ── the tracker's own store ────────────────────────────────────────────────
+#
+# One document per message, written the instant it arrives — before any chain
+# check has run, and whether or not it carries a token at all. That is the
+# whole point: the Premium Callers mirror group shows every message with no
+# delay because it forwards on the message and asks nothing, and a tracker that
+# waits for an RPC round trip can only ever trail it.
+#
+# Tokens are attached afterwards, as each chain check comes back. So a call
+# appears immediately as text and grows its chain chips a moment later, rather
+# than appearing late and complete.
+
+async def record_message(
+    *,
+    chat_id: int,
+    msg_id: int,
+    group: str = "",
+    username: Optional[str] = None,
+    followers: Optional[int] = None,
+    post_url: str = "",
+    text: str = "",
+    reply_to: Optional[str] = None,
+    reply_text: str = "",
+    media_id: Optional[str] = None,
+    ts: Optional[float] = None,
+) -> None:
+    now = ts or time.time()
+    key = {"chat_id": int(chat_id), "msg_id": int(msg_id)}
+    doc = {
+        **key,
+        "group": group or "",
+        "username": username or None,
+        "followers": followers,
+        "post_url": post_url or "",
+        "text": (text or "")[:TEXT_MAX],
+        "reply_to": reply_to or None,
+        "reply_text": (reply_text or "")[:280],
+        "media_id": media_id or None,
+        "tokens": [],
+        "ts": now,
+        "day": _day(now),
+        "dt": datetime.now(timezone.utc),
+    }
+    res = await db.get_collection("premium_messages").update_one(
+        key, {"$setOnInsert": doc}, upsert=True)
+    if getattr(res, "upserted_id", None) is not None:
+        await _push("premium_message", {k: v for k, v in doc.items() if k != "dt"})
+
+
+async def attach_token(chat_id: int, msg_id: Optional[int], chain: str,
+                       address: str, symbol: str = "") -> None:
+    """Hang a resolved token off the message that named it.
+
+    `$addToSet` on the chain, so the same message checked against a chain twice
+    — a retry, a reconnect replaying it — does not grow a duplicate chip.
+    """
+    if msg_id is None or not chain or not address:
+        return
+    token = {"chain": chain, "address": address, "symbol": symbol or "",
+             "gmgn_url": gmgn_url(chain, address)}
+    key = {"chat_id": int(chat_id), "msg_id": int(msg_id)}
+    res = await db.get_collection("premium_messages").update_one(
+        key, {"$addToSet": {"tokens": token}})
+    if getattr(res, "modified_count", 0):
+        await _push("premium_message_token", {**key, "token": token})
+
+
+async def _push(event: str, payload: dict) -> None:
+    """Announce something to the dashboards, never at the cost of the write."""
+    try:
+        from .ws_hub import hub
+        await hub.broadcast(event, payload)
+    except Exception:  # noqa: BLE001
+        pass

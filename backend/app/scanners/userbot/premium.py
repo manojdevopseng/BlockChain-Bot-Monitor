@@ -68,6 +68,10 @@ async def _log_call(ctx: Optional[dict], chain: str, address: str,
     try:
         await calls.record(chain=chain, address=address, symbol=symbol,
                            name=name, keyword=keyword, **ctx)
+        # The tracker already has this message on screen — this is what turns
+        # its plain text into a linked token with a chain on it.
+        await calls.attach_token(ctx.get("chat_id"), ctx.get("msg_id"),
+                                 chain, address, symbol)
     except Exception as exc:  # noqa: BLE001
         # A feed row is not worth losing a detection over.
         log.warning(f"[CALLS] could not record {chain} {address[:10]}: {exc}")
@@ -87,6 +91,10 @@ class PremiumCaptureMixin:
             hits = await calls.known_chains(address)
             if hits:
                 await calls.record_all(hits, **ctx)
+                for hit in hits:
+                    await calls.attach_token(ctx.get("chat_id"), ctx.get("msg_id"),
+                                             hit["chain"], hit["address"],
+                                             hit.get("symbol", ""))
         except Exception as exc:  # noqa: BLE001
             log.warning(f"[CALLS] repeat for {address[:10]} failed: {exc}")
 

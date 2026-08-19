@@ -236,6 +236,8 @@ _TTL_COLLECTIONS = {
     # them. Two windows, not one — the images are what fill a disk, and losing
     # a picture from three weeks ago costs far less than losing the call.
     "premium_calls": "calls_retention_days",
+    # Every premium message, token or not — the tracker's own feed.
+    "premium_messages": "calls_retention_days",
     "premium_media": "calls_media_retention_days",
 }
 
@@ -292,6 +294,12 @@ async def ensure_indexes() -> None:
         ("premium_calls",      [("day", -1)]),                       # History dropdown
         ("premium_calls",      [("chat_id", 1), ("ts", -1)]),        # one caller's feed
         ("premium_media",      "mid"),                               # image by id
+        # The tracker reads newest-first and updates by (chat, message), so
+        # both have to be index-backed: it is written on every premium message,
+        # which is the highest-volume write in the app.
+        ("premium_messages",   [("ts", -1)]),
+        ("premium_messages",   [("chat_id", 1), ("msg_id", 1)]),
+        ("premium_messages",   [("tokens.chain", 1), ("ts", -1)]),
         # Added after an audit found these queried on every request with no
         # index behind them:
         ("premium_groups",     "id"),                               # reload + toggle, ~20s

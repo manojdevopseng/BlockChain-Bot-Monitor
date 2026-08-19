@@ -27,6 +27,10 @@ const EVENT_KEYS: Record<string, string[]> = {
   // group repeating a token it has already called — which the detection event
   // deliberately does not, because the panel has nothing to learn from one.
   premium_call: ["/api/calls"],
+  // The tracker's two: the message itself, written before any chain check
+  // has run, and the token that check later hangs off it.
+  premium_message: ["/api/calls"],
+  premium_message_token: ["/api/calls"],
   launchpad_token: ["/api/launchpad", "/api/dashboard/feed"],
   gas_alert: ["/api/dashboard", "/api/tokens"],
   // One token, pushed the moment the X feed finds it. Revalidating the section

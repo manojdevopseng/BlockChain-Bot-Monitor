@@ -331,14 +331,20 @@ class HandlersMixin:
         eth_match = ETH_RE.search(message)
         eth_address = eth_match.group(0).lower() if eth_match else None
 
-        # The Second Dashboard only tracks messages that carry a token, so the
-        # context is read once, here, and only when there is one to attach it
-        # to. Downloading a picture for every chat message would be the most
-        # expensive thing this handler does.
+        # Read once per message, and written before any chain check runs. The
+        # mirror group shows everything instantly because it forwards on the
+        # message and asks nothing; a tracker that waits for an RPC round trip
+        # can only ever trail it. So the message lands now and its tokens are
+        # hung off it as each check comes back.
         ctx: dict = {}
-        if calls_on and (sol_addrs or eth_address):
+        if calls_on or tracker_on:
             ctx = await _call_context(event, bare, source_name, source_uname,
                                       want_media=tracker_on)
+        if tracker_on and ctx:
+            try:
+                await calls.record_message(**ctx)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"[TRACKER] could not record {bare}/{event.id}: {exc}")
 
         # ── SOL address detection (dashboard-only panel; independent of ETH) ──
         for sol_addr in sol_addrs:
