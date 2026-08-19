@@ -107,7 +107,10 @@ export default function LiteDashboard() {
           </section>
 
           <div className="min-h-[420px] xl:min-h-0">
-            <TgTracker chain={chain} q={query} />
+            {/* A token in the tracker can drive the table beside it: the two
+                panels are two readings of the same feed, and jumping between
+                them by hand meant copying an address across the screen. */}
+            <TgTracker chain={chain} q={query} onPickToken={(a) => setQ(a)} />
           </div>
         </div>
       </main>

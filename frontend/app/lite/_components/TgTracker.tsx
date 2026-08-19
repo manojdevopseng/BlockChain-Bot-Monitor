@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, ExternalLink, CornerUpLeft, Users } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, BellOff, Coins, CornerUpLeft, ExternalLink, Highlighter,
+         Star, Table2, Users, X } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { Badge, Variant } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
@@ -33,6 +34,10 @@ type Entry = {
   reply_to?: string | null;
   reply_text?: string;
   media_id?: string | null;
+  // How many callers were already on this token when this message landed, and
+  // how many there are in total — see the backend's echo window.
+  echo_rank?: number;
+  echo_total?: number;
   // photo / gif / video / sticker / audio / document / text — what the caller
   // posted, which decides how the attachment is drawn.
   kind?: string;
@@ -62,22 +67,117 @@ function stamp(ts?: number) {
   return sameDay ? time : `${d.toLocaleDateString("en-GB")} ${time}`;
 }
 
+// One look for every filter switch in this header.
+function Toggle(
+  { on, onClick, title, children }:
+  { on: boolean; onClick: () => void; title: string; children: React.ReactNode },
+) {
+  return (
+    <button onClick={onClick} title={title} aria-pressed={on}
+      className={`grid h-7 w-7 place-items-center rounded-lg border transition-colors ${
+        on ? "border-brand/40 bg-brand/15 text-brand-soft"
+           : "border-border text-text-dim hover:text-text"
+      }`}>
+      {children}
+    </button>
+  );
+}
+
+// Wraps the forwarder's own keywords where they appear. Whole-word only, the
+// same rule the matcher uses — "eth" should not light up inside "something".
+function Highlighted({ text, words }: { text: string; words: string[] }) {
+  if (!words.length) return <Linkify text={text} />;
+  const safe = words.filter(Boolean)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    // Longest first, so "pump fun" wins over "pump" where both are listed.
+    .sort((a, b) => b.length - a.length);
+  if (!safe.length) return <Linkify text={text} />;
+  const re = new RegExp(`\\b(${safe.join("|")})\\b`, "gi");
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(<Linkify key={last} text={text.slice(last, m.index)} />);
+    out.push(
+      <mark key={`k${m.index}`}
+            className="rounded bg-accent-amber/25 px-0.5 text-accent-amber">
+        {m[0]}
+      </mark>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(<Linkify key="tail" text={text.slice(last)} />);
+  return <>{out}</>;
+}
+
+// 2nd, 3rd, 4th — the badge reads as a sentence, not a number.
+function ordinal(n: number) {
+  const t = n % 100;
+  if (t >= 11 && t <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] || "th"}`;
+}
+
 function fmtFollowers(n?: number | null) {
   if (!n) return null;
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`;
   return String(n);
 }
 
-export function TgTracker({ chain, q }: { chain: string; q: string }) {
+const MUTED_KEY = "lite_tracker_muted";
+const HILITE_KEY = "lite_tracker_highlight";
+
+export function TgTracker(
+  { chain, q, onPickToken }:
+  { chain: string; q: string; onPickToken?: (address: string) => void },
+) {
+  // Filters. All of them off by default, so the feed opens exactly as it did
+  // before any of this existed.
+  const [tokensOnly, setTokensOnly] = useState(false);
+  const [icOnly, setIcOnly] = useState(false);
+  const [highlight, setHighlight] = useState(false);
+  const [caller, setCaller] = useState<{ id: number; name: string } | null>(null);
+  const [muted, setMuted] = useState<number[]>([]);
+
+  useEffect(() => {
+    try {
+      setMuted(JSON.parse(localStorage.getItem(MUTED_KEY) || "[]"));
+      setHighlight(localStorage.getItem(HILITE_KEY) === "1");
+    } catch {}
+  }, []);
+
+  function toggleMute(id: number) {
+    setMuted((cur) => {
+      const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+      try { localStorage.setItem(MUTED_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
   const { data } = useApi<any>(
-    `/api/calls/tracker?chain=${chain}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+    `/api/calls/tracker?chain=${chain}${q ? `&q=${encodeURIComponent(q)}` : ""}`
+    + (tokensOnly ? "&only_tokens=1" : ""),
   );
   // Per-caller box colours, set in Forwarder → Premium Groups. Its own request
   // rather than a field on every message: one caller posting forty times would
   // otherwise repeat its three colours forty times.
   const { data: styleData } = useApi<any>("/api/forwarder/group-chips");
   const boxes: ChipMap | undefined = styleData?.tracker;
-  const items: Entry[] = data?.items ?? [];
+  const starred = useMemo(
+    () => new Set<number>((styleData?.ic ?? []).map(Number)), [styleData]);
+
+  // The words the forwarder already matches on. Reused rather than a second
+  // list to maintain — if it is worth alerting on, it is worth seeing.
+  const { data: kwData } = useApi<any>(highlight ? "/api/settings/keywords" : null);
+  const keywords: string[] = kwData?.items ?? [];
+
+  const all: Entry[] = data?.items ?? [];
+  const items = useMemo(() => all.filter((e) => {
+    const id = Number(e.chat_id);
+    if (muted.includes(id)) return false;
+    if (icOnly && !starred.has(id)) return false;
+    if (caller && id !== caller.id) return false;
+    return true;
+  }), [all, muted, icOnly, starred, caller]);
 
   const scroller = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);   // scrolled down far enough to offer a way back
@@ -144,14 +244,53 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-bg-card/60">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-3 py-2.5">
         <h2 className="mr-auto text-sm font-semibold text-text">TG Tracker</h2>
-        <span className="text-[11px] text-text-dim">{items.length} messages</span>
+        <span className="text-[11px] text-text-dim">
+          {items.length}{items.length !== all.length ? ` / ${all.length}` : ""} messages
+        </span>
+        <Toggle on={tokensOnly} onClick={() => setTokensOnly((v) => !v)}
+                title="Only messages that carry a token">
+          <Coins size={12} />
+        </Toggle>
+        <Toggle on={icOnly} onClick={() => setIcOnly((v) => !v)}
+                title="Only starred (IC) callers">
+          <Star size={12} fill={icOnly ? "currentColor" : "none"} />
+        </Toggle>
+        <Toggle on={highlight} onClick={() => {
+                  const next = !highlight;
+                  setHighlight(next);
+                  try { localStorage.setItem(HILITE_KEY, next ? "1" : "0"); } catch {}
+                }}
+                title="Highlight the forwarder's keywords in the text">
+          <Highlighter size={12} />
+        </Toggle>
         {/* Its own switch, not the calls one: this fires on anything a starred
             caller posts, and wanting the call without the chatter is the
             common case. */}
         <IcAlert kind="messages" />
       </div>
+
+      {(caller || muted.length > 0) && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border
+                        bg-bg-soft/40 px-3 py-1.5 text-[11px] text-text-dim">
+          {caller && (
+            <button onClick={() => setCaller(null)}
+                    className="flex items-center gap-1 rounded-full border border-brand/40
+                               bg-brand/15 px-2 py-0.5 text-brand-soft">
+              only {caller.name} <X size={10} />
+            </button>
+          )}
+          {muted.length > 0 && (
+            <button onClick={() => { setMuted([]);
+                                     try { localStorage.removeItem(MUTED_KEY); } catch {} }}
+                    className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5
+                               hover:text-text">
+              {muted.length} muted — unmute all <X size={10} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Each message is its own box. A rule between them is not enough: a
           caller's post is often several lines with blank lines of its own, and
@@ -164,7 +303,7 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
             Nothing yet. Every message from a premium caller appears here as it
             arrives.
           </p>
-        ) : items.map((e) => {
+        ) : items.map((e, i) => {
           const tokens = e.tokens ?? [];
           const box = chipStyleOf(boxes, e.chat_id);
           return (
@@ -173,7 +312,7 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
               // A styled caller gets its own surface; an unstyled one keeps the
               // default, so colouring one group does not make the rest look
               // like an oversight.
-              className={`shrink-0 overflow-hidden rounded-lg border px-3 py-2.5 transition-colors ${
+              className={`group/msg shrink-0 overflow-hidden rounded-lg border px-3 py-2.5 transition-colors ${
                 box ? "" : "border-border bg-bg-soft/50 hover:bg-bg-hover/40"
               }`}
               style={box ? { background: box.bg, borderColor: box.border, color: box.text }
@@ -181,9 +320,17 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
             >
               <header className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                  <span className={`truncate text-sm font-semibold ${box ? "" : "text-text"}`}>
+                  <button
+                    onClick={() => setCaller(
+                      caller?.id === Number(e.chat_id)
+                        ? null
+                        : { id: Number(e.chat_id), name: e.group || "this caller" })}
+                    title="Show only this caller"
+                    className={`truncate text-left text-sm font-semibold hover:underline ${
+                      box ? "" : "text-text"}`}
+                  >
                     {e.group || "Unknown"}
-                  </span>
+                  </button>
                   {e.username && (
                     <span className="font-mono text-[11px] text-text-dim">@{e.username}</span>
                   )}
@@ -193,6 +340,20 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
                     </span>
                   )}
                   <span className="font-mono text-[11px] text-text-dim">· {stamp(e.ts)}</span>
+                  {e.echo_rank && e.echo_rank > 1 && (
+                    // Not decoration: the third group to name a token inside
+                    // half an hour is a different event from the first.
+                    <span
+                      title={`${e.echo_total} callers have named this token in the last 30 minutes`}
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        e.echo_rank >= 3
+                          ? "bg-accent-red/20 text-accent-red"
+                          : "bg-accent-amber/20 text-accent-amber"
+                      }`}
+                    >
+                      {ordinal(e.echo_rank)} caller
+                    </span>
+                  )}
                 </div>
                 {/* Chain chips, then the way out to Telegram. */}
                 <div className="flex shrink-0 items-center gap-1">
@@ -201,6 +362,15 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
                       {CHAIN_LABEL[t.chain || ""] || t.chain || "?"}
                     </Badge>
                   ))}
+                  <button
+                    onClick={() => toggleMute(Number(e.chat_id))}
+                    title="Mute this caller — hides their messages from this feed"
+                    className="inline-grid h-5 w-5 place-items-center rounded text-text-dim
+                               opacity-0 transition hover:bg-bg-hover hover:text-accent-red
+                               focus:opacity-100 group-hover/msg:opacity-100"
+                  >
+                    <BellOff size={12} />
+                  </button>
                   {e.post_url && (
                     <a href={e.post_url} target="_blank" rel="noopener noreferrer"
                        title="Open in Telegram"
@@ -230,7 +400,9 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
               {e.text && (
                 <p className={`mt-1.5 whitespace-pre-wrap break-all text-xs leading-relaxed ${
                   box ? "opacity-90" : "text-text-muted"}`}>
-                  <Linkify text={e.text} />
+                  {highlight
+                    ? <Highlighted text={e.text} words={keywords} />
+                    : <Linkify text={e.text} />}
                 </p>
               )}
 
@@ -274,6 +446,18 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
                             {shortAddr(t.address)}
                           </span>
                           <CopyButton value={t.address} />
+                          {onPickToken && (
+                            // Its own control rather than making the symbol do
+                            // two jobs — that link opens GMGN and always has.
+                            <button
+                              onClick={() => onPickToken(t.address!)}
+                              title="Find this token in Premium Calls"
+                              className="inline-grid h-4 w-4 place-items-center rounded
+                                         text-text-dim hover:text-brand-soft"
+                            >
+                              <Table2 size={11} />
+                            </button>
+                          )}
                         </>
                       )}
                     </span>
@@ -282,6 +466,21 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
               )}
             </article>
           );
+        }).flatMap((node, i) => {
+          const e = items[i];
+          const unseenHere = fresh > 0 && seen.current != null
+            && (e.ts || 0) > seen.current
+            && (i === items.length - 1 || (items[i + 1]?.ts || 0) <= seen.current);
+          return unseenHere
+            ? [node,
+               <div key="readline" className="flex shrink-0 items-center gap-2 px-1 py-0.5">
+                 <span className="h-px flex-1 bg-accent-amber/40" />
+                 <span className="text-[10px] uppercase tracking-wide text-accent-amber/80">
+                   read up to here
+                 </span>
+                 <span className="h-px flex-1 bg-accent-amber/40" />
+               </div>]
+            : [node];
         })}
       </div>
 

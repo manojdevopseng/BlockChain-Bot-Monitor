@@ -14,6 +14,7 @@ thing somebody said.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -171,7 +172,59 @@ async def tracker(
                 or any(needle in str(t.get(k) or "").lower()
                        for t in (d.get("tokens") or [])
                        for k in ("symbol", "address"))][:limit]
-    return {"total": len(docs), "items": clean_list(docs)}
+    items = clean_list(docs)
+    await _echo_ranks(items)
+    return {"total": len(items), "items": items}
+
+
+# How far back "another caller said the same thing" still counts. Half an hour:
+# long enough that a second caller picking a token up is the same event, short
+# enough that yesterday's mention is not.
+ECHO_WINDOW = 30 * 60
+
+
+async def _echo_ranks(items: list[dict]) -> None:
+    """Mark each message with where its caller sits in the queue for that token.
+
+    A token named by one group is a call. The same token named by a third group
+    twelve minutes later is a different and much louder fact, and the feed had
+    no way to say so — every row looked like the first.
+
+    One query for the whole page, not one per row: the addresses on screen are
+    collected first and their recent callers fetched together.
+    """
+    addrs = {t.get("address") for it in items for t in (it.get("tokens") or [])
+             if t.get("address")}
+    if not addrs:
+        return
+    since = time.time() - ECHO_WINDOW
+    rows = await db.get_collection("premium_calls").find(
+        {"address": {"$in": list(addrs)}, "ts": {"$gte": since}}
+    ).to_list(_SCAN_CAP)
+
+    # address -> callers in the order they first named it
+    order: dict[str, list[int]] = {}
+    for r in sorted(rows, key=lambda d: d.get("ts") or 0):
+        addr, cid = r.get("address"), r.get("chat_id")
+        if not addr or cid is None:
+            continue
+        seen = order.setdefault(addr, [])
+        if cid not in seen:
+            seen.append(cid)
+
+    for it in items:
+        best = None
+        for tok in (it.get("tokens") or []):
+            queue = order.get(tok.get("address") or "")
+            if not queue or it.get("chat_id") not in queue:
+                continue
+            rank = queue.index(it["chat_id"]) + 1
+            # The loudest thing about a message with two tokens is whichever
+            # one the most people are already on.
+            if best is None or rank > best[0]:
+                best = (rank, len(queue))
+        if best and best[0] > 1:
+            it["echo_rank"], it["echo_total"] = best
 
 
 @router.get("/media/{mid}")
