@@ -247,6 +247,11 @@ class Settings(BaseSettings):
     # such token spun up eighteen pools in half an hour, each of which looked
     # like a new pair. 0 disables the check.
     gas_max_token_age_seconds: int = 3600
+    # TG Tracker: the largest video or GIF worth keeping. Checked against the
+    # size Telegram reports *before* anything is downloaded, so an oversized
+    # clip costs nothing at all. Photos are capped separately and much lower —
+    # they are small by nature and there are twenty times as many of them.
+    tracker_media_max_bytes: int = 8 * 1024 * 1024
     # Base — premium-caller detection only, same shape as BNB above: no
     # discovery scanner, no WSS, just "is this address a contract on Base".
     # Two endpoints because one public RPC going quiet must not take the chain

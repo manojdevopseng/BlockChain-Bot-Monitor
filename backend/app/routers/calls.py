@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from .. import calls, csvout, db
 from ..util import clean_list
@@ -175,13 +175,41 @@ async def tracker(
 
 
 @router.get("/media/{mid}")
-async def media(mid: str):
+async def media(mid: str, request: Request):
+    """One stored picture, GIF or clip.
+
+    Range requests are answered properly because a <video> needs them: without
+    a 206 the browser cannot seek, and Safari will not play the file at all.
+    Everything is content-addressed, so an id is always the same bytes and can
+    be cached hard — the TTL decides how long it exists, not the browser.
+    """
     doc = await calls.get_media(mid)
     if not doc or not doc.get("data"):
-        raise HTTPException(404, "No such image")
-    return Response(
-        doc["data"], media_type=doc.get("mime") or "image/jpeg",
-        # Content-addressed, so a given id is always the same bytes and can be
-        # cached hard. The TTL decides how long it exists, not the browser.
-        headers={"Cache-Control": "public, max-age=86400, immutable"},
-    )
+        raise HTTPException(404, "No such media")
+    data: bytes = doc["data"]
+    mime = doc.get("mime") or "image/jpeg"
+    common = {
+        "Cache-Control": "public, max-age=86400, immutable",
+        "Accept-Ranges": "bytes",
+    }
+
+    rng = request.headers.get("range") or request.headers.get("Range")
+    if rng and rng.startswith("bytes="):
+        spec = rng[6:].split(",")[0].strip()
+        start_s, _, end_s = spec.partition("-")
+        try:
+            start = int(start_s) if start_s else 0
+            end = int(end_s) if end_s else len(data) - 1
+        except ValueError:
+            start, end = 0, len(data) - 1
+        start = max(0, min(start, len(data) - 1))
+        end = max(start, min(end, len(data) - 1))
+        chunk = data[start:end + 1]
+        return Response(
+            chunk, status_code=206, media_type=mime,
+            headers={**common,
+                     "Content-Range": f"bytes {start}-{end}/{len(data)}",
+                     "Content-Length": str(len(chunk))},
+        )
+
+    return Response(data, media_type=mime, headers=common)

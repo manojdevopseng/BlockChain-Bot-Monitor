@@ -5,6 +5,7 @@ import { useApi } from "@/lib/api";
 import { Badge, Variant } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
 import { AuthImage } from "@/components/AuthImage";
+import { AuthMedia } from "@/components/AuthMedia";
 import { Linkify } from "@/components/Linkify";
 import { shortAddr } from "@/lib/utils";
 import { ChipMap, chipStyleOf } from "@/components/GroupChip";
@@ -31,6 +32,9 @@ type Entry = {
   reply_to?: string | null;
   reply_text?: string;
   media_id?: string | null;
+  // photo / gif / video / sticker / audio / document / text — what the caller
+  // posted, which decides how the attachment is drawn.
+  kind?: string;
   ts?: number;
   tokens?: Token[];
 };
@@ -166,13 +170,24 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
 
               {e.media_id && (
                 // Fetched with the session, not by the tag: the endpoint is
-                // behind the login and an <img> cannot carry the header.
-                <AuthImage
-                  path={`/api/calls/media/${e.media_id}`}
-                  zoomable
-                  caption={`${e.group || ""} · ${stamp(e.ts)}`}
-                  className="mt-2 max-h-64 w-auto rounded-lg border border-border object-contain"
-                />
+                // behind the login and neither <img> nor <video> can carry the
+                // header. A picture loads on sight; a clip waits for a click,
+                // because a feed that pulled down eighty videos unprompted is
+                // not a feed anybody would leave open.
+                e.kind === "gif" || e.kind === "video" ? (
+                  <AuthMedia
+                    path={`/api/calls/media/${e.media_id}`}
+                    kind={e.kind}
+                    className="mt-2 max-h-64 w-auto rounded-lg border border-border"
+                  />
+                ) : (
+                  <AuthImage
+                    path={`/api/calls/media/${e.media_id}`}
+                    zoomable
+                    caption={`${e.group || ""} · ${stamp(e.ts)}`}
+                    className="mt-2 max-h-64 w-auto rounded-lg border border-border object-contain"
+                  />
+                )
               )}
 
               {tokens.length > 0 && (

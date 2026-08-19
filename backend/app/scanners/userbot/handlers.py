@@ -20,6 +20,7 @@ import re
 from telethon import events
 
 from app import calls, fwd_counters, heartbeat
+from app.scanners import scfg as config
 from app.util import bare_chat_id, tg_message_url
 
 from .common import (DEST_DEXS, DEST_IC, DEST_OTTO, DEST_PREMIUM_ALL,
@@ -211,13 +212,31 @@ async def _enrich(event, bare: int, chat, want_media: bool) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
-    if want_media and getattr(event.message, "photo", None):
-        try:
-            raw = await event.download_media(file=bytes)
-            if raw:
-                out["media_id"] = await calls.save_media(raw)
-        except Exception as exc:  # noqa: BLE001
-            log.debug(f"[CALLS] media download failed for {bare}/{event.id}: {exc}")
+    if want_media:
+        kind = _media_kind(event.message)
+        if kind in ("photo", "gif", "video"):
+            # Telegram reports the size before a single byte is fetched, so an
+            # oversized clip costs nothing to refuse. Photos keep their own,
+            # much lower cap: they are small by nature and twenty times more
+            # numerous, and one loose limit for both would be a limit for
+            # neither.
+            cap = (calls.MEDIA_MAX_BYTES if kind == "photo"
+                   else getattr(config, "TRACKER_MEDIA_MAX", 8 * 1024 * 1024))
+            size = getattr(getattr(event.message, "file", None), "size", 0) or 0
+            if size and size > cap:
+                log.debug(f"[CALLS] {kind} from {bare} is {size/1048576:.1f}MB — "
+                          f"over the {cap/1048576:.0f}MB cap, not stored")
+            else:
+                try:
+                    raw = await event.download_media(file=bytes)
+                    if raw:
+                        mime = (getattr(getattr(event.message, "file", None),
+                                        "mime_type", None)
+                                or ("image/jpeg" if kind == "photo" else "video/mp4"))
+                        out["media_id"] = await calls.save_media(raw, mime, cap)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug(f"[CALLS] {kind} download failed for "
+                              f"{bare}/{event.id}: {exc}")
     return out
 
 

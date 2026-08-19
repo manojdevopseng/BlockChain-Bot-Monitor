@@ -43,14 +43,15 @@ def _day(ts: float) -> str:
     return datetime.fromtimestamp(ts, IST).strftime("%d-%m-%Y")
 
 
-async def save_media(raw: bytes, mime: str = "image/jpeg") -> Optional[str]:
+async def save_media(raw: bytes, mime: str = "image/jpeg",
+                     cap: int = MEDIA_MAX_BYTES) -> Optional[str]:
     """Store one picture and return the id the row will reference.
 
     Content-addressed: the same picture forwarded by six groups is stored once.
     Callers repeat each other's graphics constantly, so this is not a micro
     optimisation — it is most of the disk.
     """
-    if not raw or len(raw) > MEDIA_MAX_BYTES:
+    if not raw or len(raw) > cap:
         return None
     mid = hashlib.sha256(raw).hexdigest()[:32]
     col = db.get_collection("premium_media")
