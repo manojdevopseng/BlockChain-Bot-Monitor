@@ -54,7 +54,7 @@ export default function AlertsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <SearchBox value={q} onChange={setQ} placeholder="token / address / message" />
             <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
-            <DownloadCsv path="/api/alerts/export.csv?days=15" filename="alerts.csv" />
+            <DownloadCsv path="/api/alerts/export.csv" filename="alerts.csv" />
             <Badge variant="purple">{data?.total ?? 0}</Badge>
           </div>
         </CardHeader>

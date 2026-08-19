@@ -14,13 +14,11 @@ thing somebody said.
 
 from __future__ import annotations
 
-import csv
-import io
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from .. import calls, db
+from .. import calls, csvout, db
 from ..util import clean_list
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
@@ -94,25 +92,47 @@ async def dates(chain: str = Query("all", pattern=CHAINS)):
                             reverse=True)}
 
 
+CSV_COLUMNS = ["date", "time", "chain", "symbol", "name", "address", "group",
+               "username", "keyword", "message"]
+
+
+def _csv_row(d: dict) -> dict:
+    when = datetime.fromtimestamp(d.get("ts") or 0)
+    return {
+        "date": when.strftime("%d-%m-%Y"),
+        "time": when.strftime("%H:%M:%S"),
+        "chain": d.get("chain", ""),
+        "symbol": d.get("symbol", ""),
+        "name": d.get("name", ""),
+        "address": d.get("address", ""),
+        "group": d.get("group", ""),
+        "username": f"@{d['username']}" if d.get("username") else "",
+        "keyword": d.get("keyword", ""),
+        "message": (d.get("text") or "").replace(chr(10), " ")[:500],
+    }
+
+
 @router.get("/export.csv")
 async def export_csv(chain: str = Query("all", pattern=CHAINS),
-                     q: str | None = None, date: str | None = None):
-    _, docs = await _page(chain, q, date, 5000)
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["When", "Chain", "Symbol", "Name", "Address", "Group",
-                "Username", "Keyword", "Message"])
-    for d in docs:
-        when = datetime.fromtimestamp(d.get("ts") or 0).strftime("%Y-%m-%d %H:%M:%S")
-        w.writerow([when, d.get("chain", ""), d.get("symbol", ""), d.get("name", ""),
-                    d.get("address", ""), d.get("group", ""),
-                    f"@{d['username']}" if d.get("username") else "",
-                    d.get("keyword", ""),
-                    (d.get("text") or "").replace("\n", " ")[:500]])
-    return Response(
-        buf.getvalue(), media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="calls-{chain}.csv"'},
-    )
+                     q: str | None = None):
+    """Everything held for this section, not the day being viewed.
+
+    No `date` parameter, deliberately: the History dropdown chooses what to
+    read on screen, and the export is the whole retention window regardless.
+    Chain and search still apply — those are the section's own filters, and an
+    export that ignored them would not be the table you were looking at.
+    """
+    col = db.get_collection("premium_calls")
+    flt = _flt(chain)
+
+    async def rows():
+        async for d in csvout.paged(col, flt, sort_key="ts"):
+            if not q or _match(d, q):
+                yield d
+
+    stamp = datetime.now().strftime("%d-%m-%Y")
+    return csvout.csv_response(rows(), CSV_COLUMNS,
+                               f"premium-calls-{chain}-{stamp}.csv", row=_csv_row)
 
 
 @router.get("/tracker")

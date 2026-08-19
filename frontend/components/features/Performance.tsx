@@ -61,7 +61,7 @@ export function OutcomeSummary() {
       title="Alert Performance — last 7 days"
       icon={<TrendingUp size={14} />}
       count={data?.overall?.tracked ?? 0}
-      controls={<DownloadCsv path="/api/outcomes/export.csv?days=30"
+      controls={<DownloadCsv path="/api/outcomes/export.csv"
                              filename="outcomes.csv" label="Export" />}
     >
       <p className="mb-3 text-xs text-text-dim">

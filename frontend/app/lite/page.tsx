@@ -92,8 +92,12 @@ export default function LiteDashboard() {
               <FilterTabs value={chain} onChange={setChain} options={CHAIN_TABS} />
               <SearchBox value={q} onChange={setQ} placeholder="symbol / name / address / group" />
               <HistorySelect value={date} onChange={setDate} dates={dates?.dates ?? []} />
-              <DownloadCsv path={`/api/calls/export.csv?${params}`}
-                           filename={`calls-${chain}.csv`} />
+              {/* Deliberately not `params`: that carries the History date, and
+                  the download is the whole stored window whatever day is being
+                  read on screen. Chain and search do carry over. */}
+              <DownloadCsv
+                path={`/api/calls/export.csv?chain=${chain}${query ? `&q=${encodeURIComponent(query)}` : ""}`}
+                filename={`premium-calls-${chain}.csv`} />
             </div>
             <div className="min-h-0 flex-1">
               <CallsTable items={items} showChain={chain === "all"} fill />
