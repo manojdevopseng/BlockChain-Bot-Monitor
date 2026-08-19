@@ -39,13 +39,19 @@ const CHAIN_TONE: Record<string, Variant> = {
   eth: "blue", rbh: "green", bnb: "amber", sol: "purple", base: "cyan",
 };
 
-function ago(ts?: number) {
+// The clock time the message landed, not how long ago. "3m" tells you the gap
+// but not the moment, and the moment is what you match against Telegram when
+// you go looking for the post. The date is added only when it is not today,
+// so the common case stays short.
+function stamp(ts?: number) {
   if (!ts) return "";
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
+  const d = new Date(ts * 1000);
+  const time = d.toLocaleTimeString("en-GB");
+  const today = new Date();
+  const sameDay = d.getDate() === today.getDate()
+    && d.getMonth() === today.getMonth()
+    && d.getFullYear() === today.getFullYear();
+  return sameDay ? time : `${d.toLocaleDateString("en-GB")} ${time}`;
 }
 
 function fmtFollowers(n?: number | null) {
@@ -97,7 +103,7 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
                       <Users size={10} />{fmtFollowers(e.followers)}
                     </span>
                   )}
-                  <span className="text-[11px] text-text-dim">· {ago(e.ts)}</span>
+                  <span className="font-mono text-[11px] text-text-dim">· {stamp(e.ts)}</span>
                 </div>
                 {/* Chain chips, then the way out to Telegram. */}
                 <div className="flex shrink-0 items-center gap-1">
