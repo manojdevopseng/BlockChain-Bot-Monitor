@@ -125,6 +125,11 @@ async def _call_context(event, bare: int, group: str, username, want_media: bool
         "reply_text": "",
         "media_id": None,
         "followers": None,
+        # Telegram's own clock for this message, not ours. What we time is when
+        # we finished reading it, which is a different fact and not the one the
+        # feed should be showing.
+        "tg_ts": (event.message.date.timestamp()
+                  if getattr(event.message, "date", None) else None),
         "ts": None,
     }
     try:
@@ -343,6 +348,14 @@ class HandlersMixin:
         if tracker_on and ctx:
             try:
                 await calls.record_message(**ctx)
+                # How far behind Telegram we are, per message, so the answer is
+                # measured rather than guessed at.
+                if ctx.get("tg_ts"):
+                    import time as _t
+                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} "
+                             f"stored {_t.time() - ctx['tg_ts']:.2f}s after Telegram"
+                             f"{' (photo)' if ctx.get('media_id') else ''}"
+                             f"{' (reply)' if ctx.get('reply_to') else ''}")
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"[TRACKER] could not record {bare}/{event.id}: {exc}")
 

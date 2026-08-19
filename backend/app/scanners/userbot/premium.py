@@ -66,8 +66,9 @@ async def _log_call(ctx: Optional[dict], chain: str, address: str,
     if not ctx:
         return
     try:
+        row = {k: v for k, v in ctx.items() if k != "tg_ts"}
         await calls.record(chain=chain, address=address, symbol=symbol,
-                           name=name, keyword=keyword, **ctx)
+                           name=name, keyword=keyword, **row)
         # The tracker already has this message on screen — this is what turns
         # its plain text into a linked token with a chain on it.
         await calls.attach_token(ctx.get("chat_id"), ctx.get("msg_id"),
@@ -90,7 +91,8 @@ class PremiumCaptureMixin:
         try:
             hits = await calls.known_chains(address)
             if hits:
-                await calls.record_all(hits, **ctx)
+                await calls.record_all(hits, **{k: v for k, v in ctx.items()
+                                                if k != "tg_ts"})
                 for hit in hits:
                     await calls.attach_token(ctx.get("chat_id"), ctx.get("msg_id"),
                                              hit["chain"], hit["address"],

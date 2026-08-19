@@ -199,6 +199,7 @@ async def record_message(
     reply_to: Optional[str] = None,
     reply_text: str = "",
     media_id: Optional[str] = None,
+    tg_ts: Optional[float] = None,
     ts: Optional[float] = None,
 ) -> None:
     now = ts or time.time()
@@ -214,6 +215,9 @@ async def record_message(
         "reply_text": (reply_text or "")[:280],
         "media_id": media_id or None,
         "tokens": [],
+        # Telegram's clock, and ours. The feed shows the first; the gap between
+        # them is what says whether this pipeline is keeping up.
+        "tg_ts": tg_ts,
         "ts": now,
         "day": _day(now),
         "dt": datetime.now(timezone.utc),
