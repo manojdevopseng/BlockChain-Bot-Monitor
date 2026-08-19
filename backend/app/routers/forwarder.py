@@ -103,6 +103,7 @@ async def sources():
             "enabled": g.get("enabled", True) is not False,
             "today": counts.get(fwd_counters.bare_key(gid), 0),
             "chip": g.get("chip") or None,
+            "tracker": g.get("tracker") or None,
             "ic": bool(g.get("ic")),
         })
     return {"items": items}
@@ -253,6 +254,28 @@ async def set_source_chip(key: str, payload: dict = Body(default=None)):
     return {"key": key, "chip": chip}
 
 
+@router.patch("/sources/{key}/tracker")
+async def set_source_tracker(key: str, payload: dict = Body(default=None)):
+    """Set (or clear) one premium group's TG Tracker box colours.
+
+    The same three fields as the chip and deliberately a separate style: the
+    chip is a small pill inside a table cell and this is the whole message box
+    on the Lite dashboard. A colour that reads well as a 11px pill on a table
+    row is rarely the one you want behind four lines of a caller's text, so
+    they are chosen independently rather than one being derived from the other.
+    """
+    try:
+        gid = int(key)
+    except ValueError:
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    style = _clean_chip(payload)
+    update = {"$set": {"tracker": style}} if style else {"$unset": {"tracker": ""}}
+    res = await db.get_collection("premium_groups").update_one({"id": gid}, update)
+    if not res.matched_count:
+        raise HTTPException(404, f"unknown premium group '{key}'")
+    return {"key": key, "tracker": style}
+
+
 @router.patch("/sources/{key}/ic")
 async def set_source_ic(key: str, payload: dict = Body(...)):
     """Star (or unstar) a premium group for the Important Caller mirror.
@@ -298,9 +321,20 @@ async def group_chips():
     Telegram name resolution.
     """
     rows = await db.get_collection("premium_groups").find(
-        {"chip": {"$exists": True, "$ne": None}}, {"id": 1, "chip": 1}
+        {"$or": [{"chip": {"$exists": True, "$ne": None}},
+                 {"tracker": {"$exists": True, "$ne": None}}]},
+        {"id": 1, "chip": 1, "tracker": 1},
     ).to_list(5000)
-    return {"chips": {str(r["id"]): r["chip"] for r in rows if r.get("id") is not None}}
+    # Two maps in one response, because they are read together and neither is
+    # worth a request of its own: the Detections table wants the chips, the
+    # Lite dashboard's tracker wants the boxes, and the Forwarder page draws
+    # both editors side by side.
+    return {
+        "chips": {str(r["id"]): r["chip"] for r in rows
+                  if r.get("id") is not None and r.get("chip")},
+        "tracker": {str(r["id"]): r["tracker"] for r in rows
+                    if r.get("id") is not None and r.get("tracker")},
+    }
 
 
 # ── Adding / removing premium groups ────────────────────────────────────────────

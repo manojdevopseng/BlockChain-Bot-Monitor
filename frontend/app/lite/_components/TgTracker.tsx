@@ -7,6 +7,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { AuthImage } from "@/components/AuthImage";
 import { Linkify } from "@/components/Linkify";
 import { shortAddr } from "@/lib/utils";
+import { ChipMap, chipStyleOf } from "@/components/GroupChip";
 
 /* Every premium message, newest first — the same feed the mirror group carries,
    and for the same reason: what a caller says around a call is most of the
@@ -65,6 +66,11 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
   const { data } = useApi<any>(
     `/api/calls/tracker?chain=${chain}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
   );
+  // Per-caller box colours, set in Forwarder → Premium Groups. Its own request
+  // rather than a field on every message: one caller posting forty times would
+  // otherwise repeat its three colours forty times.
+  const { data: styleData } = useApi<any>("/api/forwarder/group-chips");
+  const boxes: ChipMap | undefined = styleData?.tracker;
   const items: Entry[] = data?.items ?? [];
 
   return (
@@ -85,15 +91,22 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
           </p>
         ) : items.map((e) => {
           const tokens = e.tokens ?? [];
+          const box = chipStyleOf(boxes, e.chat_id);
           return (
             <article
               key={`${e.chat_id}-${e.msg_id}`}
-              className="shrink-0 overflow-hidden rounded-lg border border-border
-                         bg-bg-soft/50 px-3 py-2.5 transition-colors hover:bg-bg-hover/40"
+              // A styled caller gets its own surface; an unstyled one keeps the
+              // default, so colouring one group does not make the rest look
+              // like an oversight.
+              className={`shrink-0 overflow-hidden rounded-lg border px-3 py-2.5 transition-colors ${
+                box ? "" : "border-border bg-bg-soft/50 hover:bg-bg-hover/40"
+              }`}
+              style={box ? { background: box.bg, borderColor: box.border, color: box.text }
+                         : undefined}
             >
               <header className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                  <span className="truncate text-sm font-semibold text-text">
+                  <span className={`truncate text-sm font-semibold ${box ? "" : "text-text"}`}>
                     {e.group || "Unknown"}
                   </span>
                   {e.username && (
@@ -140,7 +153,8 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
               )}
 
               {e.text && (
-                <p className="mt-1.5 whitespace-pre-wrap break-all text-xs leading-relaxed text-text-muted">
+                <p className={`mt-1.5 whitespace-pre-wrap break-all text-xs leading-relaxed ${
+                  box ? "opacity-90" : "text-text-muted"}`}>
                   <Linkify text={e.text} />
                 </p>
               )}

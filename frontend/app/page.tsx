@@ -30,7 +30,7 @@ const CHOICES: Choice[] = [
   },
   {
     href: "/lite",
-    title: "2nd Dashboard",
+    title: "LITE Dashboard",
     blurb: "Premium calls, one row per call, and what the caller actually said.",
     points: ["Every call listed separately, newest first",
              "TG Tracker — messages, replies and images",

@@ -48,8 +48,9 @@ const CAT = {
   // The second dashboard's own two feeds. A section rather than two more
   // switches in Bots, because they belong to a screen rather than to a chain —
   // and because turning the whole screen off should be one obvious place.
-  dash2: { title: "2nd Dashboard", icon: Radar,
-           desc: "The per-call feed behind /lite. Both read the premium messages "
+  dash2: { title: "LITE Dashboard", icon: Radar,
+           desc: "The per-call feed and message tracker behind /lite. Both read the "
+               + "premium messages "
                + "the first dashboard already reads — nothing here opens a second "
                + "RPC connection or a second Telegram session." },
   rbhx: { title: "Robinhood Monitors", icon: Twitter,

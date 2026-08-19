@@ -54,7 +54,7 @@ export default function LiteDashboard() {
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <Link href="/" className="text-sm font-semibold text-text hover:text-brand-soft">
-            2nd Dashboard
+            LITE Dashboard
           </Link>
           <Link href="/dashboard"
                 title="Main Dashboard"

@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { AddPremiumGroup } from "@/components/features/AddPremiumGroup";
-import { ChipStyleEditor } from "@/components/ChipStyleEditor";
+import { ChipStyleEditor, TrackerStyleEditor } from "@/components/ChipStyleEditor";
 import { ChipStyle } from "@/components/GroupChip";
 import { fmtNum } from "@/lib/utils";
 
@@ -29,6 +29,9 @@ type Source = {
   today: number;
   // Set here, read by the Detections table's Groups column. Absent = default chip.
   chip?: ChipStyle | null;
+  // Set here too, read by the Lite dashboard's TG Tracker for this caller's
+  // message box. Separate from the chip on purpose — see TrackerStyleEditor.
+  tracker?: ChipStyle | null;
   // Starred for the Important Caller mirror.
   ic?: boolean;
 };
@@ -52,11 +55,12 @@ const IC_TABS = [
   { id: "not", label: "Not in IC" },
 ] as const satisfies readonly { id: IcFilter; label: string }[];
 
-function SourceRow({ s, onToggle, onRemove, onChip, onIc }: {
+function SourceRow({ s, onToggle, onRemove, onChip, onTracker, onIc }: {
   s: Source;
   onToggle: (s: Source, v: boolean) => void;
   onRemove?: (s: Source) => void;
   onChip?: (s: Source, chip: ChipStyle | null) => Promise<void>;
+  onTracker?: (s: Source, style: ChipStyle | null) => Promise<void>;
   onIc?: (s: Source, on: boolean) => Promise<void>;
 }) {
   return (
@@ -91,6 +95,10 @@ function SourceRow({ s, onToggle, onRemove, onChip, onIc }: {
           <ChipStyleEditor name={s.name} value={s.chip}
                            onSave={(chip) => onChip(s, chip)} />
         )}
+        {onTracker && (
+          <TrackerStyleEditor name={s.name} value={s.tracker}
+                              onSave={(style) => onTracker(s, style)} />
+        )}
         <Switch checked={s.enabled} onCheckedChange={(v) => onToggle(s, v)} />
         {onRemove && (
           <button
@@ -123,6 +131,12 @@ export default function ForwarderPage() {
 
   // Saved straight away — the point of the picker is that what you chose is
   // what the Detections table shows, without a second "apply" step.
+  async function setTracker(s: Source, style: ChipStyle | null) {
+    await apiSend(`/api/forwarder/sources/${s.chat_id}/tracker`, "PATCH", style ?? {});
+    mutate("/api/forwarder/sources");
+    mutate("/api/forwarder/group-chips");
+  }
+
   async function setChip(s: Source, chip: ChipStyle | null) {
     await apiSend(`/api/forwarder/sources/${s.chat_id}/chip`, "PATCH", chip ?? {});
     mutate("/api/forwarder/sources");
@@ -218,7 +232,8 @@ export default function ForwarderPage() {
         <TableScroll>
           <div className="space-y-1">
             {groups.map((s) => (
-              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove} onChip={setChip} onIc={setIc} />
+              <SourceRow key={s.key} s={s} onToggle={toggle} onRemove={remove}
+                         onChip={setChip} onTracker={setTracker} onIc={setIc} />
             ))}
             {groups.length === 0 && (
               <span className="text-xs text-text-dim">
