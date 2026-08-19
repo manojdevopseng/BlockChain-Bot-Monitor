@@ -313,7 +313,8 @@ async def set_source_ic(key: str, payload: dict = Body(...)):
 
 @router.get("/group-chips")
 async def group_chips():
-    """chat id -> chip style, for every group that has one.
+    """Per-group presentation state: chip colours, tracker box colours, and
+    which callers are starred for Important Caller.
 
     Its own endpoint, and deliberately not part of the detections payload: a
     group called by 100 rows would otherwise repeat its three colours 100
@@ -322,8 +323,9 @@ async def group_chips():
     """
     rows = await db.get_collection("premium_groups").find(
         {"$or": [{"chip": {"$exists": True, "$ne": None}},
-                 {"tracker": {"$exists": True, "$ne": None}}]},
-        {"id": 1, "chip": 1, "tracker": 1},
+                 {"tracker": {"$exists": True, "$ne": None}},
+                 {"ic": True}]},
+        {"id": 1, "chip": 1, "tracker": 1, "ic": 1},
     ).to_list(5000)
     # Two maps in one response, because they are read together and neither is
     # worth a request of its own: the Detections table wants the chips, the
@@ -334,6 +336,11 @@ async def group_chips():
                   if r.get("id") is not None and r.get("chip")},
         "tracker": {str(r["id"]): r["tracker"] for r in rows
                     if r.get("id") is not None and r.get("tracker")},
+        # The starred callers, so the Lite dashboard knows which calls are
+        # worth a sound. Here rather than in its own endpoint because this one
+        # is already polled by everything that needs it, and a second request
+        # for a list of numbers is a request for nothing.
+        "ic": [r["id"] for r in rows if r.get("id") is not None and r.get("ic")],
     }
 
 
