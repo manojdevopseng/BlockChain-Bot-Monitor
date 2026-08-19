@@ -127,8 +127,22 @@ async def record(
         "day": _day(now),
         "dt": datetime.now(timezone.utc),
     }
-    await db.get_collection("premium_calls").update_one(
+    res = await db.get_collection("premium_calls").update_one(
         key, {"$setOnInsert": doc}, upsert=True)
+
+    # Push it. The dashboard's poll is a safety net measured in seconds, and a
+    # call is the one thing on that screen worth seeing the moment it lands —
+    # Telegram shows it instantly, so a feed that trails it by ten seconds is
+    # not a feed. Only on a real insert: an upsert that matched an existing row
+    # is the same call arriving twice and has nothing to announce.
+    if getattr(res, "upserted_id", None) is not None:
+        try:
+            from .ws_hub import hub
+            await hub.broadcast("premium_call",
+                                {k: v for k, v in doc.items() if k != "dt"})
+        except Exception:  # noqa: BLE001
+            # A missed push costs one poll interval, not the row.
+            pass
 
 
 async def known_chains(address: str) -> list[dict]:

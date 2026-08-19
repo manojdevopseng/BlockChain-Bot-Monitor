@@ -22,7 +22,11 @@ const EVENT_KEYS: Record<string, string[]> = {
   service_changed: ["/api/settings/services", "/api/chains", "/api/rpc", "/api/system", "/api/dashboard"],
   // All three also feed the dashboard's Live Activity section, so it fills in
   // as things happen rather than on the next poll.
-  premium_detection: ["/api/forwarder", "/api/dashboard/feed"],
+  premium_detection: ["/api/forwarder", "/api/dashboard/feed", "/api/calls"],
+  // The second dashboard's own event. It fires for every call, including a
+  // group repeating a token it has already called — which the detection event
+  // deliberately does not, because the panel has nothing to learn from one.
+  premium_call: ["/api/calls"],
   launchpad_token: ["/api/launchpad", "/api/dashboard/feed"],
   gas_alert: ["/api/dashboard", "/api/tokens"],
   // One token, pushed the moment the X feed finds it. Revalidating the section
