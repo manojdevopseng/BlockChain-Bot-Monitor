@@ -241,6 +241,12 @@ class Settings(BaseSettings):
     # WBNB, the base token a BSC pair is priced against — the equivalent of
     # ETH_WETH. Used to work out which side of a pair is the actual token.
     bnb_wbnb: str = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+    # ETH Gas Fees: how old a token's contract may be and still count as a new
+    # launch. The feature is "a token appeared and somebody sniped it", so a
+    # pool opened on a month-old token is not what it is looking for — and one
+    # such token spun up eighteen pools in half an hour, each of which looked
+    # like a new pair. 0 disables the check.
+    gas_max_token_age_seconds: int = 3600
     # Base — premium-caller detection only, same shape as BNB above: no
     # discovery scanner, no WSS, just "is this address a contract on Base".
     # Two endpoints because one public RPC going quiet must not take the chain

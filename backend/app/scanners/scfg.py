@@ -111,6 +111,7 @@ BNB_HTTP_ENDPOINTS = [u for u in (settings.bnb_rpc_http,
                                   settings.bnb_rpc_http_fallback) if u]
 BNB_WBNB           = settings.bnb_wbnb
 # ── Base — premium-caller detection only, same shape as BNB above ──────────
+GAS_MAX_TOKEN_AGE   = settings.gas_max_token_age_seconds
 BASE_RPC_HTTP       = settings.base_rpc_http
 BASE_HTTP_ENDPOINTS = [u for u in (settings.base_rpc_http,
                                    settings.base_rpc_http_fallback) if u]

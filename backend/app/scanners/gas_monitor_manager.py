@@ -56,6 +56,10 @@ class GasMonitorManager:
         # said this", and after a few thousand other tokens the answer stops
         # mattering.
         self._alerted = BoundedSet(4000)
+        # Tokens already found to be too old to be a launch. Asked once per
+        # token, not once per pool — the case this exists for is one token
+        # producing pools by the dozen.
+        self._too_old = BoundedSet(4000)
         self._session: aiohttp.ClientSession | None = None
 
     async def close(self) -> None:
@@ -82,6 +86,10 @@ class GasMonitorManager:
             return                              # already watching
         if key in self._alerted:
             return                              # already reported — see _alerted
+        if key in self._too_old:
+            return                              # established token, not a launch
+        if not await self._is_a_launch(key, token.symbol):
+            return
         if len(self._monitors) >= config.MAX_GAS_MONITORS:
             log.warning(
                 f"[GasMonitor] cap reached ({config.MAX_GAS_MONITORS}) — "
@@ -92,6 +100,43 @@ class GasMonitorManager:
         monitor = SwapMonitor(token=token, provider=self._provider, on_alert=self._fire)
         self._monitors[key] = monitor
         await monitor.start()
+
+    # ── Is this a launch, or an old token with a new pool? ────────────────────
+
+    # Ethereum blocks are twelve seconds apart closely enough for this: the
+    # question is "minutes old or months old", and a few blocks either way
+    # cannot change that answer.
+    _BLOCK_SECONDS = 12
+
+    async def _is_a_launch(self, address: str, symbol: str) -> bool:
+        """True when the token contract is younger than the configured age.
+
+        This feature exists to catch a token appearing and being sniped. A pool
+        opened on a token that has been trading for a month is a different
+        event, and it arrives in bulk — one such token created eighteen pools
+        in half an hour, every one of which looked like a new pair.
+
+        One eth_getCode at a past block answers it. A failure is treated as
+        "let it through": a quota blip should not silently turn the feature
+        off, and the worst case is the alert we would have sent anyway.
+        """
+        max_age = getattr(config, "GAS_MAX_TOKEN_AGE", 0) or 0
+        if max_age <= 0:
+            return True
+        try:
+            head_hex = await self._provider.rpc("eth_blockNumber", [])
+            head = int(head_hex, 16)
+            probe = max(1, head - max(1, int(max_age / self._BLOCK_SECONDS)))
+            code = await self._provider.rpc("eth_getCode", [address, hex(probe)])
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[GasMonitor] age check failed for {symbol or address[:10]}: {exc}")
+            return True
+        if code and code != "0x":
+            self._too_old.add(address)
+            log.info(f"[GasMonitor] {symbol or address[:10]} already existed "
+                     f"{max_age // 60}m ago — new pool on an old token, not a launch")
+            return False
+        return True
 
     def _reap(self) -> None:
         for k in [k for k, m in self._monitors.items() if not m.running]:
