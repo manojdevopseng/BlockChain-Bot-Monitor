@@ -199,6 +199,7 @@ async def record_message(
     reply_to: Optional[str] = None,
     reply_text: str = "",
     media_id: Optional[str] = None,
+    kind: str = "text",
     tg_ts: Optional[float] = None,
     ts: Optional[float] = None,
 ) -> None:
@@ -214,6 +215,10 @@ async def record_message(
         "reply_to": reply_to or None,
         "reply_text": (reply_text or "")[:280],
         "media_id": media_id or None,
+        # photo / video / gif / voice / sticker / document / text — what the
+        # caller actually posted, which is also what decides whether there is
+        # anything for the tracker to fetch afterwards.
+        "kind": kind or "text",
         "tokens": [],
         # Telegram's clock, and ours. The feed shows the first; the gap between
         # them is what says whether this pipeline is keeping up.

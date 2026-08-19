@@ -55,6 +55,16 @@ def _content_block(content: str) -> str:
     return f"<blockquote>{html.escape(body)}</blockquote>\n\n"
 
 
+# What the tracker's context carries that a call row has no column for. Listed
+# once here rather than filtered at three call sites, so adding a field to the
+# tracker cannot break the calls table by accident.
+_TRACKER_ONLY = ("tg_ts", "kind", "ts_written")
+
+
+def _call_row(ctx: dict) -> dict:
+    return {k: v for k, v in ctx.items() if k not in _TRACKER_ONLY}
+
+
 async def _log_call(ctx: Optional[dict], chain: str, address: str,
                     symbol: str, name: str, keyword: str) -> None:
     """Record one call for the Second Dashboard, if it is switched on.
@@ -66,9 +76,8 @@ async def _log_call(ctx: Optional[dict], chain: str, address: str,
     if not ctx:
         return
     try:
-        row = {k: v for k, v in ctx.items() if k != "tg_ts"}
         await calls.record(chain=chain, address=address, symbol=symbol,
-                           name=name, keyword=keyword, **row)
+                           name=name, keyword=keyword, **_call_row(ctx))
         # The tracker already has this message on screen — this is what turns
         # its plain text into a linked token with a chain on it.
         await calls.attach_token(ctx.get("chat_id"), ctx.get("msg_id"),
@@ -91,8 +100,7 @@ class PremiumCaptureMixin:
         try:
             hits = await calls.known_chains(address)
             if hits:
-                await calls.record_all(hits, **{k: v for k, v in ctx.items()
-                                                if k != "tg_ts"})
+                await calls.record_all(hits, **_call_row(ctx))
                 for hit in hits:
                     await calls.attach_token(ctx.get("chat_id"), ctx.get("msg_id"),
                                              hit["chain"], hit["address"],

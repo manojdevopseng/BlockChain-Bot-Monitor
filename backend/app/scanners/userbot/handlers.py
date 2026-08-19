@@ -107,6 +107,28 @@ async def _followers(client, chat, bare: int) -> int | None:
     return count
 
 
+def _media_kind(message) -> str:
+    """photo / video / gif / voice / sticker / document / text.
+
+    Ordered so the specific wins: a GIF is a document with an animation
+    attribute, and a video note is a video, so asking in the wrong order
+    labels most things "document".
+    """
+    if getattr(message, "photo", None):
+        return "photo"
+    if getattr(message, "gif", None):
+        return "gif"
+    if getattr(message, "video", None) or getattr(message, "video_note", None):
+        return "video"
+    if getattr(message, "voice", None) or getattr(message, "audio", None):
+        return "audio"
+    if getattr(message, "sticker", None):
+        return "sticker"
+    if getattr(message, "document", None):
+        return "document"
+    return "text"
+
+
 def _fast_context(event, bare: int, group: str, username) -> dict:
     """Everything the tracker can know without asking Telegram anything.
 
@@ -123,6 +145,7 @@ def _fast_context(event, bare: int, group: str, username) -> dict:
         "msg_id": event.id,
         "post_url": tg_message_url(event.chat_id, event.id, username),
         "text": event.raw_text or "",
+        "kind": _media_kind(event.message),
         # Telegram's own clock for this message, not ours. What we time is when
         # we finished reading it, which is a different fact and not the one the
         # feed should be showing.
@@ -357,11 +380,14 @@ class HandlersMixin:
             ctx = _fast_context(event, bare, source_name, source_uname)
         if tracker_on and ctx:
             try:
-                await calls.record_message(**ctx)
+                await calls.record_message(**{k: v for k, v in ctx.items()
+                                              if k != "ts_written"})
+                ctx["ts_written"] = _t0mod.time()
                 if ctx.get("tg_ts"):
                     # Two numbers, not one: delivery is Telegram to us, ours is
                     # everything after that.
-                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} — "
+                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} "
+                             f"[{ctx.get('kind')}] — "
                              f"delivery {_t0 - ctx['tg_ts']:.2f}s, "
                              f"ours {_t0mod.time() - _t0:.3f}s")
             except Exception as exc:  # noqa: BLE001
@@ -419,8 +445,21 @@ class HandlersMixin:
             # Highest-volume path: every premium message is mirrored here, so it
             # is the most likely to hit Telegram's per-chat flood limit.
             try:
-                await safe_send(DEST_PREMIUM_ALL, lambda: event.forward_to(DEST_PREMIUM_ALL),
-                                self._limiter, "PREMIUM-ALL")
+                sent = await safe_send(DEST_PREMIUM_ALL,
+                                       lambda: event.forward_to(DEST_PREMIUM_ALL),
+                                       self._limiter, "PREMIUM-ALL")
+                # The three clocks side by side: the caller's own message, the
+                # row the dashboard is reading, and the copy in our group —
+                # that last one dated by Telegram, not by us, so it is the same
+                # number you would read off the two chats.
+                if ctx.get("tg_ts") and ctx.get("ts_written"):
+                    one = sent[0] if isinstance(sent, (list, tuple)) and sent else sent
+                    mirror = getattr(one, "date", None)
+                    gap = (f"{mirror.timestamp() - ctx['tg_ts']:.2f}s"
+                           if mirror else "?")
+                    log.info(f"[TIMING] {source_name[:20]} [{ctx.get('kind')}] "
+                             f"dash +{ctx['ts_written'] - ctx['tg_ts']:.3f}s | "
+                             f"mirror +{gap}")
             except Exception as exc:
                 text = event.raw_text or ""
                 if _can_copy(exc) and text:
