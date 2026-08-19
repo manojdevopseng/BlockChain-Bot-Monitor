@@ -177,10 +177,15 @@ async def tracker(
     return {"total": len(items), "items": items}
 
 
-# How far back "another caller said the same thing" still counts. Half an hour:
-# long enough that a second caller picking a token up is the same event, short
-# enough that yesterday's mention is not.
-ECHO_WINDOW = 30 * 60
+# How far back "another caller said the same thing" still counts.
+#
+# Half an hour was the first guess and it was wrong for this feed: at the
+# measured rate — roughly five calls an hour, sixty-four in twelve hours — a
+# thirty-minute window caught nothing at all, while twelve hours held nine
+# tokens with two or more callers and one with three. Three hours is the
+# compromise: long enough to fire, short enough that it still means "now"
+# rather than "at some point today".
+ECHO_WINDOW = 3 * 60 * 60
 
 
 async def _echo_ranks(items: list[dict]) -> None:
