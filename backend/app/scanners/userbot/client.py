@@ -32,7 +32,8 @@ from .handlers import HandlersMixin
 from .onchain import OnChainMixin
 from .premium import PremiumCaptureMixin
 from .sending import ChatRateLimiter
-from .store import (col, load_detections, load_filter_keywords, load_otto_rules,
+from .store import (col, load_detections, load_filter_keywords, load_group_names,
+                    load_otto_rules,
                     load_ic_ids, load_premium_ids)
 
 
@@ -74,6 +75,9 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         self._ic_ids: set = set()
         # Groups whose title we have already written back.
         self._named: set = set()
+        # bare id -> (title, username). The hot path reads the name from here
+        # instead of asking Telethon for the chat on every single message.
+        self._group_meta: dict = {}
         self._call_keywords: list = []
         self._buybot_keywords: list = []
         self._method_ids: set = set()
@@ -122,6 +126,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         # Load all runtime data from Mongo (seeded from seed_data.json, editable
         # via the dashboard — nothing hardcoded).
         self._premium_ids = await load_premium_ids()
+        self._group_meta = await load_group_names()
         self._ic_ids = await load_ic_ids()
         self._method_ids, self._function_texts, self._rugger_hashes = await load_otto_rules()
         self._call_keywords, self._buybot_keywords = await load_filter_keywords()
@@ -266,6 +271,7 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
             title = getattr(chat, "title", None) or getattr(chat, "username", None)
             if not title:
                 return
+            self._group_meta[bare] = (title, getattr(chat, "username", None))
             await col("premium_groups").update_one(
                 {"id": {"$in": [bare, -bare, int(f"-100{bare}")]}},
                 {"$set": {"name": title,

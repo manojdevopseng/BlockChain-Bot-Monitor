@@ -199,9 +199,10 @@ async def _enrich(event, bare: int, chat, want_media: bool) -> dict:
 
 
 class HandlersMixin:
-    async def _enrich_message(self, event, bare: int, chat, ctx: dict) -> None:
+    async def _enrich_message(self, event, bare: int, ctx: dict) -> None:
         """Fill in the round-trip parts of a tracker row, after it is on screen."""
         try:
+            chat = await event.get_chat()
             extra = await _enrich(event, bare, chat,
                                   want_media=self._on(GATE_CALLS_TG))
             if extra:
@@ -316,7 +317,9 @@ class HandlersMixin:
             return
         fwd_counters.bump(fwd_counters.SOURCE, bare)
         heartbeat.beat("premium_msg")
-        await self._learn_group_name(event, bare)
+        # Write-back, not a dependency: nothing below waits on the title, and
+        # on a group's first message this asks Telegram for the chat.
+        asyncio.create_task(self._learn_group_name(event, bare))
         unique_id = f"{event.chat_id}_{event.id}"
         if unique_id in self._processed:
             return
@@ -333,9 +336,18 @@ class HandlersMixin:
         #
         # So the reads and writes happen here, off what is already in memory,
         # and the forwarding follows at whatever pace the limiter allows.
-        chat = await event.get_chat()
-        source_name = getattr(chat, "title", "Unknown")
-        source_uname = getattr(chat, "username", None)
+        # Who this group is, from memory. get_chat() is usually a session-cache
+        # hit, but it is still an await on the hot path of every message from a
+        # hundred groups, and it was measurably part of the delay. A group we
+        # have never seen falls back to asking, once — after which
+        # _learn_group_name has cached it.
+        source_name, source_uname = self._group_meta.get(bare, (None, None))
+        chat = None
+        if not source_name:
+            chat = await event.get_chat()
+            source_name = getattr(chat, "title", None) or "Unknown"
+            source_uname = getattr(chat, "username", None)
+            self._group_meta[bare] = (source_name, source_uname)
 
         raw = event.raw_text or ""
         message = raw.lower()
@@ -357,7 +369,7 @@ class HandlersMixin:
             # The reply handle, the subscriber count and the picture are all
             # round trips. They land on the row afterwards rather than holding
             # the message off the screen until they arrive.
-            asyncio.create_task(self._enrich_message(event, bare, chat, ctx))
+            asyncio.create_task(self._enrich_message(event, bare, ctx))
 
         sol_addrs = set(SOL_RE.findall(raw)) if (sol_on or calls_on) else set()
         eth_match = ETH_RE.search(message)
