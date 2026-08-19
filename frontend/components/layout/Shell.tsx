@@ -58,12 +58,31 @@ function LiteConnection({ connected, children }: { connected: boolean; children:
 // revalidating on each one repainted the page that often. Prefixes are pooled
 // and flushed once per window, so a burst costs one refetch.
 const REVALIDATE_WINDOW_MS = 500;
+
+// The feeds where the wait is the point. Logs can pool for half a second
+// without anyone noticing; a caller's message cannot, because the whole claim
+// of that screen is that it keeps up with Telegram. The backend now delivers
+// these in about two milliseconds, so half a second of client-side pooling
+// would be most of the remaining delay.
+const FAST_EVENTS = new Set(["premium_call", "premium_message",
+                             "premium_message_token", "premium_detection"]);
+const FAST_WINDOW_MS = 80;
+
 let pendingPrefixes = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushDueAt = 0;
 
-function revalidate(prefixes: string[]) {
+function revalidate(prefixes: string[], fast = false) {
   prefixes.forEach((p) => pendingPrefixes.add(p));
-  if (flushTimer) return;
+  const window = fast ? FAST_WINDOW_MS : REVALIDATE_WINDOW_MS;
+  const dueAt = Date.now() + window;
+  // A fast event arriving inside a slow event's window pulls the flush
+  // forward rather than waiting behind it.
+  if (flushTimer) {
+    if (dueAt >= flushDueAt) return;
+    clearTimeout(flushTimer);
+  }
+  flushDueAt = dueAt;
   flushTimer = setTimeout(() => {
     const due = [...pendingPrefixes];
     pendingPrefixes = new Set();
@@ -74,7 +93,7 @@ function revalidate(prefixes: string[]) {
     // flashing. Without it the current data stays on screen and is replaced
     // once, when the new response lands.
     mutate((key) => typeof key === "string" && due.some((p) => key.startsWith(p)));
-  }, REVALIDATE_WINDOW_MS);
+  }, window);
 }
 
 // A tab left open across a deploy keeps running the old build — old polling
@@ -191,7 +210,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       return;
     }
     const keys = EVENT_KEYS[e.type];
-    if (keys) revalidate(keys);
+    if (keys) revalidate(keys, FAST_EVENTS.has(e.type));
   });
 
   // The login page and the chooser get the theme but none of the chrome — no
