@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { apiBlobUrl } from "@/lib/api";
+import { Lightbox } from "@/components/Lightbox";
 
 /* An image that lives behind the login.
 
@@ -16,10 +17,12 @@ import { apiBlobUrl } from "@/lib/api";
    every picture it passed. */
 
 export function AuthImage(
-  { path, alt = "", className }: { path: string; alt?: string; className?: string },
+  { path, alt = "", className, zoomable = false, caption }:
+  { path: string; alt?: string; className?: string; zoomable?: boolean; caption?: string },
 ) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let dead = false;
@@ -58,5 +61,21 @@ export function AuthImage(
     );
   }
 
-  return <img src={url} alt={alt} loading="lazy" className={className} />;
+  if (!zoomable) {
+    return <img src={url} alt={alt} loading="lazy" className={className} />;
+  }
+
+  // The overlay reuses this same object URL, so opening it costs no request.
+  return (
+    <>
+      <img
+        src={url}
+        alt={alt}
+        loading="lazy"
+        className={`${className ?? ""} cursor-zoom-in`}
+        onClick={() => setOpen(true)}
+      />
+      {open && <Lightbox url={url} caption={caption} onClose={() => setOpen(false)} />}
+    </>
+  );
 }

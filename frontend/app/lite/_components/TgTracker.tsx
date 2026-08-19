@@ -5,6 +5,7 @@ import { useApi } from "@/lib/api";
 import { Badge, Variant } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
 import { AuthImage } from "@/components/AuthImage";
+import { Linkify } from "@/components/Linkify";
 import { shortAddr } from "@/lib/utils";
 
 /* Every premium message, newest first — the same feed the mirror group carries,
@@ -131,7 +132,7 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
                       // Clamped, not cut: the quoted message is context, and a
                       // caller's disclaimer can be longer than their call.
                       <span className="ml-1 line-clamp-2 break-all opacity-70">
-                        — {e.reply_text}
+                        — <Linkify text={e.reply_text} />
                       </span>
                     )}
                   </span>
@@ -140,7 +141,7 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
 
               {e.text && (
                 <p className="mt-1.5 whitespace-pre-wrap break-all text-xs leading-relaxed text-text-muted">
-                  {e.text}
+                  <Linkify text={e.text} />
                 </p>
               )}
 
@@ -149,6 +150,8 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
                 // behind the login and an <img> cannot carry the header.
                 <AuthImage
                   path={`/api/calls/media/${e.media_id}`}
+                  zoomable
+                  caption={`${e.group || ""} · ${stamp(e.ts)}`}
                   className="mt-2 max-h-64 w-auto rounded-lg border border-border object-contain"
                 />
               )}
