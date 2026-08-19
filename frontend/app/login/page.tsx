@@ -1,12 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 import { login } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
+  // Which dashboard the chooser was pointing at. Without it every sign-in
+  // landed back on the chooser and asked the same question again.
+  //
+  // Read off the URL after mount rather than with useSearchParams, which would
+  // force this page — the one page that must render for a signed-out visitor —
+  // behind a Suspense boundary and out of the static export.
+  const [next, setNext] = useState("/");
+  useEffect(() => {
+    const to = new URLSearchParams(window.location.search).get("next");
+    if (to) setNext(to);
+  }, []);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,7 +33,9 @@ export default function LoginPage() {
       // already mounted around the login page, so a client-side navigation
       // would leave the socket connected as "signed out". This also drops any
       // SWR cache from before signing in.
-      window.location.href = "/";
+      // Only ever a path on this site — a full URL here would be an open
+      // redirect, and the value comes off the query string.
+      window.location.href = next.startsWith("/") && !next.startsWith("//") ? next : "/";
     } catch {
       setError("Invalid username or password");
       setBusy(false);

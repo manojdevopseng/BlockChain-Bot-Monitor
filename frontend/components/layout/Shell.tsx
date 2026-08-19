@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { mutate } from "swr";
 import { Sidebar } from "./Sidebar";
@@ -32,6 +32,19 @@ const EVENT_KEYS: Record<string, string[]> = {
 };
 
 const COLLAPSE_KEY = "sidebar_collapsed";
+
+// The socket lives in the Shell, and the lite dashboard draws its own header —
+// so the one fact it needs from up here is passed down rather than opening a
+// second connection to learn it.
+export const ConnectionContext = createContext(false);
+
+function LiteConnection({ connected, children }: { connected: boolean; children: React.ReactNode }) {
+  return (
+    <ConnectionContext.Provider value={connected}>
+      <div className="min-h-screen bg-bg">{children}</div>
+    </ConnectionContext.Provider>
+  );
+}
 
 // Scanner events arrive in bursts — logs alone run at roughly 40 a minute — and
 // revalidating on each one repainted the page that often. Prefixes are pooled
@@ -124,13 +137,24 @@ export function Shell({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
+  // Three shells, not two. `/` is the dashboard chooser and `/login` is the
+  // form — both are their own page with no chrome and no session. `/lite` is
+  // the second dashboard: it needs the session, but carries its own header
+  // instead of the sidebar.
   const isLogin = path === "/login";
+  const isChooser = path === "/";
+  const isBare = isLogin || isChooser;
+  const isLite = path === "/lite" || path.startsWith("/lite/");
 
   useEffect(() => {
     const ok = !!getToken();
     setSignedIn(ok);
-    if (!ok && !isLogin) router.replace("/login");
-  }, [isLogin, path, router]);
+    // The chooser is reachable signed out on purpose — it links to the login
+    // and says which page it will land on afterwards.
+    if (!ok && !isBare) {
+      router.replace(`/login?next=${encodeURIComponent(path)}`);
+    }
+  }, [isBare, path, router]);
 
   // Route change always closes the mobile drawer.
   useEffect(() => setMobileOpen(false), [path]);
@@ -162,9 +186,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if (keys) revalidate(keys);
   });
 
-  // The login page gets the theme but none of the chrome — no sidebar to
-  // navigate with and no status bar to poll while signed out.
-  if (isLogin) {
+  // The login page and the chooser get the theme but none of the chrome — no
+  // sidebar to navigate with and no status bar to poll while signed out.
+  if (isBare) {
     return <ThemeProvider>{children}</ThemeProvider>;
   }
 
@@ -172,6 +196,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // frame that flashes and then redirects.
   if (!signedIn) {
     return <ThemeProvider><div className="min-h-screen bg-bg" /></ThemeProvider>;
+  }
+
+  // The second dashboard: signed in, live socket, but no sidebar and no status
+  // bar. Its own page draws the header, using the same actions the main one
+  // does — see TopbarActions.
+  if (isLite) {
+    return (
+      <ThemeProvider>
+        <LiteConnection connected={connected}>{children}</LiteConnection>
+      </ThemeProvider>
+    );
   }
 
   return (

@@ -1,134 +1,116 @@
 "use client";
 
-import { Bell, Coins, Fuel, Eye, Activity } from "lucide-react";
-import { useApi } from "@/lib/api";
-import { StatCard } from "@/components/StatCard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { DataTable, type Column } from "@/components/DataTable";
-import { Donut } from "@/components/features/Charts";
-import { cn, fmtEth, fmtUsd, timeAgo } from "@/lib/utils";
-import { LiveFeed } from "./_components/LiveFeed";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { LayoutDashboard, Radar, ArrowRight, ShieldCheck, Moon, Sun } from "lucide-react";
+import { getToken } from "@/lib/api";
+import { useTheme } from "@/lib/theme";
 
-const ICONS: Record<string, any> = { total_alerts: Bell, total_tokens: Coins, eth_gas: Fuel, watchlist: Eye };
-const TONE: Record<string, any> = { total_alerts: "red", total_tokens: "amber", eth_gas: "blue", watchlist: "cyan" };
+/* The front door. Two dashboards read the same data and the same scanners —
+   this only decides which one you land in. Deliberately unauthenticated: it
+   shows nothing but its own two links, and each of them goes through the login
+   that already guards everything behind it. */
 
-export default function Dashboard() {
-  const { data: stats } = useApi<any>("/api/dashboard/stats");
-  const { data: overview } = useApi<any>("/api/dashboard/overview");
-  const { data: activity } = useApi<any>("/api/dashboard/activity");
-  const { data: tokens } = useApi<any>("/api/tokens?limit=6");
+type Choice = {
+  href: string;
+  title: string;
+  blurb: string;
+  points: string[];
+  icon: typeof LayoutDashboard;
+};
 
-  const cards = stats?.cards ?? [];
-  const components = overview?.components ?? [];
+const CHOICES: Choice[] = [
+  {
+    href: "/dashboard",
+    title: "Main Dashboard",
+    blurb: "Everything the monitor does, on one shell.",
+    points: ["Detections, RSI and launchpads", "Forwarder, alerts and commands",
+             "Settings, RPCs and system"],
+    icon: LayoutDashboard,
+  },
+  {
+    href: "/lite",
+    title: "2nd Dashboard",
+    blurb: "Premium calls, one row per call, and what the caller actually said.",
+    points: ["Every call listed separately, newest first",
+             "TG Tracker — messages, replies and images",
+             "Add a caller group without leaving the page"],
+    icon: Radar,
+  },
+];
 
-  const alertCols: Column<any>[] = [
-    { key: "message", header: "Event", render: (r) => <span className="text-text">{r.message}</span> },
-    { key: "chain", header: "Chain", render: (r) => <Badge variant="purple">{r.chain}</Badge> },
-    { key: "severity", header: "Severity", render: (r) => (
-      <Badge variant={r.severity === "high" ? "red" : r.severity === "medium" ? "amber" : "blue"}>{r.severity}</Badge>
-    )},
-    { key: "created_at", header: "When", render: (r) => <span className="text-text-muted">{timeAgo(r.created_at)}</span> },
-  ];
+// The chooser sits outside the Shell, so it carries its own theme control —
+// the same one the header uses, minus the header.
+function ThemeButton() {
+  const { theme, toggle } = useTheme();
+  return (
+    <button
+      onClick={toggle}
+      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted
+                 transition-colors hover:bg-bg-hover hover:text-text"
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      title={theme === "dark" ? "Light mode" : "Dark mode"}
+    >
+      {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+    </button>
+  );
+}
+
+export default function Chooser() {
+  // Only to change the wording on the buttons — the pages guard themselves.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  useEffect(() => setSignedIn(!!getToken()), []);
 
   return (
-    <div className="space-y-5">
-      {/* stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {cards.map((c: any) => (
-          <StatCard key={c.key} label={c.label}
-            value={c.key === "eth_gas" ? fmtEth(c.value) : c.value}
-            delta={c.delta} icon={ICONS[c.key] || Activity} tone={TONE[c.key] || "purple"} />
-        ))}
-      </div>
-
-      {/* The three detection feeds in one list, above everything else: it is
-          what the page is opened to look at. */}
-      <LiveFeed />
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* recent alerts */}
-        <Card className="lg:col-span-2">
-          <CardHeader><CardTitle>Recent Alerts</CardTitle></CardHeader>
-          <CardContent>
-            <DataTable columns={alertCols} rows={activity ?? []} empty="No alerts yet" />
-          </CardContent>
-        </Card>
-
-        {/* system overview */}
-        <Card>
-          <CardHeader>
-            <CardTitle>System Overview</CardTitle>
-            <span
-              className={cn(
-                "text-lg font-bold",
-                (overview?.overall_health ?? 0) === 100 ? "text-accent-green"
-                  : (overview?.overall_health ?? 0) >= 50 ? "text-accent-amber"
-                  : "text-accent-red"
-              )}
-            >
-              {overview?.overall_health ?? 0}%
-            </span>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-[11px] text-text-dim">
-              {overview?.running ?? 0} of {overview?.expected ?? 0} enabled services actually running
+    <div className="min-h-screen bg-bg px-5 py-10">
+      <div className="mx-auto flex max-w-4xl flex-col gap-10">
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold text-text">BlockChain-Bot Monitor</h1>
+            <p className="mt-1 text-sm text-text-muted">
+              Pick a dashboard. Both run off the same scanners and the same
+              database — nothing is duplicated behind them.
             </p>
-            {components.map((c: any) => (
-              <div key={c.id ?? c.name} className="flex items-start justify-between gap-2 text-sm">
-                <div className="min-w-0">
-                  <div className={cn(c.status === "stopped" ? "text-text" : "text-text-muted")}>
-                    {c.name}
-                  </div>
-                  {/* Say why, so a red row is actionable rather than mysterious */}
-                  {c.status === "stopped" && c.reason && (
-                    <div className="text-[10px] text-accent-red">{c.reason}</div>
-                  )}
-                </div>
-                <Badge
-                  variant={
-                    c.status === "running" ? "green"
-                      : c.status === "stopped" ? "red"
-                      : "gray"
-                  }
-                >
-                  {c.status}
-                </Badge>
+          </div>
+          <ThemeButton />
+        </header>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {CHOICES.map((c) => (
+            <Link
+              key={c.href}
+              href={signedIn ? c.href : `/login?next=${encodeURIComponent(c.href)}`}
+              className="group flex flex-col gap-4 rounded-xl border border-border bg-bg-card/60 p-6
+                         transition hover:border-brand/50 hover:bg-bg-hover/40
+                         focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+            >
+              <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/15 text-brand-soft">
+                <c.icon size={19} />
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-text">{c.title}</h2>
+                <p className="mt-1 text-sm text-text-muted">{c.blurb}</p>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+              <ul className="flex flex-col gap-1.5 text-xs text-text-dim">
+                {c.points.map((p) => (
+                  <li key={p} className="flex gap-2">
+                    <span className="text-brand-soft">·</span>{p}
+                  </li>
+                ))}
+              </ul>
+              <span className="mt-auto flex items-center gap-1.5 pt-2 text-xs font-medium text-brand-soft">
+                {signedIn === false ? "Sign in and open" : "Open"}
+                <ArrowRight size={13} className="transition group-hover:translate-x-0.5" />
+              </span>
+            </Link>
+          ))}
+        </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* latest tokens */}
-        <Card className="lg:col-span-2">
-          <CardHeader><CardTitle>Latest Tokens</CardTitle></CardHeader>
-          <CardContent>
-            <DataTable
-              columns={[
-                { key: "symbol", header: "Token", render: (r) => <span className="font-medium">{r.symbol}</span> },
-                { key: "chain", header: "Chain", render: (r) => <Badge variant="purple">{r.chain}</Badge> },
-                { key: "mcap_usd", header: "MCap", render: (r) => fmtUsd(r.mcap_usd) },
-                { key: "dex", header: "DEX", render: (r) => <Badge variant="blue">{(r.dex || "—").toUpperCase()}</Badge> },
-              ]}
-              rows={tokens?.items ?? []}
-              empty="No tokens detected yet"
-            />
-          </CardContent>
-        </Card>
-
-        {/* health donut */}
-        <Card>
-          <CardHeader><CardTitle>Health Distribution</CardTitle></CardHeader>
-          <CardContent>
-            <Donut data={[
-              { name: "Running",  value: components.filter((c: any) => c.status === "running").length,  color: "#22c55e" },
-              { name: "Stopped",  value: components.filter((c: any) => c.status === "stopped").length,  color: "#ef4444" },
-              { name: "Disabled", value: components.filter((c: any) => c.status === "disabled").length, color: "#334155" },
-            ].filter((d) => d.value > 0)} />
-          </CardContent>
-        </Card>
+        <p className="flex items-center gap-2 text-xs text-text-dim">
+          <ShieldCheck size={13} />
+          Both dashboards need the same login. Signing out of one signs you out
+          of both.
+        </p>
       </div>
     </div>
   );

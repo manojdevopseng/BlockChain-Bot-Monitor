@@ -460,6 +460,11 @@ _DEPENDS_ON = {
     "premium_eth_detection":    "fwd",
     "premium_rbh_detection":    "fwd",
     "premium_sol_detection":    "fwd",
+    "premium_base_detection":   "fwd",
+    # The second dashboard's two feeds ride the same userbot the premium
+    # detections do, so they restart it the same way.
+    "second_dashboard_calls":   "fwd",
+    "second_dashboard_tracker": "fwd",
     "forwarder":              "fwd",
     # Cross-chain flows and gas, on their chain's socket.
     "sol_to_eth":             "eth",
@@ -471,6 +476,9 @@ _DEPENDS_ON = {
     "rpc_eth":                "eth",
     "rpc_rbh":                "rbh",
     "rpc_sol":                "sol",
+    # Base has no socket of its own — its endpoints are read by the userbot's
+    # premium check, so that is the worker this switch belongs to.
+    "rpc_base":               "fwd",
     # Its socket is a child of the SOL scanner: with that stopped, discovery is
     # stopped too however this switch reads.
     "sol_onchain_discovery":  "sol",

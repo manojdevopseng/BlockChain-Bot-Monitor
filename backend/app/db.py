@@ -232,6 +232,11 @@ _TTL_COLLECTIONS = {
     "rsi_candles": "rsi_retention_days",
     "rsi_state": "rsi_retention_days",
     "launchpad_watch": "launchpad_retention_days",
+    # Second Dashboard: one document per call, and the pictures that came with
+    # them. Two windows, not one — the images are what fill a disk, and losing
+    # a picture from three weeks ago costs far less than losing the call.
+    "premium_calls": "calls_retention_days",
+    "premium_media": "calls_media_retention_days",
 }
 
 
@@ -279,6 +284,14 @@ async def ensure_indexes() -> None:
         ("logs",               [("ts", -1)]),                       # log stream
         ("services",           "id"),                               # every toggle read
         ("premium_detections", [("chain", 1), ("ts", -1)]),         # detection panels
+        # Second Dashboard. Unlike premium_detections these are never merged —
+        # one document per call — so the same token appears many times and the
+        # sort has to be index-backed rather than a scan of every repeat.
+        ("premium_calls",      [("chain", 1), ("ts", -1)]),
+        ("premium_calls",      [("ts", -1)]),                        # merged "All" view
+        ("premium_calls",      [("day", -1)]),                       # History dropdown
+        ("premium_calls",      [("chat_id", 1), ("ts", -1)]),        # one caller's feed
+        ("premium_media",      "mid"),                               # image by id
         # Added after an audit found these queried on every request with no
         # index behind them:
         ("premium_groups",     "id"),                               # reload + toggle, ~20s

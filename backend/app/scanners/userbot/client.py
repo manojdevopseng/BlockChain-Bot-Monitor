@@ -65,6 +65,9 @@ class TelegramForwarder(OnChainMixin, PremiumCaptureMixin, HandlersMixin):
         self._bnb_http_pool = EndpointPool(
             "BNB-PREMIUM-HTTP", lambda: list(config.BNB_HTTP_ENDPOINTS),
             chain_label="BNB premium check")
+        self._base_http_pool = EndpointPool(
+            "BASE-PREMIUM-HTTP", config.base_endpoints,
+            chain_label="Base premium check")
 
         # Loaded from Mongo in start() (seeded from seed_data.json, user-editable).
         self._premium_ids: set = set()

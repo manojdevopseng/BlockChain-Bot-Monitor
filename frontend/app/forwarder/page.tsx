@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Users, MessageSquare, Send, Radio, Plus, Loader2, Star, Trash2 } from "lucide-react";
+import { Users, MessageSquare, Send, Radio, Star, Trash2 } from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -13,7 +13,7 @@ import { TableScroll } from "@/components/TableScroll";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { AddPremiumGroup } from "@/components/features/AddPremiumGroup";
 import { ChipStyleEditor } from "@/components/ChipStyleEditor";
 import { ChipStyle } from "@/components/GroupChip";
 import { fmtNum } from "@/lib/utils";
@@ -106,62 +106,6 @@ function SourceRow({ s, onToggle, onRemove, onChip, onIc }: {
   );
 }
 
-// Add by whatever the user has to hand: the group's name, its @username, a
-// t.me link, or the raw chat id. Resolution happens server-side through the
-// userbot, which is the only thing that can see a private group.
-function AddGroup() {
-  const [val, setVal] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  async function add() {
-    const value = val.trim();
-    if (!value) return;
-    setBusy(true);
-    setMsg(null);
-    try {
-      const r: any = await apiSend("/api/forwarder/groups", "POST", { value });
-      setVal("");
-      // Same three details the chat-id finder gives back, so what was added is
-      // identifiable without hunting for the row.
-      const bits = [r.name, r.username ? `@${r.username}` : null, `-100${r.id}`]
-        .filter(Boolean).join(" · ");
-      setMsg({
-        ok: true,
-        text: r.name ? `Added ${bits} — live now`
-                     : `Added -100${r.id} — live now. Telegram would not give a `
-                       + `title; it will fill in when the group next posts.`,
-      });
-      mutate("/api/forwarder/sources");
-      mutate("/api/forwarder/stats");
-    } catch (e: any) {
-      setMsg({ ok: false, text: String(e?.message || e) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mb-3">
-      <div className="flex gap-2">
-        <Input
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          placeholder="Group name  ·  @username  ·  t.me/…  ·  -100123…"
-          onKeyDown={(e) => e.key === "Enter" && add()}
-        />
-        <Button variant="primary" size="sm" disabled={busy || !val.trim()} onClick={add}>
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
-        </Button>
-      </div>
-      {msg && (
-        <p className={`mt-1.5 text-[11px] ${msg.ok ? "text-accent-green" : "text-accent-red"}`}>
-          {msg.text}
-        </p>
-      )}
-    </div>
-  );
-}
 
 export default function ForwarderPage() {
   const [q, setQ] = useState("");
@@ -270,7 +214,7 @@ export default function ForwarderPage() {
           title, otherwise the seeded one. ⭐ mirrors that caller into
           Important Caller as well, from its next message on.
         </p>
-        <AddGroup />
+        <AddPremiumGroup />
         <TableScroll>
           <div className="space-y-1">
             {groups.map((s) => (

@@ -110,6 +110,21 @@ BNB_RPC_HTTP       = settings.bnb_rpc_http
 BNB_HTTP_ENDPOINTS = [u for u in (settings.bnb_rpc_http,
                                   settings.bnb_rpc_http_fallback) if u]
 BNB_WBNB           = settings.bnb_wbnb
+# ── Base — premium-caller detection only, same shape as BNB above ──────────
+BASE_RPC_HTTP       = settings.base_rpc_http
+BASE_HTTP_ENDPOINTS = [u for u in (settings.base_rpc_http,
+                                   settings.base_rpc_http_fallback) if u]
+# Settings → RPCs → BASE. Kept as its own flag rather than emptying the list,
+# so switching the endpoints back on does not need a restart to remember what
+# they were.
+BASE_RPC_ENABLED    = True
+
+
+def base_endpoints() -> list:
+    """What the Base pool should try right now — nothing while it is switched
+    off, so the RPC monitor's "disabled" is the truth and not a label."""
+    return list(BASE_HTTP_ENDPOINTS) if BASE_RPC_ENABLED else []
+BASE_WETH           = settings.base_weth
 
 RBH_V2_FACTORY     = settings.rbh_v2_factory
 RBH_V3_FACTORY     = settings.rbh_v3_factory
@@ -327,7 +342,9 @@ def refresh_from_registry(enabled: dict[str, bool]) -> None:
     handled by the supervisor deciding whether to start the task at all).
     """
     global RBH_NOXA_ENABLED, RBH_V2_ENABLED, RBH_V3_ENABLED, RBH_V4_ENABLED
-    global SOL_DISCOVERY_ENABLED
+    global SOL_DISCOVERY_ENABLED, BASE_RPC_ENABLED
+    if "rpc_base" in enabled:
+        BASE_RPC_ENABLED = bool(enabled["rpc_base"])
     # SOL's on-chain discovery is a child task of a scanner the supervisor keeps
     # running for other reasons, so it cannot be started/stopped by "should this
     # worker exist" — it reads this flag instead (see SolanaScanner.sync_discovery).

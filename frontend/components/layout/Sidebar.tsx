@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
 
 const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/tokens", label: "Tokens", icon: Coins },
   { href: "/detections", label: "Detections", icon: Crosshair },

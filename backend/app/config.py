@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     alert_retention_days: int = 15
     token_retention_days: int = 30
     archive_retention_days: int = 15
+    # Second Dashboard. One row per call is far more rows than the merged
+    # panel keeps, and the images are the heaviest thing the app stores — so
+    # the pictures age out well before the text they arrived with.
+    calls_retention_days: int = 30
+    calls_media_retention_days: int = 7
 
     # ── Auth ────────────────────────────────────────────────
     jwt_secret: str = "change-me"
@@ -236,6 +241,14 @@ class Settings(BaseSettings):
     # WBNB, the base token a BSC pair is priced against — the equivalent of
     # ETH_WETH. Used to work out which side of a pair is the actual token.
     bnb_wbnb: str = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+    # Base — premium-caller detection only, same shape as BNB above: no
+    # discovery scanner, no WSS, just "is this address a contract on Base".
+    # Two endpoints because one public RPC going quiet must not take the chain
+    # off the board; the pool tries them in order.
+    base_rpc_http: str = "https://mainnet.base.org"
+    base_rpc_http_fallback: str = "https://base.llamarpc.com"
+    # WETH on Base, the token a Base pair is priced against.
+    base_weth: str = "0x4200000000000000000000000000000000000006"
 
     # ── Telegram ────────────────────────────────────────────
     telegram_bot_token: str = ""

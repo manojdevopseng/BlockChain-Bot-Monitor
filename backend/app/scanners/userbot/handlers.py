@@ -19,13 +19,15 @@ import re
 
 from telethon import events
 
-from app import fwd_counters, heartbeat
-from app.util import bare_chat_id
+from app import calls, fwd_counters, heartbeat
+from app.util import bare_chat_id, tg_message_url
 
 from .common import (DEST_DEXS, DEST_IC, DEST_OTTO, DEST_PREMIUM_ALL,
-                     DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_DEXS, GATE_IC,
+                     DEST_SIGNALS, ETH_RE, GATE_BUYBOT, GATE_CALL, GATE_CALLS,
+                     GATE_CALLS_TG, GATE_DEXS, GATE_IC,
                      GATE_OTTO,
-                     GATE_PREMIUM, GATE_PREMIUM_BNB, GATE_PREMIUM_ETH, GATE_PREMIUM_RBH,
+                     GATE_PREMIUM, GATE_PREMIUM_BASE, GATE_PREMIUM_BNB,
+                     GATE_PREMIUM_ETH, GATE_PREMIUM_RBH,
                      GATE_PREMIUM_SOL,
                      HASH_RE, SOL_RE, SOURCE_BUYBOT, SOURCE_CALL, SOURCE_DEXS,
                      SOURCE_OTTO, log)
@@ -74,6 +76,59 @@ async def _source_title(event, bare: int) -> str:
     except Exception:  # noqa: BLE001
         pass
     return f"group {bare}"
+
+
+async def _call_context(event, bare: int, group: str, username, want_media: bool) -> dict:
+    """Everything the Second Dashboard shows, read off the message once.
+
+    Kept separate from detection because it is presentation, not evidence: if
+    the picture fails to download or the reply cannot be resolved, the call is
+    still recorded, just with less around it.
+    """
+    ctx: dict = {
+        "chat_id": bare,
+        "group": group,
+        "username": username,
+        "msg_id": event.id,
+        "post_url": tg_message_url(event.chat_id, event.id, username),
+        "text": event.raw_text or "",
+        "reply_to": None,
+        "reply_text": "",
+        "media_id": None,
+        "followers": None,
+        "ts": None,
+    }
+    try:
+        chat = await event.get_chat()
+        count = getattr(chat, "participants_count", None)
+        if count:
+            ctx["followers"] = int(count)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Who was replied to. The tracker shows the handle, so a thread reads as a
+    # conversation rather than a wall of disconnected posts.
+    if getattr(event.message, "reply_to_msg_id", None):
+        try:
+            replied = await event.get_reply_message()
+            if replied is not None:
+                sender = await replied.get_sender()
+                handle = getattr(sender, "username", None)
+                name = " ".join(x for x in (getattr(sender, "first_name", None),
+                                            getattr(sender, "last_name", None)) if x)
+                ctx["reply_to"] = handle or (name or None)
+                ctx["reply_text"] = replied.raw_text or ""
+        except Exception:  # noqa: BLE001
+            pass
+
+    if want_media and getattr(event.message, "photo", None):
+        try:
+            raw = await event.download_media(file=bytes)
+            if raw:
+                ctx["media_id"] = await calls.save_media(raw)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[CALLS] media download failed for {bare}/{event.id}: {exc}")
+    return ctx
 
 
 class HandlersMixin:
@@ -164,7 +219,14 @@ class HandlersMixin:
         eth_on = self._on(GATE_PREMIUM_ETH)
         rbh_on = self._on(GATE_PREMIUM_RBH)
         bnb_on = self._on(GATE_PREMIUM_BNB)
-        if not any((premium_on, ic_on, sol_on, eth_on, rbh_on, bnb_on)):
+        base_on = self._on(GATE_PREMIUM_BASE)
+        # The Second Dashboard's own two switches. Its feed is a different
+        # reading of these same messages, so it is checked here rather than
+        # riding on whether a panel gate happens to be on.
+        calls_on = self._on(GATE_CALLS)
+        tracker_on = self._on(GATE_CALLS_TG)
+        if not any((premium_on, ic_on, sol_on, eth_on, rbh_on, bnb_on, base_on,
+                    calls_on)):
             return
         bare = bare_chat_id(event.chat_id)
         if bare not in self._premium_ids:
@@ -238,32 +300,57 @@ class HandlersMixin:
         source_uname = getattr(chat, "username", None)
         bare = bare_chat_id(event.chat_id)
 
-        # ── SOL address detection (dashboard-only panel; independent of ETH) ──
-        if sol_on:
-            for sol_addr in set(SOL_RE.findall(raw)):
-                sol_key = f"{bare}:{sol_addr}"
-                if sol_key not in self._detection_seen:
-                    self._detection_seen.add(sol_key)
-                    asyncio.create_task(self._record_sol_detection(
-                        sol_addr, bare, source_name, raw,
-                        username=source_uname, msg_id=event.id,
-                        raw_chat_id=event.chat_id,
-                    ))
-
+        sol_addrs = set(SOL_RE.findall(raw)) if (sol_on or calls_on) else set()
         eth_match = ETH_RE.search(message)
         eth_address = eth_match.group(0).lower() if eth_match else None
 
+        # The Second Dashboard only tracks messages that carry a token, so the
+        # context is read once, here, and only when there is one to attach it
+        # to. Downloading a picture for every chat message would be the most
+        # expensive thing this handler does.
+        ctx: dict = {}
+        if calls_on and (sol_addrs or eth_address):
+            ctx = await _call_context(event, bare, source_name, source_uname,
+                                      want_media=tracker_on)
+
+        # ── SOL address detection (dashboard-only panel; independent of ETH) ──
+        for sol_addr in sol_addrs:
+            sol_key = f"{bare}:{sol_addr}"
+            if sol_key not in self._detection_seen:
+                self._detection_seen.add(sol_key)
+                if sol_on:
+                    asyncio.create_task(self._record_sol_detection(
+                        sol_addr, bare, source_name, raw,
+                        username=source_uname, msg_id=event.id,
+                        raw_chat_id=event.chat_id, call_ctx=ctx if calls_on else None,
+                    ))
+                elif calls_on:
+                    asyncio.create_task(self._record_call_only(sol_addr, ctx))
+            elif calls_on:
+                # Same group, same token, later message. The panel deliberately
+                # ignores this — its count is groups, not posts — but it is
+                # exactly what the Second Dashboard exists to show, so it gets
+                # its own row. No RPC: the chain was settled the first time.
+                asyncio.create_task(self._record_call_only(sol_addr, ctx))
+
         # ── ETH/RBH panel detection — independent of GATE_PREMIUM ────────────
-        if eth_address and (eth_on or rbh_on or bnb_on):
+        if eth_address:
             cap_key = f"{bare}:{eth_address}"
+            chain_checks = (eth_on or rbh_on or bnb_on or base_on)
             if cap_key not in self._detection_seen:
                 self._detection_seen.add(cap_key)
-                asyncio.create_task(self._record_eth_detection(
-                    eth_address, bare, source_name, raw,
-                    username=source_uname, msg_id=event.id,
-                    check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
-                    raw_chat_id=event.chat_id,
-                ))
+                if chain_checks:
+                    asyncio.create_task(self._record_eth_detection(
+                        eth_address, bare, source_name, raw,
+                        username=source_uname, msg_id=event.id,
+                        check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
+                        check_base=base_on, raw_chat_id=event.chat_id,
+                        call_ctx=ctx if calls_on else None,
+                    ))
+                elif calls_on:
+                    asyncio.create_task(self._record_call_only(eth_address, ctx))
+            elif calls_on:
+                asyncio.create_task(self._record_call_only(eth_address, ctx))
 
         # The caller signal itself — one message per chain, into that chain's
         # own group — is sent from premium.py, off the detection it just

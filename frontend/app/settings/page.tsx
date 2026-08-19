@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, Bot, Brain, Link2, Radio, Plus, X, Tag, Search, Hash, Loader2, Twitter, Target } from "lucide-react";
+import { Activity, Bot, Brain, Link2, Radio, Radar, Plus, X, Tag, Search, Hash, Loader2, Twitter, Target } from "lucide-react";
 import { useApi, apiGet, apiSend } from "@/lib/api";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/PageHeader";
@@ -45,6 +45,13 @@ const CAT = {
           desc: "Watches the tokens you add and says when one reaches the market "
               + "cap you set. A chain needs both its switches — the chain and "
               + "its endpoints — to be read." },
+  // The second dashboard's own two feeds. A section rather than two more
+  // switches in Bots, because they belong to a screen rather than to a chain —
+  // and because turning the whole screen off should be one obvious place.
+  dash2: { title: "2nd Dashboard", icon: Radar,
+           desc: "The per-call feed behind /lite. Both read the premium messages "
+               + "the first dashboard already reads — nothing here opens a second "
+               + "RPC connection or a second Telegram session." },
   rbhx: { title: "Robinhood Monitors", icon: Twitter,
           desc: "Who is behind a Robinhood launch, read off the token's own metadata. "
               + "Two panels, one socket — each block is one of them." },
@@ -376,6 +383,7 @@ export default function SettingsPage() {
             two places on the page. */}
         <div className="space-y-5">
           <ServiceGroup cat="ai" items={data?.ai ?? []} />
+          <ServiceGroup cat="dash2" items={data?.dash2 ?? []} />
           <CredentialsManager only="AI" />
           <NarrativeManager />
         </div>

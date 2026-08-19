@@ -17,7 +17,7 @@ import re
 import time
 from typing import Optional
 
-from app import notifier, outcomes
+from app import calls, notifier, outcomes
 from app.scanners import scfg as config
 from app.scanners.wss_pool import EndpointPool
 from app.util import gmgn_url, tg_message_url
@@ -55,7 +55,42 @@ def _content_block(content: str) -> str:
     return f"<blockquote>{html.escape(body)}</blockquote>\n\n"
 
 
+async def _log_call(ctx: Optional[dict], chain: str, address: str,
+                    symbol: str, name: str, keyword: str) -> None:
+    """Record one call for the Second Dashboard, if it is switched on.
+
+    Called from inside the chain check that has just proved the address is real
+    on `chain`, so it costs no RPC of its own — that is the whole reason it
+    lives here rather than in its own scanner.
+    """
+    if not ctx:
+        return
+    try:
+        await calls.record(chain=chain, address=address, symbol=symbol,
+                           name=name, keyword=keyword, **ctx)
+    except Exception as exc:  # noqa: BLE001
+        # A feed row is not worth losing a detection over.
+        log.warning(f"[CALLS] could not record {chain} {address[:10]}: {exc}")
+
+
 class PremiumCaptureMixin:
+    async def _record_call_only(self, address: str, ctx: Optional[dict]) -> None:
+        """A repeat of a token whose chains are already known.
+
+        The panel has nothing to learn here, and re-running the chain checks
+        would spend RPC calls to be told what is already on record — so the
+        chains come from the first dashboard's own rows instead.
+        """
+        if not ctx:
+            return
+        try:
+            hits = await calls.known_chains(address)
+            if hits:
+                await calls.record_all(hits, **ctx)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"[CALLS] repeat for {address[:10]} failed: {exc}")
+
+
     """`_record_eth_detection` / `_record_sol_detection`, called from the premium
     handler once an address has been spotted in a watched group."""
 
@@ -112,7 +147,8 @@ class PremiumCaptureMixin:
     async def _record_eth_detection(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None,
                                    check_eth: bool = True, check_rbh: bool = True,
-                                   check_bnb: bool = True, raw_chat_id=None) -> None:
+                                   check_bnb: bool = True, check_base: bool = True,
+                                   raw_chat_id=None, call_ctx: Optional[dict] = None) -> None:
         """Confirm an 0x-format address seen in a premium group and, per chain
         it turns out to be a real contract on, record it in the Detections
         panel under that chain's filter.
@@ -147,6 +183,15 @@ class PremiumCaptureMixin:
             native0,
         }
 
+        # WETH on Base plus the stables a Base pair is usually quoted in, so
+        # _resolve_token picks the token side rather than the base.
+        base_bases = {
+            (config.BASE_WETH or "").lower(),
+            "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",   # USDC
+            "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",   # USDbC
+            native0,
+        }
+
         async def check_chain(label: str, chain: str, pool: EndpointPool, bases: set) -> None:
             try:
                 if not pool.urls():
@@ -166,6 +211,11 @@ class PremiumCaptureMixin:
                 if existing:
                     entries = existing.get("group_entries") or []
                     if any(e.get("chat_id") == chat_id for e in entries):
+                        # The panel counts groups, not posts, so it is right to
+                        # ignore this. The Second Dashboard counts posts.
+                        await _log_call(call_ctx, chain, token_addr,
+                                        existing.get("symbol") or "",
+                                        existing.get("name") or "", keyword)
                         return
                     entries = [entry] + entries
                     await col("premium_detections").update_one(
@@ -179,6 +229,9 @@ class PremiumCaptureMixin:
                             "keyword": existing.get("keyword") or keyword,
                         }},
                     )
+                    await _log_call(call_ctx, chain, token_addr,
+                                    existing.get("symbol") or "",
+                                    existing.get("name") or "", keyword)
                     log.info(f"[PREMIUM-{label}] {existing.get('symbol') or token_addr[:10]} shill count → {len(entries)} (from {group})")
                     await self._announce_detection(chain, token_addr, existing.get("symbol") or "",
                                                    group, len(entries), post_url, text)
@@ -207,6 +260,8 @@ class PremiumCaptureMixin:
                     "ts": time.time(),
                 }
                 await col("premium_detections").insert_one(record)
+                await _log_call(call_ctx, chain, token_addr, record["symbol"],
+                                record["name"], keyword)
                 # Follow it forward, tagged with the calling group, so the
                 # Forwarder page can rank groups by how their calls did.
                 await outcomes.track(
@@ -237,12 +292,14 @@ class PremiumCaptureMixin:
             tasks.append(check_chain("RBH", "rbh", self._rbh_http_pool, rbh_bases))
         if check_bnb:
             tasks.append(check_chain("BNB", "bnb", self._bnb_http_pool, bnb_bases))
+        if check_base:
+            tasks.append(check_chain("BASE", "base", self._base_http_pool, base_bases))
         if tasks:
             await asyncio.gather(*tasks)
 
     async def _record_sol_detection(self, addr: str, chat_id: int, group: str, text: str,
                                    username: Optional[str] = None, msg_id: Optional[int] = None,
-                                   raw_chat_id=None) -> None:
+                                   raw_chat_id=None, call_ctx: Optional[dict] = None) -> None:
         """Capture a Solana address seen in a premium group into the SOL panel.
         Dormant unless a SOL HTTP endpoint is set (mirrors the ETH/RBH
         behaviour); the RPC getAccountInfo check filters out random base58
@@ -263,12 +320,16 @@ class PremiumCaptureMixin:
         if existing:
             entries = existing.get("group_entries") or []
             if any(e.get("chat_id") == chat_id for e in entries):
+                await _log_call(call_ctx, "sol", addr, existing.get("symbol") or "",
+                                existing.get("name") or "", keyword)
                 return
             entries = [entry] + entries
             await detections.update_one({"_id": existing["_id"]}, {"$set": {
                 "group_entries": entries, "groups": [e["name"] for e in entries],
                 "group_ids": [e["chat_id"] for e in entries], "count": len(entries),
                 "ts": time.time(), "keyword": existing.get("keyword") or keyword}})
+            await _log_call(call_ctx, "sol", addr, existing.get("symbol") or "",
+                            existing.get("name") or "", keyword)
             log.info(f"[PREMIUM-SOL] {existing.get('symbol') or addr[:10]} shill count → {len(entries)} (from {group})")
             await self._announce_detection("sol", addr, existing.get("symbol") or "",
                                           group, len(entries), post_url, text)
@@ -283,6 +344,7 @@ class PremiumCaptureMixin:
             "keyword": keyword, "ts": time.time(),
         }
         await detections.insert_one(record)
+        await _log_call(call_ctx, "sol", addr, record["symbol"], record["name"], keyword)
         from ...ws_hub import hub
         await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
         log.info(f"[PREMIUM-SOL] Captured {record['symbol'] or addr[:10]} from {group} | "
