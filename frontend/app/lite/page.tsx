@@ -10,7 +10,7 @@ import { TopbarActions } from "@/components/layout/TopbarActions";
 import { FilterTabs, HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { DownloadCsv } from "@/components/features/Performance";
 import { AddPremiumGroup } from "@/components/features/AddPremiumGroup";
-import { CallAlert } from "./_components/CallAlert";
+import { IcAlert } from "./_components/IcAlert";
 import { CallsTable } from "./_components/CallsTable";
 import { TgTracker } from "./_components/TgTracker";
 
@@ -90,7 +90,7 @@ export default function LiteDashboard() {
                   {stats?.callers ? ` · ${stats.callers} callers` : ""}
                 </span>
               </h2>
-              <CallAlert />
+              <IcAlert kind="calls" />
               <FilterTabs value={chain} onChange={setChain} options={CHAIN_TABS} />
               <SearchBox value={q} onChange={setQ} placeholder="symbol / name / address / group" />
               <HistorySelect value={date} onChange={setDate} dates={dates?.dates ?? []} />

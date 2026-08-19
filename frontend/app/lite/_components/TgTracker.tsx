@@ -8,6 +8,7 @@ import { AuthImage } from "@/components/AuthImage";
 import { Linkify } from "@/components/Linkify";
 import { shortAddr } from "@/lib/utils";
 import { ChipMap, chipStyleOf } from "@/components/GroupChip";
+import { IcAlert } from "./IcAlert";
 
 /* Every premium message, newest first — the same feed the mirror group carries,
    and for the same reason: what a caller says around a call is most of the
@@ -75,9 +76,13 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-bg-card/60">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-        <h2 className="text-sm font-semibold text-text">TG Tracker</h2>
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
+        <h2 className="mr-auto text-sm font-semibold text-text">TG Tracker</h2>
         <span className="text-[11px] text-text-dim">{items.length} messages</span>
+        {/* Its own switch, not the calls one: this fires on anything a starred
+            caller posts, and wanting the call without the chatter is the
+            common case. */}
+        <IcAlert kind="messages" />
       </div>
 
       {/* Each message is its own box. A rule between them is not enough: a
