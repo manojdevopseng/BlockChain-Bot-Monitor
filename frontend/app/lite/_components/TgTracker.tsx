@@ -292,9 +292,12 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
       {(fresh > 0 || away) && (
         <button
           onClick={toTop}
-          className={`absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full
-                      border px-3 py-1.5 text-[11px] font-medium shadow-lg backdrop-blur
-                      transition-colors ${
+          // Top centre, over the list. New messages arrive at the top, so the
+          // notice belongs where they land — and where the eye already is when
+          // scrolling back up.
+          className={`absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1.5
+                      whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px]
+                      font-medium shadow-lg backdrop-blur transition-colors ${
             fresh > 0
               ? "border-brand/40 bg-brand/90 text-white hover:bg-brand"
               : "border-border bg-bg-card/90 text-text-muted hover:text-text"
