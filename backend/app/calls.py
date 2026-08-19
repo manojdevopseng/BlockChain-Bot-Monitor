@@ -228,6 +228,22 @@ async def record_message(
         await _push("premium_message", {k: v for k, v in doc.items() if k != "dt"})
 
 
+async def update_message(chat_id: int, msg_id: int, **fields) -> None:
+    """Fill in what was not known when the message was first written.
+
+    The row is created from what is already in memory, so it can be on screen
+    in a millisecond. The reply handle, the subscriber count and the picture
+    are all API round trips, and they land here afterwards.
+    """
+    fields = {k: v for k, v in fields.items() if v is not None and v != ""}
+    if not fields:
+        return
+    key = {"chat_id": int(chat_id), "msg_id": int(msg_id)}
+    res = await db.get_collection("premium_messages").update_one(key, {"$set": fields})
+    if getattr(res, "modified_count", 0):
+        await _push("premium_message_token", {**key, "updated": sorted(fields)})
+
+
 async def attach_token(chat_id: int, msg_id: Optional[int], chain: str,
                        address: str, symbol: str = "") -> None:
     """Hang a resolved token off the message that named it.

@@ -107,24 +107,22 @@ async def _followers(client, chat, bare: int) -> int | None:
     return count
 
 
-async def _call_context(event, bare: int, group: str, username, want_media: bool) -> dict:
-    """Everything the Second Dashboard shows, read off the message once.
+def _fast_context(event, bare: int, group: str, username) -> dict:
+    """Everything the tracker can know without asking Telegram anything.
 
-    Kept separate from detection because it is presentation, not evidence: if
-    the picture fails to download or the reply cannot be resolved, the call is
-    still recorded, just with less around it.
+    All of it is already in memory by the time the handler runs, so this costs
+    nothing and the row can be written — and pushed to the dashboards — before
+    the message is forwarded anywhere. That ordering is the whole point: the
+    outbound mirror is rate limited to protect the account, and a database
+    write has no business queueing behind it.
     """
-    ctx: dict = {
+    return {
         "chat_id": bare,
         "group": group,
         "username": username,
         "msg_id": event.id,
         "post_url": tg_message_url(event.chat_id, event.id, username),
         "text": event.raw_text or "",
-        "reply_to": None,
-        "reply_text": "",
-        "media_id": None,
-        "followers": None,
         # Telegram's own clock for this message, not ours. What we time is when
         # we finished reading it, which is a different fact and not the one the
         # feed should be showing.
@@ -132,14 +130,51 @@ async def _call_context(event, bare: int, group: str, username, want_media: bool
                   if getattr(event.message, "date", None) else None),
         "ts": None,
     }
+
+
+# Subscriber counts, cached per chat. Telethon's cached entity usually has no
+# participants_count — only a full-channel request carries it — and asking
+# Telegram for one on every message would be an API call per post in every
+# group we watch. It changes by the hour at most, so it is asked for once and
+# reused until it goes stale.
+_FOLLOWERS: dict[int, tuple[float, "int | None"]] = {}
+_FOLLOWERS_TTL = 6 * 3600
+
+
+async def _followers(client, chat, bare: int):
+    import time as _t
+    hit = _FOLLOWERS.get(bare)
+    if hit and _t.time() - hit[0] < _FOLLOWERS_TTL:
+        return hit[1]
+    count = getattr(chat, "participants_count", None)
+    if not count:
+        try:
+            from telethon.tl.functions.channels import GetFullChannelRequest
+            full = await client(GetFullChannelRequest(chat))
+            count = getattr(full.full_chat, "participants_count", None)
+        except Exception:  # noqa: BLE001
+            # Basic groups, or a channel we cannot ask about. Cached as None so
+            # the failure is not retried on every single message.
+            count = None
+    count = int(count) if count else None
+    _FOLLOWERS[bare] = (_t.time(), count)
+    return count
+
+
+async def _enrich(event, bare: int, chat, want_media: bool) -> dict:
+    """The parts that cost a round trip: who was replied to, how many
+    subscribers, and the picture.
+
+    Runs after the row exists, and each piece is independent — a photo that
+    fails to download must not cost the reply handle, and neither is worth
+    holding the message off the screen for.
+    """
+    out: dict = {}
     try:
-        chat = await event.get_chat()
-        ctx["followers"] = await _followers(event.client, chat, bare)
+        out["followers"] = await _followers(event.client, chat, bare)
     except Exception:  # noqa: BLE001
         pass
 
-    # Who was replied to. The tracker shows the handle, so a thread reads as a
-    # conversation rather than a wall of disconnected posts.
     if getattr(event.message, "reply_to_msg_id", None):
         try:
             replied = await event.get_reply_message()
@@ -148,8 +183,8 @@ async def _call_context(event, bare: int, group: str, username, want_media: bool
                 handle = getattr(sender, "username", None)
                 name = " ".join(x for x in (getattr(sender, "first_name", None),
                                             getattr(sender, "last_name", None)) if x)
-                ctx["reply_to"] = handle or (name or None)
-                ctx["reply_text"] = replied.raw_text or ""
+                out["reply_to"] = handle or (name or None)
+                out["reply_text"] = replied.raw_text or ""
         except Exception:  # noqa: BLE001
             pass
 
@@ -157,13 +192,24 @@ async def _call_context(event, bare: int, group: str, username, want_media: bool
         try:
             raw = await event.download_media(file=bytes)
             if raw:
-                ctx["media_id"] = await calls.save_media(raw)
+                out["media_id"] = await calls.save_media(raw)
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[CALLS] media download failed for {bare}/{event.id}: {exc}")
-    return ctx
+    return out
 
 
 class HandlersMixin:
+    async def _enrich_message(self, event, bare: int, chat, ctx: dict) -> None:
+        """Fill in the round-trip parts of a tracker row, after it is on screen."""
+        try:
+            extra = await _enrich(event, bare, chat,
+                                  want_media=self._on(GATE_CALLS_TG))
+            if extra:
+                await calls.update_message(bare, event.id, **extra)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[TRACKER] enrich failed for {bare}/{event.id}: {exc}")
+
+
     def _register_handlers(self) -> None:
         self._client.add_event_handler(self._call_handler, events.NewMessage(chats=SOURCE_CALL))
         self._client.add_event_handler(self._buybot_handler, events.NewMessage(chats=SOURCE_BUYBOT))
@@ -270,6 +316,88 @@ class HandlersMixin:
         if unique_id in self._processed:
             return
 
+        # ── the dashboards, first ────────────────────────────────────────────
+        #
+        # Everything below this block sends something to Telegram, and every
+        # outbound send waits its turn in a rate limiter that exists to keep
+        # the account out of a flood ban — roughly one message every three
+        # seconds into the mirror chat, with a hundred groups feeding it. This
+        # used to run after all of that, so a database write measured in
+        # milliseconds was queueing behind minutes of outbound traffic: fifteen
+        # seconds behind Telegram for a plain message, measured.
+        #
+        # So the reads and writes happen here, off what is already in memory,
+        # and the forwarding follows at whatever pace the limiter allows.
+        chat = await event.get_chat()
+        source_name = getattr(chat, "title", "Unknown")
+        source_uname = getattr(chat, "username", None)
+
+        raw = event.raw_text or ""
+        message = raw.lower()
+
+        ctx: dict = {}
+        if calls_on or tracker_on:
+            ctx = _fast_context(event, bare, source_name, source_uname)
+        if tracker_on and ctx:
+            try:
+                await calls.record_message(**ctx)
+                if ctx.get("tg_ts"):
+                    # Kept: this is the number that says whether the ordering
+                    # above is still doing its job.
+                    import time as _t
+                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} "
+                             f"stored {_t.time() - ctx['tg_ts']:.2f}s after Telegram")
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"[TRACKER] could not record {bare}/{event.id}: {exc}")
+            # The reply handle, the subscriber count and the picture are all
+            # round trips. They land on the row afterwards rather than holding
+            # the message off the screen until they arrive.
+            asyncio.create_task(self._enrich_message(event, bare, chat, ctx))
+
+        sol_addrs = set(SOL_RE.findall(raw)) if (sol_on or calls_on) else set()
+        eth_match = ETH_RE.search(message)
+        eth_address = eth_match.group(0).lower() if eth_match else None
+
+        # ── SOL address detection (dashboard-only panel; independent of ETH) ──
+        for sol_addr in sol_addrs:
+            sol_key = f"{bare}:{sol_addr}"
+            if sol_key not in self._detection_seen:
+                self._detection_seen.add(sol_key)
+                if sol_on:
+                    asyncio.create_task(self._record_sol_detection(
+                        sol_addr, bare, source_name, raw,
+                        username=source_uname, msg_id=event.id,
+                        raw_chat_id=event.chat_id, call_ctx=ctx if calls_on else None,
+                    ))
+                elif calls_on:
+                    asyncio.create_task(self._record_call_only(sol_addr, ctx))
+            elif calls_on:
+                # Same group, same token, later message. The panel deliberately
+                # ignores this — its count is groups, not posts — but it is
+                # exactly what the Second Dashboard exists to show, so it gets
+                # its own row. No RPC: the chain was settled the first time.
+                asyncio.create_task(self._record_call_only(sol_addr, ctx))
+
+        # ── ETH/RBH panel detection — independent of GATE_PREMIUM ────────────
+        if eth_address:
+            cap_key = f"{bare}:{eth_address}"
+            chain_checks = (eth_on or rbh_on or bnb_on or base_on)
+            if cap_key not in self._detection_seen:
+                self._detection_seen.add(cap_key)
+                if chain_checks:
+                    asyncio.create_task(self._record_eth_detection(
+                        eth_address, bare, source_name, raw,
+                        username=source_uname, msg_id=event.id,
+                        check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
+                        check_base=base_on, raw_chat_id=event.chat_id,
+                        call_ctx=ctx if calls_on else None,
+                    ))
+                elif calls_on:
+                    asyncio.create_task(self._record_call_only(eth_address, ctx))
+            elif calls_on:
+                asyncio.create_task(self._record_call_only(eth_address, ctx))
+
+        # ── mirrors, after ───────────────────────────────────────────────────
         if premium_on and DEST_PREMIUM_ALL:
             # Highest-volume path: every premium message is mirrored here, so it
             # is the most likely to hit Telegram's per-chat flood limit.
@@ -322,81 +450,6 @@ class HandlersMixin:
                         log.warning(f"[IC] copy fallback failed for chat {event.chat_id}: {exc2}")
                 else:
                     log.error(f"[IC] Forward error: {exc}")
-
-        raw = event.raw_text or ""
-        message = raw.lower()
-
-        # Resolve the source once — needed by both the SOL and ETH branches.
-        chat = await event.get_chat()
-        source_name = getattr(chat, "title", "Unknown")
-        source_uname = getattr(chat, "username", None)
-        bare = bare_chat_id(event.chat_id)
-
-        sol_addrs = set(SOL_RE.findall(raw)) if (sol_on or calls_on) else set()
-        eth_match = ETH_RE.search(message)
-        eth_address = eth_match.group(0).lower() if eth_match else None
-
-        # Read once per message, and written before any chain check runs. The
-        # mirror group shows everything instantly because it forwards on the
-        # message and asks nothing; a tracker that waits for an RPC round trip
-        # can only ever trail it. So the message lands now and its tokens are
-        # hung off it as each check comes back.
-        ctx: dict = {}
-        if calls_on or tracker_on:
-            ctx = await _call_context(event, bare, source_name, source_uname,
-                                      want_media=tracker_on)
-        if tracker_on and ctx:
-            try:
-                await calls.record_message(**ctx)
-                # How far behind Telegram we are, per message, so the answer is
-                # measured rather than guessed at.
-                if ctx.get("tg_ts"):
-                    import time as _t
-                    log.info(f"[TRACKER] {source_name[:24]} msg {event.id} "
-                             f"stored {_t.time() - ctx['tg_ts']:.2f}s after Telegram"
-                             f"{' (photo)' if ctx.get('media_id') else ''}"
-                             f"{' (reply)' if ctx.get('reply_to') else ''}")
-            except Exception as exc:  # noqa: BLE001
-                log.warning(f"[TRACKER] could not record {bare}/{event.id}: {exc}")
-
-        # ── SOL address detection (dashboard-only panel; independent of ETH) ──
-        for sol_addr in sol_addrs:
-            sol_key = f"{bare}:{sol_addr}"
-            if sol_key not in self._detection_seen:
-                self._detection_seen.add(sol_key)
-                if sol_on:
-                    asyncio.create_task(self._record_sol_detection(
-                        sol_addr, bare, source_name, raw,
-                        username=source_uname, msg_id=event.id,
-                        raw_chat_id=event.chat_id, call_ctx=ctx if calls_on else None,
-                    ))
-                elif calls_on:
-                    asyncio.create_task(self._record_call_only(sol_addr, ctx))
-            elif calls_on:
-                # Same group, same token, later message. The panel deliberately
-                # ignores this — its count is groups, not posts — but it is
-                # exactly what the Second Dashboard exists to show, so it gets
-                # its own row. No RPC: the chain was settled the first time.
-                asyncio.create_task(self._record_call_only(sol_addr, ctx))
-
-        # ── ETH/RBH panel detection — independent of GATE_PREMIUM ────────────
-        if eth_address:
-            cap_key = f"{bare}:{eth_address}"
-            chain_checks = (eth_on or rbh_on or bnb_on or base_on)
-            if cap_key not in self._detection_seen:
-                self._detection_seen.add(cap_key)
-                if chain_checks:
-                    asyncio.create_task(self._record_eth_detection(
-                        eth_address, bare, source_name, raw,
-                        username=source_uname, msg_id=event.id,
-                        check_eth=eth_on, check_rbh=rbh_on, check_bnb=bnb_on,
-                        check_base=base_on, raw_chat_id=event.chat_id,
-                        call_ctx=ctx if calls_on else None,
-                    ))
-                elif calls_on:
-                    asyncio.create_task(self._record_call_only(eth_address, ctx))
-            elif calls_on:
-                asyncio.create_task(self._record_call_only(eth_address, ctx))
 
         # The caller signal itself — one message per chain, into that chain's
         # own group — is sent from premium.py, off the detection it just
