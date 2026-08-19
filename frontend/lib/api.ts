@@ -49,6 +49,25 @@ export async function apiGet<T = any>(path: string): Promise<T> {
   return res.json();
 }
 
+/** Fetch a protected binary — an image, say — as an object URL.
+ *
+ * An <img src> cannot carry an Authorization header, and the token lives in
+ * localStorage rather than a cookie, so anything behind the login has to be
+ * fetched and handed to the tag as a blob. The caller owns the URL and must
+ * revoke it.
+ */
+export async function apiBlobUrl(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    onUnauthorized();
+    throw new Error("Not authenticated");
+  }
+  if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
 export async function apiSend<T = any>(
   path: string,
   method: "POST" | "PATCH" | "PUT" | "DELETE",

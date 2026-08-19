@@ -4,6 +4,7 @@ import { ExternalLink, CornerUpLeft, Users } from "lucide-react";
 import { useApi } from "@/lib/api";
 import { Badge, Variant } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
+import { AuthImage } from "@/components/AuthImage";
 import { shortAddr } from "@/lib/utils";
 
 /* Every premium message, newest first — the same feed the mirror group carries,
@@ -80,8 +81,8 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
           return (
             <article
               key={`${e.chat_id}-${e.msg_id}`}
-              className="rounded-lg border border-border bg-bg-soft/50 px-3 py-2.5
-                         transition-colors hover:bg-bg-hover/40"
+              className="overflow-hidden rounded-lg border border-border bg-bg-soft/50
+                         px-3 py-2.5 transition-colors hover:bg-bg-hover/40"
             >
               <header className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
@@ -118,26 +119,30 @@ export function TgTracker({ chain, q }: { chain: string; q: string }) {
               {e.reply_to && (
                 <p className="mt-1.5 flex items-start gap-1 text-[11px] text-text-dim">
                   <CornerUpLeft size={11} className="mt-0.5 shrink-0" />
-                  <span className="min-w-0">
+                  <span className="min-w-0 break-words">
                     Replying to <span className="font-mono text-brand-soft">@{e.reply_to}</span>
-                    {e.reply_text && <span className="ml-1 opacity-70">— {e.reply_text}</span>}
+                    {e.reply_text && (
+                      // Clamped, not cut: the quoted message is context, and a
+                      // caller's disclaimer can be longer than their call.
+                      <span className="ml-1 line-clamp-2 break-all opacity-70">
+                        — {e.reply_text}
+                      </span>
+                    )}
                   </span>
                 </p>
               )}
 
               {e.text && (
-                <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-text-muted">
+                <p className="mt-1.5 whitespace-pre-wrap break-all text-xs leading-relaxed text-text-muted">
                   {e.text}
                 </p>
               )}
 
               {e.media_id && (
-                // Content-addressed and cached hard, so the same graphic posted
-                // by six groups is fetched once.
-                <img
-                  src={`/api/calls/media/${e.media_id}`}
-                  alt=""
-                  loading="lazy"
+                // Fetched with the session, not by the tag: the endpoint is
+                // behind the login and an <img> cannot carry the header.
+                <AuthImage
+                  path={`/api/calls/media/${e.media_id}`}
                   className="mt-2 max-h-64 w-auto rounded-lg border border-border object-contain"
                 />
               )}
