@@ -7,6 +7,7 @@ import { Badge, Variant } from "@/components/ui/badge";
 import { ChipMap, GroupChip, chipStyleOf } from "@/components/GroupChip";
 import { fmtDateTime, shortAddr, rowKey } from "@/lib/utils";
 import { Age } from "@/components/Age";
+import { TradeButton } from "@/components/features/TradeButton";
 
 export type GroupEntry = {
   chat_id?: number;
@@ -71,11 +72,12 @@ export function DetectionTable(
             <th className="px-3 py-2.5 font-medium">Keyword</th>
             <th className="px-3 py-2.5 font-medium">Count</th>
             <th className="px-3 py-2.5 font-medium">When</th>
+            <th className="px-3 py-2.5 font-medium">Trade</th>
           </tr>
         </thead>
         <tbody>
           {items.length === 0 ? (
-            <tr><td colSpan={showChain ? 9 : 8} className="px-3 py-10 text-center text-text-dim">No detections yet</td></tr>
+            <tr><td colSpan={showChain ? 10 : 9} className="px-3 py-10 text-center text-text-dim">No detections yet</td></tr>
           ) : (
             items.map((d, i) => (
               <tr key={rowKey(d, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
@@ -165,6 +167,11 @@ export function DetectionTable(
                 {/* When — the absolute time it was recorded */}
                 <td className="px-3 py-3">
                   <span className="font-mono text-xs text-text-muted">{d.ts ? fmtDateTime(d.ts) : "—"}</span>
+                </td>
+                {/* Buy, or sell when this account already holds it. */}
+                <td className="px-3 py-3">
+                  <TradeButton chain={d.chain} address={d.address}
+                               symbol={d.symbol} name={d.name} />
                 </td>
               </tr>
             ))

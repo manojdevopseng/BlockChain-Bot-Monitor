@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { BadgeCheck, KeyRound, Loader2, Mail, Send, Unlink } from "lucide-react";
-import { apiSend } from "@/lib/api";
+import Link from "next/link";
+import { mutate } from "swr";
+import { BadgeCheck, CandlestickChart, KeyRound, Loader2, Mail, Send,
+         Unlink } from "lucide-react";
+import { apiSend, useApi } from "@/lib/api";
 import { useAccount, statusLine, statusTone } from "@/lib/account";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -179,6 +182,102 @@ function CredentialsCard() {
   );
 }
 
+
+/* Trading — the key, and the switch that uses it.
+ *
+ * The key is stored and never read back: the API answers "one is set" and
+ * nothing more, so a page that can be opened cannot also be the way a key
+ * leaves. Which matters more than usual here, because the honest note below
+ * explains that the key alone cannot trade anyway. */
+function TradingCard() {
+  const { data: conf } = useApi<any>("/api/trading/settings");
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function save(patch: any, tag: string) {
+    setBusy(tag);
+    setMsg(null);
+    try {
+      await apiSend("/api/trading/settings", "PATCH", patch);
+      mutate("/api/trading/settings");
+      setKey("");
+      setMsg({ ok: true, text: "Saved." });
+    } catch (e: any) {
+      setMsg({ ok: false, text: String(e?.message || e) });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <CandlestickChart size={14} /> Trading
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <label className="flex items-start justify-between gap-3">
+          <span>
+            <span className="block text-sm text-text">Auto-buy starred callers</span>
+            <span className="block text-[11px] text-text-dim">
+              When an Important Caller names a token, open a position for it.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={!!conf?.auto_buy}
+            disabled={busy === "toggle"}
+            onChange={(e) => save({ auto_buy: e.target.checked }, "toggle")}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--brand)]"
+          />
+        </label>
+
+        <div>
+          <label className="mb-1 block text-xs text-text-muted">
+            GMGN API key{" "}
+            {conf?.gmgn_key_set && <Badge variant="green">stored</Badge>}
+          </label>
+          <div className="flex gap-2">
+            <Input value={key} onChange={(e) => setKey(e.target.value)}
+                   placeholder={conf?.gmgn_key_set ? "•••••••• — enter a new key to replace it"
+                                                   : "x-route-key from GMGN"}
+                   type="password" />
+            <Button size="sm" variant="outline" disabled={!key.trim() || busy === "key"}
+                    onClick={() => save({ gmgn_key: key.trim() }, "key")}>
+              {busy === "key" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
+            </Button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-text-dim">
+            Never shown again once saved.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3
+                        text-[11px] leading-relaxed text-accent-amber">
+          <b>Positions are recorded, not executed.</b> GMGN's trading API signs
+          each order with your private key rather than the API key, and serves
+          Solana only — while most calls here are on Robinhood. So this follows
+          your callers and keeps the score without placing an order. Nothing on
+          this page can move funds, and no private key is ever asked for.
+        </div>
+
+        {msg && (
+          <p className={`text-[11px] ${msg.ok ? "text-accent-green" : "text-accent-red"}`}>
+            {msg.text}
+          </p>
+        )}
+
+        <Link href="/trading"
+              className="inline-block text-[11px] text-brand-soft hover:underline">
+          Open Trading →
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ProfilePage() {
   const { account, loading } = useAccount();
 
@@ -245,6 +344,7 @@ export default function ProfilePage() {
         </Card>
 
         <TelegramCard />
+        <TradingCard />
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

@@ -138,6 +138,16 @@ async def record(
     # is the same call arriving twice and has nothing to announce.
     if getattr(res, "upserted_id", None) is not None:
         await _push("premium_call", {k: v for k, v in doc.items() if k != "dt"})
+        # And, for any account that asked for it, a paper position. Guarded
+        # because a trading feature must never be the reason a call goes
+        # unrecorded — the row above is the product, this is a reading of it.
+        try:
+            from . import trading
+            await trading.on_call(chain=chain, address=addr, symbol=symbol,
+                                  name=name, chat_id=chat_id, group=group)
+        except Exception as exc:  # noqa: BLE001
+            from .scanners.slog import get_logger
+            get_logger(__name__).warning(f"[TRADING] auto-buy skipped: {exc}")
 
 
 async def known_chains(address: str) -> list[dict]:

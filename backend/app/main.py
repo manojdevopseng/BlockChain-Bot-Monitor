@@ -29,7 +29,7 @@ from .routers import (
     commands, dashboard, forwarder, launchpad, logs, mcap,
     notifications as notif_router,
     outcomes as outcomes_router, public, rbhx, rpc, rsi,
-    settings as settings_router, system, tokens, users as users_router,
+    settings as settings_router, system, tokens, trading, users as users_router,
 )
 from .ws_hub import hub
 
@@ -177,7 +177,7 @@ app.add_middleware(
 #           admin-only — which left the main button of a paid feature answering
 #           403 to the people paying for it. Its writes are its own allowance
 #           instead, checked at the endpoint.
-_PRODUCT = (rsi, mcap, ai_router, alert_rules)
+_PRODUCT = (rsi, mcap, ai_router, alert_rules, trading)
 # Billing is its own rule: an account with an ended subscription must be able to
 # buy one, so this needs a login and nothing more.
 # Reporting a problem is not a product feature to be paywalled: an account

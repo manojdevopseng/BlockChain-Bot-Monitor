@@ -308,6 +308,11 @@ async def ensure_indexes() -> None:
         ("premium_calls",      [("day", -1)]),                       # History dropdown
         ("premium_calls",      [("chat_id", 1), ("ts", -1)]),        # one caller's feed
         ("premium_media",      "mid"),                               # image by id
+        # Paper trading: one account's own positions, read newest-first and
+        # marked to market by (chain, address).
+        ("trading_positions",  [("user", 1), ("status", 1), ("opened_at", -1)]),
+        ("trading_positions",  [("chain", 1), ("address", 1)]),
+        ("trading_settings",   "user"),
         # The tracker reads newest-first and updates by (chat, message), so
         # both have to be index-backed: it is written on every premium message,
         # which is the highest-volume write in the app.

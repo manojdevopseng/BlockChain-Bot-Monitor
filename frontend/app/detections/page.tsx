@@ -13,6 +13,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { SortableSections } from "@/components/SortableSections";
 import { FilterTabs, HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { DownloadCsv } from "@/components/features/Performance";
+import { TradeButton } from "@/components/features/TradeButton";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtDateTime, fmtEth, shortAddr, rowKey } from "@/lib/utils";
@@ -151,11 +152,12 @@ function GasSection() {
                 <th className="px-3 py-2.5 font-medium">Gas Fee</th>
                 <th className="px-3 py-2.5 font-medium">Tx</th>
                 <th className="px-3 py-2.5 font-medium">When</th>
+                <th className="px-3 py-2.5 font-medium">Trade</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-text-dim">
                   {query ? "No high-gas buy matches this search"
                     : date ? `No high-gas buys on ${date}`
                     : dex !== "all" ? `No ${dex.toUpperCase()} high-gas buys`
@@ -207,6 +209,12 @@ function GasSection() {
                     <span className="font-mono text-xs text-text-muted">
                       {r.created_at ? fmtDateTime(r.created_at) : "—"}
                     </span>
+                  </td>
+                  {/* This panel is Ethereum only, so the chain is not a column
+                      here the way it is next door — it is simply eth. */}
+                  <td className="px-3 py-3">
+                    <TradeButton chain="eth" address={r.address}
+                                 symbol={r.symbol} name={r.name} />
                   </td>
                 </tr>
               ))}
