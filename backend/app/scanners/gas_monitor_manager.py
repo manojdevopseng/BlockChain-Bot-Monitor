@@ -16,6 +16,7 @@ When a monitor fires, this module:
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Dict
 
@@ -199,22 +200,43 @@ class GasMonitorManager:
         text = _format_alert(token, fee_eth, age_seconds)
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
-        try:
-            async with self._session.post(
-                f"{TELEGRAM_API}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                      "disable_web_page_preview": True,
-                      "reply_markup": tgbuttons.keyboard(
-                          chain="eth", address=token.address, symbol=token.symbol)},
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    log.info(f"[GasAlert] sent {token.symbol} → {chat_id}")
-                else:
+
+        # One retry, because this alert has no second chance: the watch stops
+        # when it fires, so a single timeout meant the snipe was recorded in
+        # the dashboard and never announced. A blip on Telegram's side should
+        # not be the difference.
+        for attempt in (1, 2):
+            try:
+                async with self._session.post(
+                    f"{TELEGRAM_API}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
+                    json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                          "disable_web_page_preview": True,
+                          "reply_markup": tgbuttons.keyboard(
+                              chain="eth", address=token.address, symbol=token.symbol)},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        log.info(f"[GasAlert] sent {token.symbol} → {chat_id}")
+                        return
                     body = await resp.text()
-                    log.error(f"[GasAlert] Telegram {resp.status}: {body[:180]}")
-        except Exception as exc:  # noqa: BLE001
-            log.error(f"[GasAlert] send failed: {exc}")
+                    # Telegram rejecting the message — a bad chat id, a parse
+                    # error — will reject it again just as fast. Only a 5xx is
+                    # worth asking twice.
+                    if resp.status < 500 or attempt == 2:
+                        log.error(f"[GasAlert] Telegram {resp.status}: {body[:180]}")
+                        return
+                    log.warning(f"[GasAlert] Telegram {resp.status}, retrying once")
+            except Exception as exc:  # noqa: BLE001
+                # The type matters more than the message here: a timeout's own
+                # message is empty, which is how "send failed:" came to be
+                # logged with nothing after it.
+                detail = f"{type(exc).__name__}: {exc}".rstrip(": ")
+                if attempt == 2:
+                    log.error(f"[GasAlert] send failed for {token.symbol} "
+                              f"after 2 tries — {detail}")
+                    return
+                log.warning(f"[GasAlert] {detail} — retrying once")
+            await asyncio.sleep(2)
 
 
 def _format_alert(token: DetectedToken, fee_eth: float, age_seconds: int) -> str:
