@@ -156,6 +156,14 @@ async def remove(doc: dict) -> tuple[bool, str]:
         return False, "no Telegram account on file"
     ok, res = await _api("banChatMember", chat_id=chat_id(), user_id=uid)
     if not ok:
+        # Already gone is the outcome this wanted. Telegram says so with
+        # PARTICIPANT_ID_INVALID, which is not a failure to retry every quarter
+        # hour for ever — the flag is cleared and the account is left alone.
+        if "PARTICIPANT_ID_INVALID" in str(res) or "not found" in str(res).lower():
+            await db.get_collection("users").update_one(
+                {"username": doc.get("username")},
+                {"$unset": {"premium_group_invited_at": ""}})
+            return True, ""
         return False, str(res)
     await _api("unbanChatMember", chat_id=chat_id(), user_id=uid,
                only_if_banned=True)

@@ -81,14 +81,19 @@ class Plan:
 
 
 PLANS: dict[str, Plan] = {
+    # Telegram is the paid half. The trial shows the whole dashboard and lets
+    # somebody add tokens of their own, but nothing reaches their phone — that
+    # is the line between looking and subscribing, and it is drawn here rather
+    # than in a check beside every send: alert_target, the connect route and
+    # the Profile card all read this one flag.
     "trial": Plan("trial", "7-day Trial", 0.0, TRIAL_DAYS,
                   rsi_tokens=3, mcap_tokens=3, mcap_checks_per_day=25,
                   min_cadence=300, min_interval=300,
-                  telegram_alerts=True, alerts_per_day=25,
+                  telegram_alerts=False, alerts_per_day=0,
                   alert_delay_seconds=45,
                   ai_checks_per_day=10, support_hours=72,
-                  note="Everything readable, a few tokens of your own, "
-                       "and 25 Telegram alerts a day, 45s behind live."),
+                  note="Everything readable and a few tokens of your own. "
+                       "Telegram alerts come with a paid plan."),
     "monthly": Plan("monthly", "Monthly", 29.99, 30,
                     rsi_tokens=25, mcap_tokens=25, mcap_checks_per_day=300,
                     min_cadence=15, min_interval=60,
