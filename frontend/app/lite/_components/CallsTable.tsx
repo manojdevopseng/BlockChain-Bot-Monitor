@@ -8,16 +8,15 @@ import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge, Variant } from "@/components/ui/badge";
 import { rowKey, shortAddr } from "@/lib/utils";
 
-/* One row per call. Not per token — the same token called by four groups is
-   four rows, and called twice by one group is two, because reading the
-   sequence is the point of this table.
+/* One row per token, with every caller on it — the same shape as the main
+   dashboard's detections panel, which is where this table's readers already
+   know how to look.
 
-   Those rows are grouped, though. A token's calls sit together with its newest
-   caller at the top, and the token called most recently leads the table — the
-   same ordering the main dashboard's detections panel has, which lifts a token
-   back to the top every time somebody new calls it. The server does the
-   grouping and marks each row with its rank; here that is only a left bar down
-   the block and a count on the row that leads it. */
+   The columns are this dashboard's own; only the Groups cell is borrowed. Each
+   caller is a chip in the order it called, newest first, and each chip opens
+   that caller's own message — so folding the calls into one row hides nothing,
+   it just stops one token filling the screen. The token called most recently
+   leads the table. */
 
 export type Call = {
   chain?: string;
@@ -28,14 +27,21 @@ export type Call = {
   username?: string | null;
   gmgn_url?: string;
   ts?: number;
-  // Set by /api/calls: 0 is this token's newest call, and the total is how many
-  // of its calls are in the window being shown.
-  call_rank?: number;
-  call_total?: number;
-  // What the group chip opens, and the id its colour is keyed on.
-  post_url?: string;
+  // Set by /api/calls. One entry per caller, newest first; `count` is how many
+  // callers and `calls` how many posts — a group that called the same token
+  // three times is one chip, not three.
+  group_entries?: GroupEntry[];
+  count?: number;
+  calls?: number;
+};
+
+type GroupEntry = {
   chat_id?: number;
+  name?: string;
+  username?: string;
   msg_id?: number;
+  post_url?: string;
+  ts?: number;
 };
 
 const CHAIN_LABEL: Record<string, string> = {
@@ -64,10 +70,17 @@ function When({ ts }: { ts?: number }) {
 
 // The message link. post_url is written when the call is recorded; the rebuild
 // covers rows stored before it was, and a private group has neither.
-function tgUrl(c: Call): string | null {
-  if (c.post_url) return c.post_url;
-  if (c.username && c.msg_id) return `https://t.me/${c.username}/${c.msg_id}`;
+function tgUrl(e: GroupEntry): string | null {
+  if (e.post_url) return e.post_url;
+  if (e.username && e.msg_id) return `https://t.me/${e.username}/${e.msg_id}`;
   return null;
+}
+
+// Rows from before the API grouped them still carry a single group on the row
+// itself; read as a one-caller list so nothing renders blank.
+function entriesOf(c: Call): GroupEntry[] {
+  if (c.group_entries?.length) return c.group_entries;
+  return c.group || c.username ? [{ name: c.group, username: c.username || "" }] : [];
 }
 
 export function CallsTable(
@@ -100,23 +113,13 @@ export function CallsTable(
               </td>
             </tr>
           ) : items.map((c, i) => {
-            const rank = c.call_rank ?? 0;
-            const total = c.call_total ?? 1;
-            // A single call is not a group and must not be dressed as one.
-            const grouped = total > 1;
-            const lead = grouped ? "border-l-2 border-l-brand/40" : "";
-            // The block is newest-first, so its last row is who called it
-            // first — the same 🥇 the detections panel puts on that group.
-            const first = grouped && rank === total - 1;
+            const entries = entriesOf(c);
+            const callers = c.count ?? entries.length;
             return (
             <tr key={rowKey(c, i)}
-                className={`align-top hover:bg-bg-hover/40 ${
-                  // The bottom border closes the block, not every row in it, so
-                  // one token's calls read as one thing.
-                  grouped && rank < total - 1 ? "" : "border-b border-border-soft"
-                } ${grouped && rank > 0 ? "bg-bg-soft/25" : ""}`}>
+                className="border-b border-border-soft align-top hover:bg-bg-hover/40">
               {showChain && (
-                <td className={`px-3 py-3 ${lead}`}>
+                <td className="px-3 py-3">
                   <Badge variant={CHAIN_TONE[c.chain || ""] || "gray"}>
                     {CHAIN_LABEL[c.chain || ""] || c.chain || "?"}
                   </Badge>
@@ -125,7 +128,7 @@ export function CallsTable(
 
               {/* Symbol opens GMGN; the address sits under it with its own copy,
                   so one cell carries both things you do with a token. */}
-              <td className={`px-3 py-3 ${showChain ? "" : lead}`}>
+              <td className="px-3 py-3">
                 <div className="flex items-center gap-1.5">
                   {c.gmgn_url ? (
                     <a href={c.gmgn_url} target="_blank" rel="noopener noreferrer"
@@ -137,11 +140,16 @@ export function CallsTable(
                     <span className="font-semibold text-text">{c.symbol || "?"}</span>
                   )}
                   {c.symbol && <CopyButton value={c.symbol} />}
-                  {grouped && rank === 0 && (
+                  {/* The detections panel says this in a Count column. There is
+                      no room for one here and none was added, so the number
+                      rides beside the symbol instead. */}
+                  {callers > 1 && (
                     <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px]
                                      font-medium text-brand-soft"
-                          title={`${total} calls on this token`}>
-                      {total} calls
+                          title={c.calls && c.calls > callers
+                            ? `${callers} callers, ${c.calls} posts`
+                            : `${callers} callers`}>
+                      x{callers}
                     </span>
                   )}
                 </div>
@@ -165,27 +173,35 @@ export function CallsTable(
                 </div>
               </td>
 
-              {/* One chip, because one row is one call — and it opens that
-                  call on Telegram, the way the detections panel's chips do.
-                  The handle is in the tooltip rather than printed under the
-                  chip: a coloured chip with a mono @name beneath it was two
-                  labels for one thing. */}
+              {/* Every caller, each chip opening its own message. Width-capped
+                  the way the detections panel caps it: the chips wrap, and a
+                  token called by five groups with long names does not stretch
+                  the column and push When off the screen. */}
               <td className="px-3 py-3">
-                {c.group || c.username ? (
-                  <GroupChip
-                    label={`${first ? "🥇 " : ""}${c.group || `@${c.username}`}`}
-                    url={tgUrl(c)}
-                    // Keyed by chat id, never by name: Telegram titles get
-                    // re-read and overwritten, and a group can rename itself.
-                    style={chipStyleOf(chips, c.chat_id)}
-                    title={[
-                      first ? "First caller" : null,
-                      c.username ? `@${c.username}` : null,
-                      tgUrl(c) ? "Open this call on Telegram"
-                               : "Private group — no message link",
-                    ].filter(Boolean).join(" · ")}
-                  />
-                ) : <span className="text-text-dim">—</span>}
+                <div className="flex max-w-[280px] flex-wrap gap-1">
+                  {entries.map((e, j) => {
+                    // Newest-first, so the last one is who called it first.
+                    const first = entries.length > 1 && j === entries.length - 1;
+                    const url = tgUrl(e);
+                    return (
+                      <GroupChip
+                        key={j}
+                        label={`${first ? "🥇 " : ""}${e.name || `@${e.username}`}`}
+                        url={url}
+                        // Keyed by chat id, never by name: Telegram titles get
+                        // re-read and overwritten, and a group can rename itself.
+                        style={chipStyleOf(chips, e.chat_id)}
+                        title={[
+                          first ? "First caller" : null,
+                          e.username ? `@${e.username}` : null,
+                          url ? "Open this call on Telegram"
+                              : "Private group — no message link",
+                        ].filter(Boolean).join(" · ")}
+                      />
+                    );
+                  })}
+                  {entries.length === 0 && <span className="text-text-dim">—</span>}
+                </div>
               </td>
 
               <td className="px-3 py-3"><When ts={c.ts} /></td>
