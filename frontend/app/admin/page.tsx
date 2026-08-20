@@ -85,10 +85,10 @@ function Money() {
   const rows = orders?.items ?? [];
   const stray = unmatched?.items ?? [];
 
-  async function settle(id: string) {
+  async function settle(id: string, method: string) {
     setSettling(id);
     try {
-      await apiSend(`/api/admin/orders/${id}/settle`, "POST", {});
+      await apiSend(`/api/admin/orders/${id}/settle`, "POST", { method });
       mutate("/api/admin/orders?limit=25");
       mutate("/api/admin/unmatched");
     } finally { setSettling(""); }
@@ -140,12 +140,29 @@ function Money() {
                 <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-text-dim">
                   <span>{o.chain}</span>
                   <span>{fmtDateTime(o.created_at)}</span>
-                  {o.status !== "activated" && (
-                    <button onClick={() => settle(o.id)} disabled={settling === o.id}
-                            className="ml-auto text-brand-soft hover:underline">
-                      {settling === o.id ? "settling…" : "settle by hand"}
-                    </button>
-                  )}
+                  {/* Approving is one press, but which press matters: the
+                      order records whether the money was cash or crypto, and
+                      that is the only place the difference survives. */}
+                  {o.status !== "activated" ? (
+                    <span className="ml-auto flex items-center gap-2">
+                      {settling === o.id ? (
+                        <span className="text-text-dim">approving…</span>
+                      ) : (
+                        <>
+                          <span className="text-text-dim">approve:</span>
+                          <button onClick={() => settle(o.id, "cash")}
+                                  className="text-accent-green hover:underline">cash</button>
+                          <button onClick={() => settle(o.id, "crypto")}
+                                  className="text-brand-soft hover:underline">crypto</button>
+                        </>
+                      )}
+                    </span>
+                  ) : o.paid_via && o.paid_via !== "chain" ? (
+                    <span className="ml-auto text-text-dim">
+                      {o.paid_via_label}
+                      {o.settled_by ? ` · ${o.settled_by}` : ""}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -180,6 +197,32 @@ function Accounts() {
     } finally { setBusy(""); }
   }
 
+  // The second way past an unconfirmed address. The first is the emailed link;
+  // this is for when it never arrived — until then the account is 402 on every
+  // route it has, Connect Telegram included.
+  async function verify(username: string) {
+    setBusy(username);
+    try {
+      await apiSend(`/api/admin/users/${username}`, "PATCH", { email_verified: true });
+      mutate(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    } finally { setBusy(""); }
+  }
+
+  // Somebody paid in cash: put them on the plan for its own length. Same route
+  // a payment takes, so the expiry is worked out the same way and a grant
+  // never shortens what is already there.
+  async function give(username: string, plan: string) {
+    const days = PLAN_DAYS[plan];
+    setBusy(username);
+    try {
+      await apiSend(`/api/admin/users/${username}`, "PATCH", {
+        plan, grant_days: days,
+        reason: `${PLAN_LABEL[plan]} granted from the admin desk (paid outside the app)`,
+      });
+      mutate(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    } finally { setBusy(""); }
+  }
+
   return (
     <Section title="Accounts" icon={<Users size={14} />} count={rows.length}>
       <Input value={q} onChange={(e) => setQ(e.target.value)}
@@ -198,11 +241,28 @@ function Accounts() {
             <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-text-dim">
               <span>{u.days_left} days left</span>
               <span>{u.usage?.rsi_tokens ?? 0} RSI · {u.usage?.mcap_tokens ?? 0} market cap</span>
-              <span className="ml-auto flex gap-2">
+              <span className="ml-auto flex flex-wrap items-center gap-2">
+                {/* Only where it is the thing standing in the way. */}
+                {u.status === "unverified" && (
+                  <button onClick={() => verify(u.username)} disabled={busy === u.username}
+                          className="font-medium text-accent-green hover:underline">
+                    verify email
+                  </button>
+                )}
+                <span className="text-text-dim">give:</span>
+                {PLAN_IDS.map((id) => (
+                  <button key={id} onClick={() => give(u.username, id)}
+                          disabled={busy === u.username}
+                          title={`Put ${u.username} on ${PLAN_LABEL[id]} for ${PLAN_DAYS[id]} days`}
+                          className="text-brand-soft hover:underline">
+                    {PLAN_LABEL[id]}
+                  </button>
+                ))}
+                <span className="text-text-dim">·</span>
                 <button onClick={() => grant(u.username, 7)} disabled={busy === u.username}
-                        className="text-brand-soft hover:underline">+7 days</button>
+                        className="text-brand-soft hover:underline">+7d</button>
                 <button onClick={() => grant(u.username, 30)} disabled={busy === u.username}
-                        className="text-brand-soft hover:underline">+30 days</button>
+                        className="text-brand-soft hover:underline">+30d</button>
                 <button onClick={() => block(u.username, !u.blocked)}
                         disabled={busy === u.username}
                         className="text-accent-red hover:underline">
@@ -252,6 +312,15 @@ function Contacts() {
     </Section>
   );
 }
+
+// The purchasable plans and their lengths, mirroring accounts.PLANS. Kept here
+// so granting one is a single press; the server still validates the id and
+// works out the expiry itself.
+const PLAN_IDS = ["monthly", "half", "yearly"] as const;
+const PLAN_LABEL: Record<string, string> = {
+  monthly: "monthly", half: "6 months", yearly: "yearly",
+};
+const PLAN_DAYS: Record<string, number> = { monthly: 30, half: 182, yearly: 365 };
 
 export default function AdminPage() {
   const { data, isLoading } = useApi<any>("/api/admin/overview",

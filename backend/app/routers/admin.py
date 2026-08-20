@@ -107,6 +107,20 @@ async def edit_user(username: str, payload: dict = Body(...),
         raise HTTPException(404, "No such account")
 
     changed: dict = {}
+    cleared: dict = {}
+    # The second way in. The first is the link we email; when mail is not
+    # configured, or the message never arrived, an unconfirmed account is stuck
+    # behind a 402 on every route it has — including Connect Telegram. This is
+    # the operator saying "I know who this is".
+    if "email_verified" in payload:
+        changed["email_verified"] = bool(payload["email_verified"])
+        if changed["email_verified"]:
+            # Same two steps the emailed link takes: the token is spent, and
+            # the trial starts here rather than at sign-up. Without the trial a
+            # freshly verified account reads as `expired`, which is not what
+            # verifying somebody is meant to do.
+            cleared["verify_token"] = ""
+        changed["verified_by"] = claims["username"]
     if "grant_days" in payload:
         days = float(payload["grant_days"])
         base = max(time.time(), float(doc.get("plan_ends_at") or 0))
@@ -128,7 +142,14 @@ async def edit_user(username: str, payload: dict = Body(...),
     if not changed:
         raise HTTPException(400, "nothing to change")
 
-    await users.update_one({"username": username}, {"$set": changed})
+    update: dict = {"$set": changed}
+    if cleared:
+        update["$unset"] = cleared
+    await users.update_one({"username": username}, update)
+    if changed.get("email_verified"):
+        # Idempotent, and it will not extend an account that already had its
+        # trial — see accounts.start_trial.
+        await accounts.start_trial(username)
     await db.get_collection("admin_audit").insert_one(
         {"at": time.time(), "by": claims["username"], "user": username,
          "changed": {k: v for k, v in changed.items() if k != "password"}})
@@ -162,19 +183,27 @@ async def settle_by_hand(order_id: str, payload: dict = Body(default={}),
     The same path a matched payment takes — the plan is applied, the buyer is
     emailed, the order says activated — so a hand-settled order is not a second
     kind of order that behaves differently later.
+
+    `method` says how the money really arrived: cash in a hand, crypto the
+    watcher could not match, or something else. It is stored on the order
+    rather than inferred, because "paid" and "paid in cash" answer different
+    questions later.
     """
     row = await orders.get(order_id)
     if row is None:
         raise HTTPException(404, "No such order")
     if row.get("status") == orders.ACTIVATED:
         raise HTTPException(409, "That order is already activated")
+    method = str(payload.get("method") or orders.VIA_OTHER).lower()
+    if method not in orders.METHODS:
+        raise HTTPException(400, f"method must be one of {', '.join(orders.METHODS)}")
     seen = float(payload.get("amount") or row.get("amount") or 0)
-    doc = await orders.settle(row, seen)
+    doc = await orders.settle(row, seen, method=method, by=claims["username"])
     if doc is None:
         raise HTTPException(500, "The account behind that order is gone")
     await db.get_collection("admin_audit").insert_one(
         {"at": time.time(), "by": claims["username"], "order": order_id,
-         "changed": {"settled_by_hand": seen}})
+         "changed": {"settled_by_hand": seen, "method": method}})
     # Whatever unmatched payment prompted this is no longer waiting.
     await db.get_collection("payments_unmatched").update_many(
         {"asset_id": row.get("asset_id"), "settled": False},

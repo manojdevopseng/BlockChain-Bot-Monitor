@@ -264,6 +264,12 @@ async def start_trial(username: str) -> Optional[dict]:
 
     `trial_used` is what makes it one: re-registering the same email is blocked
     by the unique address, and re-confirming cannot extend anything.
+
+    It also never shortens. An account can be put on a plan while its address is
+    still unconfirmed — granted for a cash payment, say — and confirming it
+    afterwards used to overwrite that plan with a seven-day trial, taking away
+    something already paid for. So the trial is only started when there is
+    nothing running, and only extends when it would end later than what is.
     """
     doc = await _col().find_one({"username": username})
     if not doc:
@@ -271,11 +277,22 @@ async def start_trial(username: str) -> Optional[dict]:
     if doc.get("trial_used"):
         return doc
     now = _now()
-    await _col().update_one(
-        {"username": username},
-        {"$set": {"plan": "trial", "trial_used": True,
-                  "plan_started_at": now,
-                  "plan_ends_at": now + TRIAL_DAYS * 86400}})
+    trial_ends = now + TRIAL_DAYS * 86400
+    running = float(doc.get("plan_ends_at") or 0)
+
+    changed: dict = {"trial_used": True}
+    if running <= now:
+        # The ordinary case: a fresh sign-up confirming its address.
+        changed.update({"plan": "trial", "plan_started_at": now,
+                        "plan_ends_at": trial_ends})
+    elif trial_ends > running:
+        # Something is running but ends sooner than the trial would. Take the
+        # longer of the two and leave the plan it is on alone.
+        changed["plan_ends_at"] = trial_ends
+    # Otherwise a longer plan is already there. Marking the trial used is all
+    # this does — starting it would cost the account days it already has.
+
+    await _col().update_one({"username": username}, {"$set": changed})
     return await _col().find_one({"username": username})
 
 

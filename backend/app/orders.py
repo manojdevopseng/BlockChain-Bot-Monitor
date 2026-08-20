@@ -194,17 +194,45 @@ async def open_orders(asset_id: Optional[str] = None) -> list[dict]:
     return await _col().find(flt).sort("created_at", 1).to_list(500)
 
 
-async def settle(order: dict, seen: float) -> Optional[dict]:
+# How an order came to be paid. "chain" is the watcher seeing the money arrive;
+# the rest are an operator saying so, and the order records which — a plan
+# granted for cash and a plan the chain confirmed are not the same fact, and a
+# month later only the order remembers the difference.
+VIA_CHAIN = "chain"
+VIA_CASH = "cash"
+VIA_CRYPTO = "crypto"
+VIA_OTHER = "other"
+METHODS = (VIA_CHAIN, VIA_CASH, VIA_CRYPTO, VIA_OTHER)
+
+_VIA_LABEL = {
+    VIA_CHAIN: "confirmed on-chain",
+    VIA_CASH: "cash, taken by hand",
+    VIA_CRYPTO: "crypto, confirmed by hand",
+    VIA_OTHER: "settled by hand",
+}
+
+
+async def settle(order: dict, seen: float, *, method: str = VIA_CHAIN,
+                 by: str = "") -> Optional[dict]:
     """Mark an order paid and put the account on its plan.
 
     Written before the plan is applied and again after, so a crash between the
     two leaves an order that says `paid` — which is the state an operator can
     finish by hand. The opposite order would leave money taken and nothing said.
+
+    `method` is how the money actually arrived and `by` is who said so when it
+    was not the watcher. Both are stored on the order and both are on the
+    receipt, so "why is this account on a yearly plan" has an answer that does
+    not depend on anybody remembering.
     """
+    method = method if method in METHODS else VIA_OTHER
     now = time.time()
     await _col().update_one({"id": order["id"]},
                             {"$set": {"status": PAID, "paid_at": now,
-                                      "amount_seen": seen}})
+                                      "amount_seen": seen,
+                                      "paid_via": method,
+                                      "paid_via_label": _VIA_LABEL[method],
+                                      "settled_by": by or ""}})
     doc = await accounts.activate(order["user_id"], order["plan"],
                                   source=f"order {order['id']}")
     if doc is None:
@@ -249,8 +277,11 @@ async def settle(order: dict, seen: float) -> Optional[dict]:
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"👤 {order['user_id']}\n"
         f"📦 {order['plan_label']} — ${order.get('price_usd')}\n"
-        f"⛓ {seen} {order.get('symbol')} on {str(order.get('chain')).upper()}\n"
-        f"🧾 <code>{order['id']}</code>\n"
+        + (f"⛓ {seen} {order.get('symbol')} on {str(order.get('chain')).upper()}\n"
+           if method == VIA_CHAIN else
+           f"💵 {_VIA_LABEL[method]}"
+           + (f" by {by}" if by else "") + "\n")
+        + f"🧾 <code>{order['id']}</code>\n"
         f"📅 runs to {row['expires_on']}")
     return doc
 
