@@ -290,6 +290,9 @@ class Settings(BaseSettings):
     # Where the operator's own paper trades are posted. Customers never see
     # this group — see trading._notify.
     trading_alert_chat_id: str = ""
+    # The one shared room paying accounts are invited into. Blank falls back to
+    # DEST_PREMIUM_ALL, which on most deployments is the same group.
+    member_group_chat_id: str = ""
     # Repeat of the same error is re-sent at most once per this many seconds.
     error_alert_cooldown: int = 900
     # An identical WARNING/ERROR is written to the log at most once per this

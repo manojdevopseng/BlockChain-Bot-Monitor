@@ -177,6 +177,30 @@ async def telegram_link_start(doc: dict = Depends(security.require_customer)):
                        "that chat."}
 
 
+# ── the Premium Callers group ────────────────────────────────────────────────
+
+@router.get("/premium-group")
+async def premium_group(doc: dict = Depends(security.account)):
+    """Whether this account may join the shared group, and whether it has."""
+    from .. import group_access
+    return await group_access.status_for(doc)
+
+
+@router.post("/premium-group/invite")
+async def premium_group_invite(doc: dict = Depends(security.require_customer)):
+    """A single-use, quarter-hour invite issued to this account.
+
+    Not stored and not reusable: asking twice builds a second link and leaves
+    the first to expire on its own. A link that reaches anybody else has either
+    been used already or is already dead.
+    """
+    from .. import group_access
+    try:
+        return await group_access.invite_for(doc)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc))
+
+
 @router.delete("/telegram/link")
 async def telegram_link_stop(doc: dict = Depends(security.require_customer)):
     removed = await telegram_link.unlink(doc["username"])

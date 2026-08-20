@@ -63,6 +63,14 @@ EDITABLE: dict[str, dict] = {
                 "own Telegram gets its own trades in its own chat, and one that "
                 "has not connected anything gets nothing sent at all.",
     },
+    "MEMBER_GROUP_CHAT_ID": {
+        "label": "Premium Callers group customers join (chat id)", "kind": "text",
+        "group": "Detection Tuning", "applies": "live",
+        "help": "The one group a paying account is invited into. Each invite is "
+                "built for one person, admits one member and expires in fifteen "
+                "minutes. The bot must be an administrator there with the right "
+                "to invite users. Blank uses DEST_PREMIUM_ALL.",
+    },
     "MIN_FEE_ETH": {
         "label": "Min gas fee to alert (ETH)", "kind": "number", "group": "Detection Tuning",
         "min": 0.0, "applies": "live",

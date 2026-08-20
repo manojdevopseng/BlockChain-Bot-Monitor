@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { mutate } from "swr";
 import { BadgeCheck, CandlestickChart, KeyRound, Loader2, Mail, Send,
-         Unlink } from "lucide-react";
+         Unlink, Users } from "lucide-react";
 import { apiSend, useApi } from "@/lib/api";
 import { useAccount, statusLine, statusTone } from "@/lib/account";
 import { PageHeader } from "@/components/PageHeader";
@@ -117,6 +117,91 @@ function TelegramCard() {
     </Card>
   );
 }
+
+/* The one shared room, and the only way into it.
+ *
+ * A group is a weaker thing to sell than a private feed — anybody inside can
+ * forward what they read — so the invite is built for one person, admits one
+ * member and expires in fifteen minutes. Nothing is stored and nothing is
+ * reusable, which is why pressing the button twice is fine and why a link that
+ * reaches somebody else is already dead. */
+function PremiumGroupCard() {
+  const { data, mutate } = useApi<any>("/api/account/premium-group");
+  const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState("");
+  const [error, setError] = useState("");
+
+  async function join() {
+    setBusy(true); setError(""); setLink("");
+    try {
+      const got = await apiSend("/api/account/premium-group/invite", "POST");
+      setLink(got.url);
+      // Joining happens in Telegram, so nothing here sees it land.
+      setTimeout(() => mutate(), 10000);
+    } catch (e: any) {
+      setError(String(e?.message || e).replace(/^Error:\s*/, ""));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users size={14} /> Premium Callers group
+        </CardTitle>
+        {data?.member && <Badge variant="green">joined</Badge>}
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs leading-relaxed text-text-muted">
+          Every premium caller, in one room. Your invite is issued to your
+          account, admits one person and expires in fifteen minutes — so it is
+          worth nothing to anybody you send it to.
+        </p>
+
+        {!data?.configured ? (
+          <p className="mt-4 rounded-lg border border-border bg-bg-soft/50 px-3 py-2.5
+                        text-[11px] text-text-dim">
+            The group has not been set up yet. It appears here as soon as it is.
+          </p>
+        ) : data?.member ? (
+          <p className="mt-4 rounded-lg border border-accent-green/30 bg-accent-green/10
+                        px-3 py-2.5 text-[11px] text-accent-green">
+            You are in the group. It stays that way while your plan runs.
+          </p>
+        ) : !data?.eligible ? (
+          <p className="mt-4 rounded-lg border border-accent-amber/30 bg-accent-amber/10
+                        px-3 py-2.5 text-[11px] leading-relaxed text-accent-amber">
+            {data?.reason}
+          </p>
+        ) : (
+          <Button size="sm" variant="primary" className="mt-4 w-full justify-center"
+                  disabled={busy} onClick={join}>
+            {busy ? <Loader2 size={13} className="animate-spin" /> : "Get my invite"}
+          </Button>
+        )}
+
+        {link && (
+          <div className="mt-3 rounded-lg border border-border bg-bg-soft/50 px-3 py-2.5">
+            <a href={link} target="_blank" rel="noopener noreferrer"
+               className="break-all text-[11px] text-brand-soft hover:underline">
+              {link}
+            </a>
+            <p className="mt-1.5 text-[10px] text-text-dim">
+              Open it and press Join. One person, fifteen minutes.
+            </p>
+          </div>
+        )}
+        {error && <p className="mt-2 text-[11px] text-accent-red">{error}</p>}
+
+        <p className="mt-3 text-[10px] leading-relaxed text-text-dim">
+          Leaving the group is up to you; when a plan ends you are removed from
+          it automatically, and a new invite is waiting whenever you come back.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 
 function CredentialsCard() {
   const { account, reload } = useAccount();
@@ -344,6 +429,9 @@ export default function ProfilePage() {
         </Card>
 
         <TelegramCard />
+        {/* Beside the Telegram card on purpose: connecting one is what makes
+            the invite issuable, and the two read as one step. */}
+        <PremiumGroupCard />
         <TradingCard />
       </div>
 

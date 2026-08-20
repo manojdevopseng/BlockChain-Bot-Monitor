@@ -273,6 +273,11 @@ DEFAULT_SERVICES: list[dict] = [
     # column only moves when somebody presses Prices, and no rule can fire.
     {"id": "trading_engine",        "category": BOT,
      "label": "Trading Engine (auto-sell & limits)", "chain": None, "enabled": True},
+    # Invites paying accounts into the Premium Callers group and removes them
+    # when their access ends. Off, nobody is removed — the invites still work,
+    # so the room slowly fills with people who stopped paying.
+    {"id": "member_group",          "category": BOT,
+     "label": "Premium Group Membership", "chain": None, "enabled": True},
     # Posts each alert's 1h and 24h result as a reply to that alert. Narrower
     # than the tracker: off, measurement continues and only Telegram goes quiet.
     {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",

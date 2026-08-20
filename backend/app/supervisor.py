@@ -185,6 +185,10 @@ async def reconcile() -> None:
     # firing needs a way to stop them that is not "turn every account off".
     if bool(enabled.get("trading_engine", True)):
         want.add("trade")
+    # Takes accounts out of the shared group when their access ends. Its own
+    # switch because it is the one worker that removes somebody from a chat.
+    if bool(enabled.get("member_group", True)):
+        want.add("grp")
 
     # Stop workers no longer wanted.
     for name in list(_tasks):
@@ -196,7 +200,7 @@ async def reconcile() -> None:
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
     for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd",
-                 "cmd", "trade"):
+                 "cmd", "trade", "grp"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -310,6 +314,10 @@ async def _start_worker(name: str) -> None:
     if name == "trade":
         from . import trading_worker
         _tasks["trade"] = asyncio.create_task(trading_worker.run(), name="trading-engine")
+        return
+    if name == "grp":
+        from . import group_access
+        _tasks["grp"] = asyncio.create_task(group_access.run(), name="group-access")
         return
     if name == "rsi":
         from .scanners.rsi_tracker import RsiTracker
@@ -518,6 +526,7 @@ _DEPENDS_ON = {
     "sol_onchain_discovery":  "sol",
     # Every switch the monitor reads at start rather than per message.
     "trading_engine":         "trade",
+    "member_group":           "grp",
     "rsi_tracker":            "rsi",
     "rsi_telegram":           "rsi",
     "rsi_chain_rbh":          "rsi",
