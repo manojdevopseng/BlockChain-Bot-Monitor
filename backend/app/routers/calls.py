@@ -30,6 +30,12 @@ CHAINS = "^(all|eth|rbh|sol|bnb|base)$"
 # set; the plain view counts in Mongo instead.
 _SCAN_CAP = 20000
 
+# Rows read per row shown. The table groups a token's calls together, so it has
+# to see further down the feed than it displays — a token called an hour ago and
+# again just now has its earlier row well below the newest hundred. Four is
+# enough for a day of this feed and still one small query.
+_WINDOW = 4
+
 
 def _flt(chain: str, date: str | None = None) -> dict:
     f: dict = {} if chain == "all" else {"chain": chain}
@@ -44,16 +50,70 @@ def _match(d: dict, q: str) -> bool:
                for k in ("symbol", "name", "address", "group", "username"))
 
 
+def _cluster(docs: list[dict], limit: int) -> list[dict]:
+    """One row per token, carrying every caller — the detections panel's shape.
+
+    That panel holds one document per token, lists the groups that called it
+    newest-first, and lifts the row back to the top each time somebody new
+    calls it. This builds the same thing out of the per-call rows, so the
+    Second Dashboard reads the same way without the collection changing.
+
+    Nothing is lost by folding the rows together: each caller keeps its own
+    chip and its own link to its own message, so the individual calls are still
+    one click away.
+
+    One chip per group, not per post — the same rule the detections panel uses.
+    A group that called the same token three times is one caller, and its chip
+    opens the newest of those calls. `calls` keeps the post count for the
+    tooltip, because "three posts from one group" and "three groups" are
+    different things and the row should be able to say which it is.
+
+    `docs` arrives newest-first, so each group's first row is that token's
+    latest call and the tokens sort on it directly.
+    """
+    tokens: dict[tuple, list[dict]] = {}
+    for d in docs:
+        tokens.setdefault((d.get("chain"), d.get("address")), []).append(d)
+
+    out: list[dict] = []
+    for rows in sorted(tokens.values(),
+                       key=lambda r: r[0].get("ts") or 0, reverse=True):
+        # The newest call carries the token's details — a symbol or name that
+        # was blank when it was first called may have resolved since.
+        head = dict(rows[0])
+        entries: list[dict] = []
+        seen: set = set()
+        for d in rows:
+            cid = d.get("chat_id")
+            if cid in seen:
+                continue
+            seen.add(cid)
+            entries.append({
+                "chat_id": cid,
+                "name": d.get("group") or "",
+                "username": d.get("username") or "",
+                "msg_id": d.get("msg_id"),
+                "post_url": d.get("post_url") or "",
+                "ts": d.get("ts"),
+            })
+        head["group_entries"] = entries
+        head["count"] = len(entries)      # callers, as the detections panel counts
+        head["calls"] = len(rows)         # posts, which is not the same number
+        out.append(head)
+    return out[:limit]
+
+
 async def _page(chain: str, q: str | None, date: str | None, limit: int):
     col = db.get_collection("premium_calls")
     flt = _flt(chain, date)
     if not q:
         total = await col.count_documents(flt)
-        docs = await col.find(flt).sort("ts", -1).limit(limit).to_list(limit)
-        return total, docs
+        window = min(limit * _WINDOW, _SCAN_CAP)
+        docs = await col.find(flt).sort("ts", -1).limit(window).to_list(window)
+        return total, _cluster(docs, limit)
     docs = await col.find(flt).sort("ts", -1).to_list(_SCAN_CAP)
     docs = [d for d in docs if _match(d, q)]
-    return len(docs), docs[:limit]
+    return len(docs), _cluster(docs, limit)
 
 
 @router.get("")
