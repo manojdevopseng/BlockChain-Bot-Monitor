@@ -82,8 +82,19 @@ async def tokens(
         docs = [d for d in docs if _matches(d, q)]
         total = len(docs)
         docs = docs[:limit]
+    # One query for the whole page rather than one per row. The tally lives in
+    # its own collection so it outlives the fifteen-day retention on these
+    # rows, and the panel wants two different numbers: what this launch was
+    # (`handle_seq`, fixed when it happened) and where that account stands now
+    # (`handle_launches`, which keeps growing).
+    from .. import x_accounts
+    tally = await x_accounts.many(d.get("handle") or "" for d in docs)
     for d in docs:
         d["gmgn_url"] = gmgn_url("rbh", d.get("address", ""))
+        who = x_accounts.key(d.get("handle") or "")
+        entry = tally.get(who) or {}
+        d["handle_launches"] = entry.get("launches")
+        d["handle_symbols"] = (entry.get("symbols") or [])[-8:]
     return {"total": total, "items": clean_list(docs)}
 
 

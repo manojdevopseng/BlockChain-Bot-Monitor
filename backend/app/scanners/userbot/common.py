@@ -41,6 +41,12 @@ GATE_PREMIUM_ETH = "premium_eth_detection"   # premium groups → ETH detections
 GATE_PREMIUM_RBH = "premium_rbh_detection"   # premium groups → RBH detections panel
 GATE_PREMIUM_SOL = "premium_sol_detection"   # premium groups → SOL detections panel
 GATE_PREMIUM_BNB = "premium_bnb_detection"   # premium groups → BNB detections panel
+GATE_PREMIUM_BASE = "premium_base_detection"  # premium groups → Base detections panel
+# The Second Dashboard's own two switches. Separate from the panel gates
+# above: the merged panel and the per-call feed are different readings of the
+# same messages, and either can be wanted without the other.
+GATE_CALLS      = "second_dashboard_calls"    # one row per call
+GATE_CALLS_TG   = "second_dashboard_tracker"  # message text, replies and images
 GATE_IC          = "important_caller"        # starred groups → Important Caller
 
 # Every chain the premium panels hold. The daily rollover iterates this, and it

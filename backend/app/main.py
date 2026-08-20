@@ -24,7 +24,7 @@ from .config import settings
 from .routers import (
     account, admin as admin_router, ai_agent as ai_router, alert_rules,
     alerts, analytics,
-    auth, billing, chains,
+    auth, billing, calls as calls_router, chains,
     chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
     notifications as notif_router,
@@ -106,6 +106,18 @@ async def lifespan(app: FastAPI):
     # Rows written before accounts existed belong to nobody; adopt them before
     # anything scoped by owner runs and finds an empty list.
     await migrations.run()
+
+    # Count the launches already on file before anything reads the tally.
+    # Without it every account reads as its first launch on the day this
+    # ships, which is wrong for the thousands that already have more than one.
+    # Fills in only accounts it has never seen, so it is safe on every boot.
+    try:
+        from . import x_accounts
+        seeded = await x_accounts.backfill()
+        if seeded:
+            print(f"[startup] counted {seeded} X account(s) from the launches on file")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] X account tally not seeded (continuing): {exc}")
     await supervisor.start()
     _heartbeat_task = asyncio.create_task(_heartbeat())
     # Alerting must never be able to stop the bot from starting.
@@ -173,7 +185,7 @@ _PRODUCT = (rsi, mcap, ai_router, alert_rules)
 # that needs to say so.
 _ACCOUNT = (billing, support, notif_router)
 _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
-           chat_lookup, outcomes_router, rbhx, launchpad)
+           chat_lookup, outcomes_router, rbhx, launchpad, calls_router)
 _OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router,
              admin_router)
 

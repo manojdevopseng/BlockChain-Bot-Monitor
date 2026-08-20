@@ -246,6 +246,13 @@ _TTL_COLLECTIONS = {
     # A notice nobody read in a month is not going to be read.
     "notifications": "alert_retention_days",
     "launchpad_watch": "launchpad_retention_days",
+    # Second Dashboard: one document per call, and the pictures that came with
+    # them. Two windows, not one — the images are what fill a disk, and losing
+    # a picture from three weeks ago costs far less than losing the call.
+    "premium_calls": "calls_retention_days",
+    # Every premium message, token or not — the tracker's own feed.
+    "premium_messages": "calls_retention_days",
+    "premium_media": "calls_media_retention_days",
 }
 
 
@@ -293,6 +300,20 @@ async def ensure_indexes() -> None:
         ("logs",               [("ts", -1)]),                       # log stream
         ("services",           "id"),                               # every toggle read
         ("premium_detections", [("chain", 1), ("ts", -1)]),         # detection panels
+        # Second Dashboard. Unlike premium_detections these are never merged —
+        # one document per call — so the same token appears many times and the
+        # sort has to be index-backed rather than a scan of every repeat.
+        ("premium_calls",      [("chain", 1), ("ts", -1)]),
+        ("premium_calls",      [("ts", -1)]),                        # merged "All" view
+        ("premium_calls",      [("day", -1)]),                       # History dropdown
+        ("premium_calls",      [("chat_id", 1), ("ts", -1)]),        # one caller's feed
+        ("premium_media",      "mid"),                               # image by id
+        # The tracker reads newest-first and updates by (chat, message), so
+        # both have to be index-backed: it is written on every premium message,
+        # which is the highest-volume write in the app.
+        ("premium_messages",   [("ts", -1)]),
+        ("premium_messages",   [("chat_id", 1), ("msg_id", 1)]),
+        ("premium_messages",   [("tokens.chain", 1), ("ts", -1)]),
         # Added after an audit found these queried on every request with no
         # index behind them:
         ("premium_groups",     "id"),                               # reload + toggle, ~20s
@@ -386,6 +407,13 @@ async def ensure_indexes() -> None:
         ("v4_pools",           [("chain", 1), ("currency0", 1)]),
         ("v4_pools",           [("chain", 1), ("currency1", 1)]),
         ("mcap_state",         [("chain", 1), ("address", 1)]),
+        # Counting an account's launches, and the column that shows it. There
+        # was no index on handle at all before this.
+        ("launchpad_tokens",   [("handle", 1), ("open_timestamp", -1)]),
+        # The tally itself is keyed by _id (the lower-case handle), so only the
+        # "busiest accounts" sort needs an index. Deliberately absent from
+        # _TTL_COLLECTIONS: a count that expires is not a count.
+        ("x_accounts",         [("launches", -1)]),
         ("launchpad_skip",     "handle"),
         ("launchpad_watch",    "handle"),
     ]

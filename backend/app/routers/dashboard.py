@@ -85,3 +85,148 @@ async def overview():
 async def activity(limit: int = 8):
     docs = await db.get_collection("alerts").find({}).sort("created_at", -1).limit(limit).to_list(limit)
     return clean_list(docs)
+
+
+# ── The mixed feed ───────────────────────────────────────────────────────────
+#
+# One section showing what the three detection panels found, so the interesting
+# rows can be read without scrolling three of them. Nothing new is stored: this
+# reads the same collections Detections already writes, and the retention on
+# them is unchanged.
+#
+# Quotas per source rather than one newest-first list, and that is the whole
+# design. Measured over 24 hours on the live box: 2,865 launchpad rows, 48
+# premium calls, 36 gas alerts. Merged straight by time, launchpad is 97% of the
+# feed and the two feeds worth reading closely — roughly one call and one gas
+# alert every half hour — are pushed off the screen within minutes by the
+# cheapest one. With a quota each, a call from 17:53 is still there at 18:30,
+# because only a NEWER CALL can displace it.
+_QUOTAS = {"calls": 8, "gas": 8, "launches": 12}
+
+# A launchpad row only joins the mix if it carries a reason. All 2,865 a day
+# would bury everything else; these four cut it to about 640, which is roughly
+# 27 an hour and sits sensibly beside the gas feed. Each is a thing somebody
+# actually acts on.
+_LAUNCH_SIGNAL = {"$or": [
+    {"matched_keywords": {"$nin": [None, ""]}},      # ~417/day
+    {"watched": True},                                # ~7/day
+    {"dev_buy_eth": {"$gt": 0.199}},                  # ~157/day
+    {"followers": {"$gte": 500}},                     # ~222/day
+]}
+
+
+def _take(wanted: str, limit: int) -> dict[str, int]:
+    """How many rows each source may contribute.
+
+    One source asked for by name gets the whole page. Otherwise the quotas are
+    scaled to fit the limit, with a floor of one each — because a section that
+    silently drops a whole source is worse than one that shows a single row from
+    it, and a caller passing a small limit should not be able to defeat the
+    reservation by accident.
+    """
+    if wanted in _QUOTAS:
+        return {k: (limit if k == wanted else 0) for k in _QUOTAS}
+    total = sum(_QUOTAS.values())
+    if limit >= total:
+        return dict(_QUOTAS)
+    share = {k: max(1, round(v / total * limit)) for k, v in _QUOTAS.items()}
+    # Rounding up three ways can overshoot; take the excess off the biggest.
+    while sum(share.values()) > limit:
+        biggest = max(share, key=lambda k: share[k])
+        if share[biggest] <= 1:
+            break
+        share[biggest] -= 1
+    return share
+
+
+def _ago(*values):
+    """The first timestamp that is actually set."""
+    for v in values:
+        if v:
+            return float(v)
+    return 0.0
+
+
+@router.get("/feed")
+async def feed(source: str = "all", limit: int = 28):
+    """Premium calls, launchpad launches and high-gas buys in one list.
+
+    `source` filters to one of them, which is what the tabs do — and asking for
+    one source gives the whole quota for it rather than a third of the page.
+    """
+    from ..util import gmgn_url
+
+    wanted = source if source in _QUOTAS else "all"
+    take = _take(wanted, limit)
+    out: list[dict] = []
+
+    if take["calls"]:
+        # `ts`, not `created_at` — that field does not exist on this collection,
+        # and sorting by a missing one silently returns an arbitrary eight
+        # rather than the newest eight. The Detections panel next door has
+        # always sorted by ts; this was the odd one out.
+        rows = await db.get_collection("premium_detections").find({}).sort(
+            "ts", -1).limit(take["calls"]).to_list(take["calls"])
+        for r in rows:
+            out.append({
+                "source": "calls", "at": _ago(r.get("ts"), r.get("created_at")),
+                "chain": r.get("chain") or "", "symbol": r.get("symbol") or "",
+                "name": r.get("name") or "", "address": r.get("address") or "",
+                # The group chips the Detections table already draws, with the
+                # colours set in Forwarder → Premium Groups.
+                "groups": r.get("group_entries") or [
+                    {"name": g} for g in (r.get("groups") or [])],
+                "calls": r.get("count"),
+                "keyword": r.get("keyword") or "",
+            })
+
+    if take["launches"]:
+        rows = await db.get_collection("launchpad_tokens").find(
+            _LAUNCH_SIGNAL).sort("open_timestamp", -1).limit(
+                take["launches"]).to_list(take["launches"])
+        for r in rows:
+            out.append({
+                "source": "launches",
+                "at": _ago(r.get("open_timestamp"), r.get("found_at")),
+                "chain": "rbh", "symbol": r.get("symbol") or "",
+                "name": r.get("name") or "", "address": r.get("address") or "",
+                "launchpad": r.get("launchpad_label") or r.get("launchpad") or "",
+                "handle": r.get("handle") or "", "link": r.get("link") or "",
+                "followers": r.get("followers") or 0,
+                "handle_seq": r.get("handle_seq"),
+                "matched_keywords": r.get("matched_keywords") or "",
+                "watched": bool(r.get("watched")),
+                "dev_buy_eth": r.get("dev_buy_eth"),
+            })
+
+    if take["gas"]:
+        rows = await db.get_collection("gas_alerts").find({}).sort(
+            "created_at", -1).limit(take["gas"]).to_list(take["gas"])
+        for r in rows:
+            out.append({
+                "source": "gas", "at": _ago(r.get("created_at")),
+                "chain": r.get("chain") or "eth", "symbol": r.get("symbol") or "",
+                "name": r.get("name") or "", "address": r.get("address") or "",
+                "fee_eth": r.get("fee_eth"), "age_seconds": r.get("age_seconds"),
+                "dex": (r.get("dex") or "").upper(),
+            })
+
+    for row in out:
+        row["gmgn_url"] = gmgn_url(row["chain"], row["address"])
+    out.sort(key=lambda r: r["at"], reverse=True)
+    # No trim here. `_take` has already decided how many of each source may
+    # appear, and cutting the merged list would undo it: at a limit of 12 that
+    # left eleven launches, one gas alert and no calls at all — exactly the
+    # crowding the quotas exist to prevent.
+    return {"items": clean_list(out),
+            "quotas": _QUOTAS,
+            "strong_dev_buy_eth": _strong_floor(),
+            # Said out loud so the section can explain itself rather than
+            # looking like it is dropping rows: it is, on purpose.
+            "note": "Launches are filtered to those carrying a keyword, a "
+                    "watched account, 500+ followers or a strong dev buy."}
+
+
+def _strong_floor() -> float:
+    from ..scanners import scfg
+    return float(getattr(scfg, "RBHX_DEV_BUY_STRONG_ETH", 0.199) or 0.199)

@@ -26,6 +26,19 @@ async def load_premium_ids() -> set:
     return {bare_chat_id(d["id"]) for d in docs if d.get("id") is not None}
 
 
+async def load_group_names() -> dict:
+    """bare chat id -> (title, username), straight from the collection.
+
+    Read once at start and kept current as groups speak, so the hot path never
+    has to ask Telethon who a chat is. That lookup is usually a session-cache
+    hit, but "usually" on every message is what a second of latency is made
+    of.
+    """
+    docs = await col("premium_groups").find({}).to_list(5000)
+    return {bare_chat_id(d["id"]): (d.get("name") or "", d.get("username"))
+            for d in docs if d.get("id") is not None}
+
+
 async def load_ic_ids() -> set:
     """Groups starred for the Important Caller mirror.
 

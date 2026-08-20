@@ -84,18 +84,32 @@ export async function apiGet<T = any>(path: string): Promise<T> {
   return res.json();
 }
 
-/** Fetch a file the API only hands to the signed-in owner, and save it.
+/** Fetch a protected binary — an image or a clip — as an object URL.
  *
- * A plain <a href> cannot carry the Authorization header, and putting the
- * token in the query string would put it in the server log — so the file is
- * fetched, turned into a blob and handed to a link that lasts one click.
+ * An <img> or <video> src cannot carry an Authorization header, and the token
+ * lives in localStorage rather than a cookie, so anything behind the login has
+ * to be fetched and handed to the tag as a blob. The caller owns the URL and
+ * must revoke it.
  */
-export async function apiDownload(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(`${BASE}${path}`, { headers: headers() });
+export async function apiBlobUrl(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (res.status === 401) {
     onUnauthorized();
     throw new Error("Not authenticated");
   }
+  if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
+/** Fetch a file the API only hands to the signed-in owner, and save it.
+ *
+ * The sibling of the above, for a file that belongs on disk rather than on
+ * screen: same reason the header cannot ride on an <a href>, different ending.
+ */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, { headers: headers() });
   if (!res.ok) {
     let detail = "";
     try { detail = (await res.json())?.detail || ""; } catch {}

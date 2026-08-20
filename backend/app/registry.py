@@ -52,6 +52,10 @@ MCAP = "mcap"
 # switchable here, so it does not belong in Chains (which is "is SOL on at
 # all") or RPCs (which is "is this endpoint used").
 SOL = "sol"
+# The Second Dashboard. Its own section so the two feeds it runs on — the
+# per-call rows and the message tracker — can be switched without hunting
+# through Bots for them.
+DASH2 = "dash2"
 
 # Registry ids that were renamed, old -> new. `seed` carries the user's on/off
 # state across so a rename never silently re-enables something they had turned
@@ -175,6 +179,13 @@ DEFAULT_SERVICES: list[dict] = [
      "label": "BSC endpoints", "chain": "bnb", "enabled": True},
     {"id": "rsi_rpc_sol",  "category": RSI, "group": "RPC Endpoints",
      "label": "SOL endpoints", "chain": "sol", "enabled": False},
+    # Where the candles come from on ETH, BSC and SOL. On, one request brings
+    # the whole history and a token added a minute ago has an RSI immediately;
+    # off, every token builds its own candles by reading its pool once an
+    # interval, which is what happened before and what still happens on
+    # Robinhood Chain either way — it is on no aggregator at all.
+    {"id": "rsi_gmgn", "category": RSI, "group": "Tracker",
+     "label": "Candles from GMGN (ETH/BSC/SOL)", "chain": None, "enabled": True},
 
     # ── Market Cap Alert ───────────────────────────────────────────────────
     # Same three blocks as the RSI tracker above and for the same reason: is it
@@ -224,6 +235,8 @@ DEFAULT_SERVICES: list[dict] = [
      "chain": "sol", "enabled": True},
     {"id": "premium_bnb_detection",   "category": BOT, "label": "Premium BNB",
      "chain": "bnb", "enabled": True},
+    {"id": "premium_base_detection",  "category": BOT, "label": "Premium BASE",
+     "chain": "base", "enabled": True},
 
     # ── Bots: cross-chain and gas ──
     {"id": "sol_to_eth",            "category": BOT, "label": "SOL to ETH",
@@ -304,6 +317,15 @@ DEFAULT_SERVICES: list[dict] = [
     {"id": "rpc_eth", "category": RPC, "label": "ETH", "chain": "eth", "enabled": True},
     {"id": "rpc_rbh", "category": RPC, "label": "RBH", "chain": "rbh", "enabled": True},
     {"id": "rpc_sol", "category": RPC, "label": "SOL", "chain": "sol", "enabled": True},
+    {"id": "rpc_base", "category": RPC, "label": "BASE", "chain": "base", "enabled": True},
+
+    # ── Second Dashboard ──
+    # Both read the same premium messages the first dashboard already reads —
+    # nothing here opens a second RPC connection or a second Telegram session.
+    {"id": "second_dashboard_calls",   "category": DASH2, "label": "Premium Calls",
+     "chain": None, "enabled": True},
+    {"id": "second_dashboard_tracker", "category": DASH2, "label": "TG Tracker",
+     "chain": None, "enabled": True},
 ]
 
 # Supervisor registers a callback here so a toggle takes effect live.
@@ -398,7 +420,7 @@ async def grouped() -> dict[str, list[dict]]:
     instead of rendering empty.
     """
     out: dict[str, list[dict]] = {BOT: [], AI: [], CHAIN: [], RPC: [], RBHX: [],
-                                  RSI: [], MCAP: [], SOL: []}
+                                  RSI: [], MCAP: [], SOL: [], DASH2: []}
     for svc in await list_services():
         out.setdefault(svc["category"], []).append(svc)
     return out

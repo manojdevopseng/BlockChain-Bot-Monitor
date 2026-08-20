@@ -75,7 +75,10 @@ function PremiumSection() {
           <Layers size={13} /> Multi 2+
         </Button>
         <HistorySelect value={date} onChange={setDate} dates={datesData?.dates ?? []} />
-        <DownloadCsv path={`/api/forwarder/detections/export.csv?chain=${chain}`}
+        {/* No date: the download is every day still held — the archive as
+            well as today — not the day the History dropdown is showing. */}
+        <DownloadCsv
+          path={`/api/forwarder/detections/export.csv?chain=${chain}&multi=${multi}${query ? `&q=${encodeURIComponent(query)}` : ""}`}
           filename={`detections-${chain}.csv`} />
       </>}
     >

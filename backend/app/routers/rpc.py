@@ -65,6 +65,10 @@ async def _build() -> list[dict]:
          else "Robinhood — X — Token Monitor (borrowing Robinhood Chain)",
          "rbh", "rbhx_rpc", "rbhx", "WSS", list(scfg.RBHX_WSS_ENDPOINTS)),
         ("BNB Chain", "bnb", "", "", "HTTP", list(scfg.BNB_HTTP_ENDPOINTS)),
+        # Base, same shape as BNB: premium-caller checks only, so HTTP slots
+        # and no socket to report on. Two of them — the second is the backup
+        # the pool falls to when the first stops answering.
+        ("Base", "base", "rpc_base", "", "HTTP", list(scfg.BASE_HTTP_ENDPOINTS)),
         ("Solana", "sol", "rpc_sol", "sol", "WSS", list(scfg.SOL_WSS_ENDPOINTS)),
         ("Solana", "sol", "rpc_sol", "",    "HTTP", list(scfg.SOL_HTTP_ENDPOINTS)),
         # Market Cap Alert: two HTTP slots per chain, its own switch each. No

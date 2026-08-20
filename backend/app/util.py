@@ -108,7 +108,7 @@ def bare_chat_id(chat_id: Any) -> int:
 # GMGN's spelling passes through.
 _GMGN_SLUG = {"eth": "eth", "ethereum": "eth", "rbh": "robinhood",
               "robinhood": "robinhood", "sol": "sol", "solana": "sol",
-              "bnb": "bsc", "bsc": "bsc"}
+              "bnb": "bsc", "bsc": "bsc", "base": "base"}
 
 
 def tg_message_url(chat_id: Any, message_id: Any, username: str | None = None) -> str:

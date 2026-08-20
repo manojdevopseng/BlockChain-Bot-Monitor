@@ -192,6 +192,19 @@ async def tokens(chain: str = Query("all"), q: str | None = None,
         row = {**row,
                "rsi": rd.get("rsi"), "zone": rd.get("zone") or "",
                "price": st.get("price"), "samples": rd.get("samples") or 0,
+               # Where the candles came from, and how much of the series
+               # actually moved. A reading off a padded run is a real number
+               # and a meaningless one; the page has to be able to say so
+               # rather than showing 3.60 "oversold" as if it were a signal.
+               "source": rd.get("source") or "",
+               "moved": rd.get("moved"), "moved_pct": rd.get("moved_pct"),
+               # The decisive figure is the recent window, not the whole
+               # series — a token that traded an hour ago and has been flat
+               # since reads healthy over 300 candles and dead over the last 60.
+               "moved_recent": rd.get("moved_recent"),
+               "moved_recent_pct": rd.get("moved_recent_pct"),
+               "moved_window": rd.get("moved_window"),
+               "thin": bool(rd.get("thin")),
                "checked_at": rd.get("checked_at"),
                "updated_at": st.get("updated_at"),
                # Whose alert bookkeeping this is — the row's own, not the
