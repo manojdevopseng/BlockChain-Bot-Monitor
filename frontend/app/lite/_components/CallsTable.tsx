@@ -8,7 +8,14 @@ import { rowKey, shortAddr } from "@/lib/utils";
 
 /* One row per call. Not per token — the same token called by four groups is
    four rows, and called twice by one group is two, because reading the
-   sequence is the point of this table. */
+   sequence is the point of this table.
+
+   Those rows are grouped, though. A token's calls sit together with its newest
+   caller at the top, and the token called most recently leads the table — the
+   same ordering the main dashboard's detections panel has, which lifts a token
+   back to the top every time somebody new calls it. The server does the
+   grouping and marks each row with its rank; here that is only a left bar down
+   the block and a count on the row that leads it. */
 
 export type Call = {
   chain?: string;
@@ -19,6 +26,10 @@ export type Call = {
   username?: string | null;
   gmgn_url?: string;
   ts?: number;
+  // Set by /api/calls: 0 is this token's newest call, and the total is how many
+  // of its calls are in the window being shown.
+  call_rank?: number;
+  call_total?: number;
 };
 
 const CHAIN_LABEL: Record<string, string> = {
@@ -68,10 +79,21 @@ export function CallsTable(
                 No calls yet
               </td>
             </tr>
-          ) : items.map((c, i) => (
-            <tr key={rowKey(c, i)} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
+          ) : items.map((c, i) => {
+            const rank = c.call_rank ?? 0;
+            const total = c.call_total ?? 1;
+            // A single call is not a group and must not be dressed as one.
+            const grouped = total > 1;
+            const lead = grouped ? "border-l-2 border-l-brand/40" : "";
+            return (
+            <tr key={rowKey(c, i)}
+                className={`align-top hover:bg-bg-hover/40 ${
+                  // The bottom border closes the block, not every row in it, so
+                  // one token's calls read as one thing.
+                  grouped && rank < total - 1 ? "" : "border-b border-border-soft"
+                } ${grouped && rank > 0 ? "bg-bg-soft/25" : ""}`}>
               {showChain && (
-                <td className="px-3 py-3">
+                <td className={`px-3 py-3 ${lead}`}>
                   <Badge variant={CHAIN_TONE[c.chain || ""] || "gray"}>
                     {CHAIN_LABEL[c.chain || ""] || c.chain || "?"}
                   </Badge>
@@ -80,7 +102,7 @@ export function CallsTable(
 
               {/* Symbol opens GMGN; the address sits under it with its own copy,
                   so one cell carries both things you do with a token. */}
-              <td className="px-3 py-3">
+              <td className={`px-3 py-3 ${showChain ? "" : lead}`}>
                 <div className="flex items-center gap-1.5">
                   {c.gmgn_url ? (
                     <a href={c.gmgn_url} target="_blank" rel="noopener noreferrer"
@@ -92,6 +114,13 @@ export function CallsTable(
                     <span className="font-semibold text-text">{c.symbol || "?"}</span>
                   )}
                   {c.symbol && <CopyButton value={c.symbol} />}
+                  {grouped && rank === 0 && (
+                    <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px]
+                                     font-medium text-brand-soft"
+                          title={`${total} calls on this token`}>
+                      {total} calls
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex items-center gap-1.5">
                   <span className="font-mono text-[11px] text-accent-blue">{shortAddr(c.address)}</span>
@@ -123,7 +152,8 @@ export function CallsTable(
 
               <td className="px-3 py-3"><When ts={c.ts} /></td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </TableScroll>

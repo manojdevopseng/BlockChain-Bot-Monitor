@@ -30,6 +30,12 @@ CHAINS = "^(all|eth|rbh|sol|bnb|base)$"
 # set; the plain view counts in Mongo instead.
 _SCAN_CAP = 20000
 
+# Rows read per row shown. The table groups a token's calls together, so it has
+# to see further down the feed than it displays — a token called an hour ago and
+# again just now has its earlier row well below the newest hundred. Four is
+# enough for a day of this feed and still one small query.
+_WINDOW = 4
+
 
 def _flt(chain: str, date: str | None = None) -> dict:
     f: dict = {} if chain == "all" else {"chain": chain}
@@ -44,16 +50,47 @@ def _match(d: dict, q: str) -> bool:
                for k in ("symbol", "name", "address", "group", "username"))
 
 
+def _cluster(docs: list[dict], limit: int) -> list[dict]:
+    """Keep one token's calls together, newest caller at the top of each.
+
+    The main dashboard's detections panel holds one row per token and lifts it
+    back to the top of the table every time somebody new calls it. This is that
+    ordering without giving up what the Second Dashboard is for: every call
+    keeps its own row — its own group, its own text, its own timestamp — the
+    calls on one token sit together, and the token called most recently leads.
+
+    `docs` arrives newest-first, so the first row of each group is that token's
+    latest call and the groups sort on it directly.
+
+    `call_rank` and `call_total` go on each row for the table: rank 0 is the
+    newest call on that token, and the total is how many of its calls are in
+    this window — not how many exist, which would be one query per token.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for d in docs:
+        groups.setdefault((d.get("chain"), d.get("address")), []).append(d)
+
+    out: list[dict] = []
+    for rows in sorted(groups.values(),
+                       key=lambda r: r[0].get("ts") or 0, reverse=True):
+        for i, d in enumerate(rows):
+            d["call_rank"] = i
+            d["call_total"] = len(rows)
+        out.extend(rows)
+    return out[:limit]
+
+
 async def _page(chain: str, q: str | None, date: str | None, limit: int):
     col = db.get_collection("premium_calls")
     flt = _flt(chain, date)
     if not q:
         total = await col.count_documents(flt)
-        docs = await col.find(flt).sort("ts", -1).limit(limit).to_list(limit)
-        return total, docs
+        window = min(limit * _WINDOW, _SCAN_CAP)
+        docs = await col.find(flt).sort("ts", -1).limit(window).to_list(window)
+        return total, _cluster(docs, limit)
     docs = await col.find(flt).sort("ts", -1).to_list(_SCAN_CAP)
     docs = [d for d in docs if _match(d, q)]
-    return len(docs), docs[:limit]
+    return len(docs), _cluster(docs, limit)
 
 
 @router.get("")
