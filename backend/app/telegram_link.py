@@ -69,11 +69,27 @@ async def finish(token: str, chat_id, tg_username: str = "") -> Optional[dict]:
         raise ValueError("That Telegram account is already connected to "
                          "another login. Disconnect it there first.")
 
-    await _users().update_one(
-        {"username": row["username"]},
-        {"$set": {"telegram_chat_id": chat_id,
-                  "telegram_username": tg_username,
-                  "telegram_linked_at": time.time()}})
+    fields = {"telegram_chat_id": chat_id,
+              "telegram_username": tg_username,
+              "telegram_linked_at": time.time()}
+    res = await _users().update_one({"username": row["username"]}, {"$set": fields})
+    if not getattr(res, "matched_count", 0):
+        # The env admin is answered from settings rather than the database, so
+        # the box stays reachable when the database is not — which left it as
+        # the one account with nowhere to put a chat id. It reported success,
+        # returned nothing, and the bot told the operator the link had expired.
+        # A row is written for it here; security.account still answers from
+        # settings, so this only gives the alerts somewhere to be addressed.
+        from .config import settings
+        if row["username"] != settings.admin_username:
+            return None          # an account deleted between the two steps
+        from . import accounts
+        await _users().update_one(
+            {"username": row["username"]},
+            {"$set": {**fields, "username": row["username"],
+                      "role": accounts.ADMIN, "plan": "admin",
+                      "email_verified": True, "enabled": True}},
+            upsert=True)
     await _links().delete_one({"token": row["token"]})
     log.info(f"[TG] {row['username']} connected Telegram chat {chat_id}"
              + (f" (@{tg_username})" if tg_username else ""))
