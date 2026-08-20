@@ -39,9 +39,23 @@ FEEDS: dict[str, str] = {
     "calls": "Premium group calls",
 }
 
-# Chains an event can carry. Kept as ids the rest of the app already uses.
+# Chains an event can carry. Kept as ids the rest of the app already uses —
+# which is exactly what this got wrong: BNB was "bsc" here and "bnb" in the
+# events, so every BNB premium call was filtered out of every subscription with
+# "bnb is not in your chains", a reason naming an id no subscriber could ever
+# have chosen.
 CHAINS: dict[str, str] = {"eth": "Ethereum", "rbh": "Robinhood",
-                          "bsc": "BNB Chain", "sol": "Solana"}
+                          "bnb": "BNB Chain", "sol": "Solana"}
+
+# Subscriptions written while it was "bsc" still say so. Read as the same chain
+# rather than rewritten: a stored list is somebody's setting, and quietly
+# editing their settings to correct our own spelling is the worse fix.
+_CHAIN_ALIASES: dict[str, str] = {"bsc": "bnb"}
+
+
+def chain_id(chain: str) -> str:
+    """The canonical id for a chain, whichever spelling arrived."""
+    return _CHAIN_ALIASES.get(chain, chain)
 
 MODES = ("instant", "digest")
 DIGEST_CHOICES = (5, 15, 30, 60)
@@ -145,7 +159,10 @@ def clean(payload: dict, plan_cap: int) -> dict:
         got = payload["feeds"] or {}
         out["feeds"] = {key: bool(got.get(key)) for key in FEEDS}
     if "chains" in payload:
-        out["chains"] = [c for c in (payload["chains"] or []) if c in CHAINS]
+        # Normalised on the way in, so a subscription saved once stops carrying
+        # the old spelling forward.
+        out["chains"] = [chain_id(c) for c in (payload["chains"] or [])
+                         if chain_id(c) in CHAINS]
     if "launchpads" in payload:
         out["launchpads"] = [str(p)[:32] for p in (payload["launchpads"] or [])][:20]
     if "min_followers" in payload:
@@ -283,8 +300,11 @@ def matches(sub: dict, event: Event) -> tuple[bool, str]:
     if not sub.get("feeds", {}).get(event.feed):
         return False, f"the {FEEDS.get(event.feed, event.feed)} feed is off"
 
-    if event.chain and event.chain not in (sub.get("chains") or []):
-        return False, f"{CHAINS.get(event.chain, event.chain)} is not in your chains"
+    if event.chain:
+        want = {chain_id(c) for c in (sub.get("chains") or [])}
+        if chain_id(event.chain) not in want:
+            return False, (f"{CHAINS.get(chain_id(event.chain), event.chain)} "
+                           f"is not in your chains")
 
     pads = sub.get("launchpads") or []
     if event.launchpad and pads and event.launchpad not in pads:

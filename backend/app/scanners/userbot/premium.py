@@ -130,8 +130,6 @@ class PremiumCaptureMixin:
         if calls > CALL_CAP or not self._on(GATE_PREMIUM):
             return
         chat_id = config.DEST_PREMIUM_BY_CHAIN.get(chain)
-        if not chat_id:
-            return
         label = chain.upper()
         group = group or "Unknown"
         # The address is the one thing that gets acted on, so it sits alone on
@@ -154,6 +152,12 @@ class PremiumCaptureMixin:
         # The subscribers' copy. Queued before the operator's send rather than
         # after, because `send_to` awaits Telegram and this does not — a slow
         # send must not hold a detection back from everybody else.
+        #
+        # And queued whether or not the operator has a group for this chain.
+        # It used to return above when DEST_PREMIUM_<CHAIN> was blank, which
+        # made every paying subscriber's alerts depend on the operator having
+        # configured a mirror of their own — the four other feeds have never
+        # worked that way, and this one should not either.
         try:
             from app import alert_dispatch
             from app.alert_subs import Event
@@ -163,6 +167,8 @@ class PremiumCaptureMixin:
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[PREMIUM] not queued for fan-out: {exc}")
 
+        if not chat_id:
+            return          # no mirror of our own; the subscribers have theirs
         if await notifier.send_to(chat_id, text, keyboard=keyboard):
             self.count_premium += 1
             log.info(f"[PREMIUM] [{group}] {symbol or address[:10]} -> {label} group ({calls}/{CALL_CAP})")
