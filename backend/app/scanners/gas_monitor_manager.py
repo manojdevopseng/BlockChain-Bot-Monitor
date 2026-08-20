@@ -204,6 +204,17 @@ class GasMonitorManager:
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[GasMonitor] could not store alert: {exc}")
 
+        # Queued, not bought: at this age nobody has sold the token yet, so the
+        # sellability guard would refuse it. trading.sweep_pending retries while
+        # the tape fills in. Stored after the alert row on purpose — the guard
+        # recognises a gas token by finding it in gas_alerts.
+        try:
+            from .. import trading
+            await trading.on_gas(chain="eth", address=token.address,
+                                 symbol=token.symbol, name=token.name)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[GasMonitor] auto-buy queue skipped: {exc}")
+
     async def _send_telegram(self, token: DetectedToken, fee_eth: float,
                              age_seconds: int) -> None:
         chat_id = config.GAS_ALERT_CHAT_ID

@@ -312,6 +312,10 @@ async def ensure_indexes() -> None:
         # marked to market by (chain, address).
         ("trading_positions",  [("user", 1), ("status", 1), ("opened_at", -1)]),
         ("trading_positions",  [("chain", 1), ("address", 1)]),
+        # The queued gas-fee buys the worker sweeps. Keyed the way sweep_pending
+        # reads it, and the way on_gas upserts it.
+        ("trading_pending",    [("next_at", 1)]),
+        ("trading_pending",    [("user", 1), ("chain", 1), ("address", 1)]),
         ("trading_settings",   "user"),
         # The tracker reads newest-first and updates by (chat, message), so
         # both have to be index-backed: it is written on every premium message,

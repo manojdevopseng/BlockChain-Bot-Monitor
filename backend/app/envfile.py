@@ -55,6 +55,14 @@ EDITABLE: dict[str, dict] = {
         "label": "GMGN API key", "kind": "text", "secret": True,
         "group": "GMGN Credentials", "applies": "live",
     },
+    "TRADING_ALERT_CHAT_ID": {
+        "label": "Trading alerts group (chat id)", "kind": "text",
+        "group": "Detection Tuning", "applies": "live",
+        "help": "Where the operator's own paper buys and sells are posted. "
+                "Customers never see this group: an account that connected its "
+                "own Telegram gets its own trades in its own chat, and one that "
+                "has not connected anything gets nothing sent at all.",
+    },
     "MIN_FEE_ETH": {
         "label": "Min gas fee to alert (ETH)", "kind": "number", "group": "Detection Tuning",
         "min": 0.0, "applies": "live",

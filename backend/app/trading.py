@@ -19,8 +19,9 @@ request per refresh, however many positions are open.
 
 from __future__ import annotations
 
+import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 import aiohttp
@@ -46,8 +47,16 @@ DEFAULTS: dict[str, Any] = {
     # the number people tune here is the number that would be spent later.
     "buy_usd": 50.0,
     "chains": list(CHAINS),
-    # Empty means every starred caller. A list means only these.
+    # Empty means every starred caller. A list means only these — and it can
+    # only ever narrow that set, never widen it: a caller outside the starred
+    # list is not reachable from here at all.
     "callers": [],
+    # Gas-fee detections, armed separately from callers. Off by default and
+    # kept apart on purpose: a caller's token has a person behind it, a gas
+    # token has nobody, so arming one must never quietly arm the other. The
+    # master auto_buy switch still gates it, which is what makes the kill
+    # switch stop both.
+    "auto_buy_gas": False,
     "max_open": 20,
     "daily_buys": 20,
     # Held for the day this runs for real. Stored, shown, and not yet used —
@@ -86,6 +95,11 @@ DEFAULTS: dict[str, Any] = {
     # mysteriously off and leaving the reason in a log file.
     "stopped_reason": "",
     "stopped_at": 0.0,
+
+    # Telegram. Where it goes is not a setting — an account that connected its
+    # own chat gets its own trades there and nobody else's; see
+    # telegram_link.alert_target.
+    "tg_alerts": True,
 }
 
 
@@ -167,7 +181,8 @@ async def prices(session: aiohttp.ClientSession,
 
 async def open_position(*, user: str, chain: str, address: str, symbol: str = "",
                         name: str = "", usd: float = 0.0, source: str = "manual",
-                        caller: str = "", session: aiohttp.ClientSession | None = None,
+                        caller: str = "", caller_id: Optional[int] = None,
+                        session: aiohttp.ClientSession | None = None,
                         demo_price: float | None = None) -> dict:
     """Record a buy at the price it would have paid right now.
 
@@ -220,6 +235,10 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         "symbol": symbol or "", "name": name or "",
         "usd": spend, "entry": float(price), "qty": spend / float(price),
         "source": source, "caller": caller or "",
+        # The id is what the P&L groups on; the name is only what it was called
+        # on the day. A group renamed on Telegram used to split its own history
+        # into two rows that looked like two different callers.
+        "caller_id": int(caller_id) if caller_id is not None else None,
         "status": "open", "opened_at": now,
         "last_price": float(price), "last_at": now,
         # The high-water mark a trailing stop measures its drop from. Seeded at
@@ -229,6 +248,7 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
     }
     res = await db.get_collection("trading_positions").insert_one(doc)
     doc["_id"] = res.inserted_id
+    notify_open(doc)
     return doc
 
 
@@ -282,7 +302,9 @@ async def close_position(user: str, pid: str, *, part: float = 100.0,
             "qty": float(row["qty"]) - qty, "usd": float(row["usd"]) - cost,
             "last_price": float(price), "last_at": now,
             "realised_usd": float(row.get("realised_usd") or 0) + (out - cost)}})
-    return await col.find_one({"_id": row["_id"]})
+    done = await col.find_one({"_id": row["_id"]})
+    notify_close(done, part=part, reason=reason)
+    return done
 
 
 async def refresh(user: str, session: aiohttp.ClientSession | None = None) -> int:
@@ -333,13 +355,15 @@ def view(row: dict) -> dict:
         "closed_reason": row.get("closed_reason") or "",
         "status": row.get("status"), "source": row.get("source") or "",
         "caller": row.get("caller") or "",
+        "caller_id": row.get("caller_id"),
         "opened_at": row.get("opened_at"), "closed_at": row.get("closed_at"),
         "last_at": row.get("last_at"),
     }
 
 
 async def can_auto_buy(user: str, chain: str, caller_id: Optional[int],
-                       conf: dict | None = None) -> tuple[bool, str]:
+                       conf: dict | None = None,
+                       source: str = "auto") -> tuple[bool, str]:
     """Whether an automatic buy is allowed right now, and why not when it is not.
 
     The reason is returned rather than logged because "why did it not buy" is
@@ -351,16 +375,20 @@ async def can_auto_buy(user: str, chain: str, caller_id: Optional[int],
         return False, "auto-buy is off"
     if chain not in (conf.get("chains") or CHAINS):
         return False, f"{chain.upper()} is not in the chain list"
-    allow = conf.get("callers") or []
-    if allow and caller_id is not None and int(caller_id) not in [int(x) for x in allow]:
-        return False, "that caller is not on the list"
+    if source == "gas":
+        if not conf.get("auto_buy_gas"):
+            return False, "gas-fee auto-buy is off"
+    else:
+        allow = conf.get("callers") or []
+        if allow and caller_id is not None and int(caller_id) not in [int(x) for x in allow]:
+            return False, "that caller is not on the list"
 
     col = db.get_collection("trading_positions")
     if await col.count_documents({"user": user, "status": "open"}) >= int(conf["max_open"]):
         return False, f"already holding {conf['max_open']} positions"
-    since = time.time() - 86400
-    if await col.count_documents({"user": user, "opened_at": {"$gte": since},
-                                  "source": "auto"}) >= int(conf["daily_buys"]):
+    if await col.count_documents(
+            {"user": user, "opened_at": {"$gte": _day_start()},
+             "source": {"$in": ["auto", "gas"]}}) >= int(conf["daily_buys"]):
         return False, "the daily automatic-buy limit is used up"
     return True, ""
 
@@ -426,7 +454,8 @@ async def on_call(*, chain: str, address: str, symbol: str = "", name: str = "",
                 row = await open_position(
                     user=user, chain=chain, address=address, symbol=symbol,
                     name=name, usd=float(conf["buy_usd"]), source="auto",
-                    caller=group or str(chat_id or ""), session=session)
+                    caller=group or str(chat_id or ""), caller_id=chat_id,
+                    session=session)
                 made.append(view(row))
             except ValueError:
                 # No price yet — a token minutes old often has none. Skipped
@@ -522,9 +551,16 @@ async def sellable(session: aiohttp.ClientSession, chain: str, address: str, *,
 
 # ── what the callers are worth ──────────────────────────────────────────────
 
+# The trading day runs on Indian time. On UTC the day rolled over at 05:30
+# local, which cut a night's trading in half and reset the loss limit in the
+# middle of a session that was still going.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def _day_start() -> float:
-    now = _utc()
-    return datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
+    """Midnight IST today, as a unix timestamp."""
+    now = datetime.now(IST)
+    return datetime(now.year, now.month, now.day, tzinfo=IST).timestamp()
 
 
 async def day_pnl(user: str) -> dict:
@@ -563,11 +599,23 @@ async def caller_stats(user: str) -> list[dict]:
     """
     rows = await db.get_collection("trading_positions").find(
         {"user": user, "source": {"$ne": "demo"}}).to_list(5000)
+    # Current names for the ids, so a group renamed on Telegram shows one row
+    # under its new name rather than two under both.
+    names = {c["id"]: c["name"] for c in await starred_callers()}
     agg: dict[str, dict] = {}
     for r in rows:
         v = view(r)
-        who = v["caller"] or ("Manual" if v["source"] == "manual" else "Unattributed")
-        a = agg.setdefault(who, {"caller": who, "trades": 0, "open": 0, "closed": 0,
+        cid = v.get("caller_id")
+        if cid is not None:
+            key = f"id:{cid}"
+            who = names.get(int(cid)) or v["caller"] or str(cid)
+        elif v["source"] == "gas":
+            key = who = "ETH Gas Fees"
+        else:
+            # Rows from before ids were stored, and every manual buy.
+            who = v["caller"] or ("Manual" if v["source"] == "manual" else "Unattributed")
+            key = who
+        a = agg.setdefault(key, {"caller": who, "trades": 0, "open": 0, "closed": 0,
                                  "wins": 0, "cost": 0.0, "realised": 0.0,
                                  "unrealised": 0.0, "best": None, "worst": None})
         a["trades"] += 1
@@ -585,6 +633,7 @@ async def caller_stats(user: str) -> list[dict]:
         pct = v["pnl_pct"]
         a["best"] = pct if a["best"] is None else max(a["best"], pct)
         a["worst"] = pct if a["worst"] is None else min(a["worst"], pct)
+        a["caller"] = who
 
     out = []
     for a in agg.values():
@@ -699,3 +748,173 @@ async def run_rules(user: str, session: aiohttp.ClientSession,
         await stop_auto_buy(user, stopped)
 
     return {"marked": marked, "sold": sold, "day": day, "stopped": stopped}
+
+
+# ── telling the account what happened ───────────────────────────────────────
+
+# asyncio holds only weak references to tasks, so a notification handed to
+# create_task and forgotten can be collected mid-flight. Same bug that lost
+# tracker media; same fix.
+_bg: set = set()
+
+_TONE = {"buy": "\U0001F7E2", "sell": "\U0001F534"}
+
+
+async def _notify(user: str, text: str) -> None:
+    """One line to whoever this account belongs to, and nobody else.
+
+    Where it lands is not a setting on this page. `alert_target` already
+    answers it correctly for every case: an account that connected its own
+    Telegram gets its trades in its own chat, an admin without one falls back
+    to the operator group set in Settings, and anyone else gets nothing —
+    because posting one customer's positions into a shared group is a leak,
+    not a fallback.
+    """
+    try:
+        from . import alert_dispatch, telegram_link
+        from .scanners import scfg
+        conf = await settings_for(user)
+        if not conf.get("tg_alerts", True):
+            return
+        chat, _why = await telegram_link.alert_target(
+            user, getattr(scfg, "TRADING_ALERT_CHAT_ID", "") or None)
+        if not chat:
+            return
+        await alert_dispatch.send_personal(user, chat, text)
+    except Exception as exc:  # noqa: BLE001
+        from .scanners.slog import get_logger
+        get_logger(__name__).debug(f"[TRADING] notify failed: {exc}")
+
+
+def _notify_bg(user: str, text: str) -> None:
+    task = asyncio.ensure_future(_notify(user, text))
+    _bg.add(task)
+    task.add_done_callback(_bg.discard)
+
+
+def _fmt(x: float) -> str:
+    return f"{x:,.2f}"
+
+
+def notify_open(row: dict) -> None:
+    """A position was opened. Demo trades stay off Telegram."""
+    if row.get("source") == "demo":
+        return
+    sym = row.get("symbol") or (row.get("address") or "")[:10]
+    line = (f"{_TONE['buy']} <b>BUY</b> {sym} · {str(row.get('chain','')).upper()}\n"
+            f"${_fmt(float(row.get('usd') or 0))} at {float(row.get('entry') or 0):.8g}")
+    who = row.get("caller")
+    if who:
+        line += f"\nCaller: {who}"
+    elif row.get("source") == "gas":
+        line += "\nSource: ETH Gas Fees"
+    _notify_bg(row.get("user") or "", line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>")
+
+
+def notify_close(row: dict, *, part: float, reason: str) -> None:
+    if row.get("source") == "demo":
+        return
+    sym = row.get("symbol") or (row.get("address") or "")[:10]
+    v = view(row)
+    pnl = v["pnl_usd"] if v["status"] == "closed" else float(v["realised_usd"] or 0)
+    sign = "+" if pnl >= 0 else "-"
+    head = f"{_TONE['sell']} <b>SELL</b> {sym} · {str(row.get('chain','')).upper()}"
+    if part < 100:
+        head += f" ({part:.0f}%)"
+    line = (f"{head}\n{sign}${_fmt(abs(pnl))} "
+            f"({sign}{abs(v['pnl_pct']):.1f}%)\nClosed by: {reason}")
+    _notify_bg(row.get("user") or "", line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>")
+
+
+# ── gas-fee tokens, queued rather than bought on sight ──────────────────────
+
+# A gas alert fires seconds after the pool exists, when nobody has sold the
+# token yet — so the sellability guard would refuse every single one of them
+# and the feature would be theatre. Instead the buy is queued and retried while
+# the tape fills in. If it still cannot be sold by the time this gives up, that
+# is the guard doing its job.
+GAS_FIRST_TRY = 90        # seconds after detection
+GAS_MAX_TRIES = 6
+GAS_GIVE_UP = 600         # ten minutes, then the idea is stale anyway
+
+
+async def on_gas(*, chain: str = "eth", address: str, symbol: str = "",
+                 name: str = "") -> int:
+    """An ETH gas-fee token was detected. Queue it for every account armed for it.
+
+    Returns how many accounts queued it — used by the logs and the tests only.
+    The caller of this must never fail because of it.
+    """
+    addr = _key(chain, address)
+    if not addr:
+        return 0
+    armed = await db.get_collection("trading_settings").find(
+        {"auto_buy": True, "auto_buy_gas": True}).to_list(500)
+    if not armed:
+        return 0
+
+    now = time.time()
+    queued = 0
+    col = db.get_collection("trading_pending")
+    for conf_row in armed:
+        user = conf_row.get("user")
+        if not user:
+            continue
+        conf = await settings_for(user)
+        ok, _why = await can_auto_buy(user, chain, None, conf, source="gas")
+        if not ok:
+            continue
+        held = await db.get_collection("trading_positions").find_one(
+            {"user": user, "chain": chain, "address": addr, "status": "open"})
+        if held:
+            continue
+        await col.update_one(
+            {"user": user, "chain": chain, "address": addr},
+            {"$setOnInsert": {
+                "user": user, "chain": chain, "address": addr,
+                "symbol": symbol or "", "name": name or "",
+                "tries": 0, "next_at": now + GAS_FIRST_TRY,
+                "expires_at": now + GAS_GIVE_UP, "dt": _utc()}},
+            upsert=True)
+        queued += 1
+    return queued
+
+
+async def sweep_pending(session: aiohttp.ClientSession) -> dict:
+    """Try the queued gas buys whose turn has come. Called once a minute."""
+    col = db.get_collection("trading_pending")
+    now = time.time()
+    rows = await col.find({"next_at": {"$lte": now}}).to_list(200)
+    bought, dropped = [], []
+    for r in rows:
+        if now >= float(r.get("expires_at") or 0):
+            await col.delete_one({"_id": r["_id"]})
+            dropped.append({"symbol": r.get("symbol") or r["address"],
+                            "why": "gave up — never became sellable"})
+            continue
+        conf = await settings_for(r["user"])
+        ok, why = await can_auto_buy(r["user"], r["chain"], None, conf, source="gas")
+        if not ok:
+            # Auto-buy went off, or the day's cap filled, between queueing and
+            # now. Dropped rather than held: the answer will not change back
+            # inside the ten minutes this row has left.
+            await col.delete_one({"_id": r["_id"]})
+            dropped.append({"symbol": r.get("symbol") or r["address"], "why": why})
+            continue
+        try:
+            row = await open_position(
+                user=r["user"], chain=r["chain"], address=r["address"],
+                symbol=r.get("symbol") or "", name=r.get("name") or "",
+                usd=float(conf["buy_usd"]), source="gas", session=session)
+            await col.delete_one({"_id": r["_id"]})
+            bought.append(view(row))
+        except ValueError as exc:
+            tries = int(r.get("tries") or 0) + 1
+            if tries >= GAS_MAX_TRIES:
+                await col.delete_one({"_id": r["_id"]})
+                dropped.append({"symbol": r.get("symbol") or r["address"],
+                                "why": str(exc)})
+            else:
+                await col.update_one({"_id": r["_id"]}, {"$set": {
+                    "tries": tries, "next_at": now + 60, "last_why": str(exc)}})
+    return {"bought": bought, "dropped": dropped}

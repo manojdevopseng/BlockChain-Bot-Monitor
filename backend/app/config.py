@@ -287,6 +287,9 @@ class Settings(BaseSettings):
     command_chat_id: str = ""
     # "High Gas Early Activity" alerts (ETH Gas Fees feature).
     gas_alert_chat_id: str = ""
+    # Where the operator's own paper trades are posted. Customers never see
+    # this group — see trading._notify.
+    trading_alert_chat_id: str = ""
     # Repeat of the same error is re-sent at most once per this many seconds.
     error_alert_cooldown: int = 900
     # An identical WARNING/ERROR is written to the log at most once per this

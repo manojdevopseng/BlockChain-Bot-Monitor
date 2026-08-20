@@ -109,7 +109,9 @@ export function QuickSettings(
         daily_buys: Number(draft.daily_buys) || 1,
         chains: draft.chains,
         callers: picked,
+        auto_buy_gas: !!draft.auto_buy_gas,
         sell_check: !!draft.sell_check,
+        tg_alerts: !!draft.tg_alerts,
         buy_slippage: Number(draft.buy_slippage) || 0,
         sell_slippage: Number(draft.sell_slippage) || 0,
         buy_gas_gwei: Number(draft.buy_gas_gwei) || 0,
@@ -253,6 +255,12 @@ export function QuickSettings(
               )}
             </div>
 
+            <Toggle title="Also auto-buy ETH gas-fee tokens" on={!!draft.auto_buy_gas}
+                    onChange={(v) => set("auto_buy_gas", v)}
+                    note="A second source, armed separately from callers. Nobody has
+                          vouched for these, so each one is queued and only bought
+                          once the check below says it can be sold again." />
+
             <Toggle title="Sellability check on gas-fee tokens" on={!!draft.sell_check}
                     onChange={(v) => set("sell_check", v)}
                     note="Before buying an ETH gas-fee token, check the pool has real
@@ -262,11 +270,11 @@ export function QuickSettings(
             <Toggle title="Daily loss limit" on={!!draft.loss_limit_on}
                     onChange={(v) => set("loss_limit_on", v)}
                     note="Turn auto-buy off by itself once the day is down by the
-                          percentage below." />
+                          percentage below. The day runs midnight to midnight IST." />
             {draft.loss_limit_on && (
               <Field label="Stop the day at" suffix="%" value={draft.loss_limit_pct}
                      onChange={(v) => set("loss_limit_pct", v)}
-                     hint="Measured against what today's positions cost, midnight UTC onward." />
+                     hint="Measured against what today's positions cost, from midnight IST." />
             )}
           </div>
         ) : (
@@ -307,6 +315,12 @@ export function QuickSettings(
               and then closes it if it falls that far from its high. It never fires on
               the way up from the entry.
             </p>
+
+            <Toggle title="Telegram alerts" on={!!draft.tg_alerts}
+                    onChange={(v) => set("tg_alerts", v)}
+                    note="Every buy and sell on this account, in your own Telegram.
+                          Connect one in Alert Rules — nothing is sent until you do,
+                          and it only ever goes to your own chat." />
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Slippage" suffix="%" value={draft.sell_slippage}

@@ -41,7 +41,21 @@ async def _accounts() -> list[str]:
     return sorted(users)
 
 
+
 async def _tick(session: aiohttp.ClientSession) -> None:
+    # Queued gas-fee buys first: a token that has just become sellable should
+    # be opened before this pass prices anything, not a minute after.
+    try:
+        gas = await trading.sweep_pending(session)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[TRADING] gas queue failed: {type(exc).__name__}: {exc}")
+    else:
+        for b in gas["bought"]:
+            log.info(f"[TRADING] gas auto-buy {b['symbol']} ({b['chain']}) "
+                     f"at {b['entry']}")
+        for d in gas["dropped"]:
+            log.info(f"[TRADING] gas auto-buy skipped {d['symbol']}: {d['why']}")
+
     for user in await _accounts():
         try:
             out = await trading.run_rules(user, session)
