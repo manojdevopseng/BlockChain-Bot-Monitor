@@ -1,7 +1,9 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import { useApi } from "@/lib/api";
 import { CopyButton } from "@/components/CopyButton";
+import { ChipMap, GroupChip, chipStyleOf } from "@/components/GroupChip";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { Badge, Variant } from "@/components/ui/badge";
 import { rowKey, shortAddr } from "@/lib/utils";
@@ -30,6 +32,10 @@ export type Call = {
   // of its calls are in the window being shown.
   call_rank?: number;
   call_total?: number;
+  // What the group chip opens, and the id its colour is keyed on.
+  post_url?: string;
+  chat_id?: number;
+  msg_id?: number;
 };
 
 const CHAIN_LABEL: Record<string, string> = {
@@ -56,10 +62,24 @@ function When({ ts }: { ts?: number }) {
   );
 }
 
+// The message link. post_url is written when the call is recorded; the rebuild
+// covers rows stored before it was, and a private group has neither.
+function tgUrl(c: Call): string | null {
+  if (c.post_url) return c.post_url;
+  if (c.username && c.msg_id) return `https://t.me/${c.username}/${c.msg_id}`;
+  return null;
+}
+
 export function CallsTable(
   { items, showChain = true, maxHeight, fill = false }:
   { items: Call[]; showChain?: boolean; maxHeight?: number | false; fill?: boolean },
 ) {
+  // The same per-caller colours Forwarder → Premium Groups sets, and the same
+  // request the tracker and the sound alert already make — SWR shares the key,
+  // so this costs nothing on a page that has them.
+  const { data: styleData } = useApi<any>("/api/forwarder/group-chips");
+  const chips: ChipMap | undefined = styleData?.chips;
+
   return (
     <TableScroll maxHeight={maxHeight} fill={fill}>
       <table className="w-full min-w-[760px] text-sm">
@@ -85,6 +105,9 @@ export function CallsTable(
             // A single call is not a group and must not be dressed as one.
             const grouped = total > 1;
             const lead = grouped ? "border-l-2 border-l-brand/40" : "";
+            // The block is newest-first, so its last row is who called it
+            // first — the same 🥇 the detections panel puts on that group.
+            const first = grouped && rank === total - 1;
             return (
             <tr key={rowKey(c, i)}
                 className={`align-top hover:bg-bg-hover/40 ${
@@ -142,12 +165,27 @@ export function CallsTable(
                 </div>
               </td>
 
-              {/* One group, because one row is one call. */}
+              {/* One chip, because one row is one call — and it opens that
+                  call on Telegram, the way the detections panel's chips do.
+                  The handle is in the tooltip rather than printed under the
+                  chip: a coloured chip with a mono @name beneath it was two
+                  labels for one thing. */}
               <td className="px-3 py-3">
-                <span className="text-text">{c.group || "—"}</span>
-                {c.username && (
-                  <span className="mt-0.5 block font-mono text-[11px] text-text-dim">@{c.username}</span>
-                )}
+                {c.group || c.username ? (
+                  <GroupChip
+                    label={`${first ? "🥇 " : ""}${c.group || `@${c.username}`}`}
+                    url={tgUrl(c)}
+                    // Keyed by chat id, never by name: Telegram titles get
+                    // re-read and overwritten, and a group can rename itself.
+                    style={chipStyleOf(chips, c.chat_id)}
+                    title={[
+                      first ? "First caller" : null,
+                      c.username ? `@${c.username}` : null,
+                      tgUrl(c) ? "Open this call on Telegram"
+                               : "Private group — no message link",
+                    ].filter(Boolean).join(" · ")}
+                  />
+                ) : <span className="text-text-dim">—</span>}
               </td>
 
               <td className="px-3 py-3"><When ts={c.ts} /></td>
