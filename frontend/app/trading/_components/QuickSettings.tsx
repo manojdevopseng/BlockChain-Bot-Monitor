@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Loader2, X } from "lucide-react";
-import { apiSend } from "@/lib/api";
+import { Check, Loader2, ShieldCheck, X } from "lucide-react";
+import { apiSend, useApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 /* Quick Buy / Sell settings, in the shape a trader already knows from GMGN:
    two tabs, the sell presets across the top, then slippage and gas.
 
-   Two of these fields do something today and the rest are held for the day
-   this executes for real. That is said out loud on the panel rather than shown
-   as a greyed-out field — a control that looks live and is not is worse than
-   one that admits it. */
+   Slippage and gas are stored for the day this executes for real and do
+   nothing today. That is said out loud on the panel rather than shown as a
+   greyed-out field — a control that looks live and is not is worse than one
+   that admits it. Everything else here is live. */
 
 const CHAINS = [
   { id: "rbh", label: "RBH" },
@@ -45,6 +45,22 @@ function Field({ label, value, onChange, suffix, hint }: {
   );
 }
 
+function Toggle({ title, note, on, onChange }: {
+  title: string; note: string; on: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-lg border
+                      border-border bg-bg-soft/50 px-3 py-2.5">
+      <span>
+        <span className="block text-sm text-text">{title}</span>
+        <span className="block text-[11px] leading-snug text-text-dim">{note}</span>
+      </span>
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)}
+             className="h-4 w-4 shrink-0 accent-[var(--brand)]" />
+    </label>
+  );
+}
+
 export function QuickSettings(
   { conf, onClose, onSaved }:
   { conf: Conf; onClose: () => void; onSaved: (c: Conf) => void },
@@ -54,6 +70,12 @@ export function QuickSettings(
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [mounted, setMounted] = useState(false);
+
+  // The starred groups, to tick the ones auto-buy is allowed to follow. Same
+  // request the per-caller table makes, so SWR serves it from cache here.
+  const { data: callerData } = useApi<any>("/api/trading/callers");
+  const available: any[] = callerData?.available ?? [];
+  const picked: number[] = (draft.callers || []).map(Number);
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -70,6 +92,12 @@ export function QuickSettings(
     set("sell_presets", next);
   }
 
+  function toggleCaller(id: number) {
+    set("callers", picked.includes(id)
+      ? picked.filter((x) => x !== id)
+      : [...picked, id]);
+  }
+
   async function save() {
     setBusy(true);
     setErr("");
@@ -80,11 +108,19 @@ export function QuickSettings(
         max_open: Number(draft.max_open) || 1,
         daily_buys: Number(draft.daily_buys) || 1,
         chains: draft.chains,
+        callers: picked,
+        sell_check: !!draft.sell_check,
         buy_slippage: Number(draft.buy_slippage) || 0,
         sell_slippage: Number(draft.sell_slippage) || 0,
         buy_gas_gwei: Number(draft.buy_gas_gwei) || 0,
         sell_gas_gwei: Number(draft.sell_gas_gwei) || 0,
         sell_presets: (draft.sell_presets || []).map(Number).filter(Boolean),
+        auto_sell: !!draft.auto_sell,
+        take_profit_pct: Number(draft.take_profit_pct) || 0,
+        stop_loss_pct: Number(draft.stop_loss_pct) || 0,
+        trailing_pct: Number(draft.trailing_pct) || 0,
+        loss_limit_on: !!draft.loss_limit_on,
+        loss_limit_pct: Number(draft.loss_limit_pct) || 0,
       };
       if (String(draft.gmgn_key || "").trim()) body.gmgn_key = draft.gmgn_key;
       const r: any = await apiSend("/api/trading/settings", "PATCH", body);
@@ -126,18 +162,9 @@ export function QuickSettings(
 
         {tab === "buy" ? (
           <div className="flex flex-col gap-3">
-            <label className="flex items-center justify-between rounded-lg border border-border
-                              bg-bg-soft/50 px-3 py-2.5">
-              <span>
-                <span className="block text-sm text-text">Auto-buy starred callers</span>
-                <span className="block text-[11px] text-text-dim">
-                  When an Important Caller names a token, open a position for it.
-                </span>
-              </span>
-              <input type="checkbox" checked={!!draft.auto_buy}
-                     onChange={(e) => set("auto_buy", e.target.checked)}
-                     className="h-4 w-4 accent-[var(--brand)]" />
-            </label>
+            <Toggle title="Auto-buy starred callers" on={!!draft.auto_buy}
+                    onChange={(v) => set("auto_buy", v)}
+                    note="When a caller below names a token, open a position for it." />
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Amount per buy" suffix="USD" value={draft.buy_usd}
@@ -174,6 +201,73 @@ export function QuickSettings(
                 })}
               </div>
             </div>
+
+            {/* Whose calls to follow. Nothing ticked means every starred caller —
+                said here, because an empty list looks like "none" otherwise. */}
+            <div>
+              <span className="mb-1.5 flex items-baseline justify-between gap-2">
+                <span className="text-[11px] text-text-dim">Callers to follow</span>
+                {picked.length > 0 && (
+                  <button onClick={() => set("callers", [])}
+                          className="text-[10px] text-text-dim hover:text-text">
+                    clear — follow all starred
+                  </button>
+                )}
+              </span>
+              {available.length === 0 ? (
+                <p className="rounded-lg border border-border bg-bg-soft/50 px-3 py-2.5
+                              text-[11px] leading-snug text-text-dim">
+                  No starred callers yet. Star a group in Forwarder → Premium Groups
+                  and it appears here.
+                </p>
+              ) : (
+                <>
+                  <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border
+                                  border-border bg-bg-soft/40 p-1.5">
+                    {available.map((c) => {
+                      const on = picked.includes(Number(c.id));
+                      return (
+                        <button key={c.id} onClick={() => toggleCaller(Number(c.id))}
+                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5
+                                      text-left text-[11px] transition-colors ${
+                            on ? "bg-brand/15 text-brand-soft" : "text-text-dim hover:text-text"
+                          }`}>
+                          <span className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded
+                                            border ${on ? "border-brand bg-brand/30" : "border-border"}`}>
+                            {on && <Check size={9} />}
+                          </span>
+                          <span className="truncate">{c.name}</span>
+                          {c.username && (
+                            <span className="ml-auto shrink-0 opacity-60">@{c.username}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="mt-1 block text-[10px] text-text-dim">
+                    {picked.length === 0
+                      ? "Nothing ticked — every starred caller is followed."
+                      : `Only these ${picked.length} are followed.`}
+                  </span>
+                </>
+              )}
+            </div>
+
+            <Toggle title="Sellability check on gas-fee tokens" on={!!draft.sell_check}
+                    onChange={(v) => set("sell_check", v)}
+                    note="Before buying an ETH gas-fee token, check the pool has real
+                          sells in it. Buys with nobody getting out is what a honeypot
+                          looks like from outside." />
+
+            <Toggle title="Daily loss limit" on={!!draft.loss_limit_on}
+                    onChange={(v) => set("loss_limit_on", v)}
+                    note="Turn auto-buy off by itself once the day is down by the
+                          percentage below." />
+            {draft.loss_limit_on && (
+              <Field label="Stop the day at" suffix="%" value={draft.loss_limit_pct}
+                     onChange={(v) => set("loss_limit_pct", v)}
+                     hint="Measured against what today's positions cost, midnight UTC onward." />
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -194,6 +288,26 @@ export function QuickSettings(
               </div>
             </div>
 
+            <Toggle title="Auto-sell" on={!!draft.auto_sell}
+                    onChange={(v) => set("auto_sell", v)}
+                    note="Close a position by itself when one of the three rules below
+                          is hit. Checked once a minute, whether or not this page is open." />
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Take profit" suffix="%" value={draft.take_profit_pct}
+                     onChange={(v) => set("take_profit_pct", v)} hint="0 = off" />
+              <Field label="Stop loss" suffix="%" value={draft.stop_loss_pct}
+                     onChange={(v) => set("stop_loss_pct", v)} hint="0 = off" />
+              <Field label="Trailing stop" suffix="%" value={draft.trailing_pct}
+                     onChange={(v) => set("trailing_pct", v)} hint="0 = off" />
+            </div>
+            <p className="rounded-lg border border-border bg-bg-soft/40 px-3 py-2
+                          text-[10px] leading-relaxed text-text-dim">
+              The trailing stop arms only once a position has actually been in profit,
+              and then closes it if it falls that far from its high. It never fires on
+              the way up from the entry.
+            </p>
+
             <div className="grid grid-cols-2 gap-3">
               <Field label="Slippage" suffix="%" value={draft.sell_slippage}
                      onChange={(v) => set("sell_slippage", v)}
@@ -205,12 +319,15 @@ export function QuickSettings(
           </div>
         )}
 
-        <div className="mt-4 rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3
-                        text-[11px] leading-relaxed text-accent-amber">
-          Positions are recorded, not executed. GMGN's trading API signs with a
-          private key rather than an API key, and serves Solana only — so
-          slippage and gas are stored here for the day this runs live, and do
-          nothing today. Everything else on this panel is live now.
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-accent-amber/30
+                        bg-accent-amber/10 p-3 text-[11px] leading-relaxed text-accent-amber">
+          <ShieldCheck size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Positions are recorded, not executed. GMGN&apos;s trading API signs with a
+            private key rather than an API key, and serves Solana only — so slippage
+            and gas are stored here for the day this runs live, and do nothing today.
+            Everything else on this panel is live now.
+          </span>
         </div>
 
         {err && <p className="mt-2 text-[11px] text-accent-red">{err}</p>}

@@ -268,6 +268,11 @@ DEFAULT_SERVICES: list[dict] = [
     # gaining new data.
     {"id": "outcome_tracker",       "category": BOT, "label": "Outcome Tracker",
      "chain": None, "enabled": True},
+    # Marks open paper positions to market once a minute, and fires the
+    # take-profit, stop-loss, trailing-stop and daily-loss rules. Off, the P&L
+    # column only moves when somebody presses Prices, and no rule can fire.
+    {"id": "trading_engine",        "category": BOT,
+     "label": "Trading Engine (auto-sell & limits)", "chain": None, "enabled": True},
     # Posts each alert's 1h and 24h result as a reply to that alert. Narrower
     # than the tracker: off, measurement continues and only Telegram goes quiet.
     {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",

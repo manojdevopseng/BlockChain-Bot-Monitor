@@ -180,6 +180,11 @@ async def reconcile() -> None:
     # stopping the detection that fills the panels.
     if bool(enabled.get("alert_fanout", True)):
         want.add("fan")
+    # Auto-sell and the daily loss limit. Its own switch because it is the one
+    # worker that closes positions: an operator who wants the rules to stop
+    # firing needs a way to stop them that is not "turn every account off".
+    if bool(enabled.get("trading_engine", True)):
+        want.add("trade")
 
     # Stop workers no longer wanted.
     for name in list(_tasks):
@@ -190,7 +195,8 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd", "cmd"):
+    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd",
+                 "cmd", "trade"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -300,6 +306,10 @@ async def _start_worker(name: str) -> None:
     if name == "fan":
         from . import alert_dispatch
         _tasks["fan"] = asyncio.create_task(alert_dispatch.run(), name="alert-fanout")
+        return
+    if name == "trade":
+        from . import trading_worker
+        _tasks["trade"] = asyncio.create_task(trading_worker.run(), name="trading-engine")
         return
     if name == "rsi":
         from .scanners.rsi_tracker import RsiTracker
@@ -507,6 +517,7 @@ _DEPENDS_ON = {
     # stopped too however this switch reads.
     "sol_onchain_discovery":  "sol",
     # Every switch the monitor reads at start rather than per message.
+    "trading_engine":         "trade",
     "rsi_tracker":            "rsi",
     "rsi_telegram":           "rsi",
     "rsi_chain_rbh":          "rsi",

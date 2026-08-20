@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { mutate } from "swr";
-import { ExternalLink, Loader2, RefreshCw, Settings2, Sparkles, Trash2 } from "lucide-react";
+import {
+  ExternalLink, Loader2, Play, Power, RefreshCw, Settings2, Sparkles, Trash2,
+} from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -12,13 +14,18 @@ import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { FilterTabs } from "@/components/SectionFilters";
 import { fmtUsd, shortAddr } from "@/lib/utils";
 import { QuickSettings } from "./_components/QuickSettings";
+import { CallerPnl } from "./_components/CallerPnl";
 
 /* Trading — what the account bought, holds, and made or lost.
  *
  * Recorded rather than executed, and the page says so where it cannot be
  * missed. The point of it is the question underneath: following starred
  * callers automatically — is that actually profitable? Two days of this
- * answers that for nothing, and the same screen becomes the live one later. */
+ * answers that for nothing, and the same screen becomes the live one later.
+ *
+ * The three switches on the Positions bar are here rather than buried in the
+ * settings modal because they are the ones reached for in a hurry. A kill
+ * switch two clicks deep is not a kill switch. */
 
 const TABS = [
   { id: "all", label: "All" },
@@ -62,6 +69,28 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
+/* A switch that saves the moment it is flipped. No Save button, because the
+   things behind these are the things somebody wants off *now*. */
+function Switch({ on, label, tone = "brand", busy, onChange }: {
+  on: boolean; label: string; tone?: "brand" | "red"; busy?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const active = tone === "red"
+    ? "border-accent-red/40 bg-accent-red/10 text-accent-red"
+    : "border-accent-green/40 bg-accent-green/10 text-accent-green";
+  return (
+    <button onClick={() => onChange(!on)} disabled={busy}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1
+                  text-[11px] font-medium transition-colors disabled:opacity-50 ${
+        on ? active : "border-border text-text-dim hover:text-text"
+      }`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${
+        on ? (tone === "red" ? "bg-accent-red" : "bg-accent-green") : "bg-text-dim"}`} />
+      {busy ? "…" : label}
+    </button>
+  );
+}
+
 export default function TradingPage() {
   const [tab, setTab] = useState<"all" | "open" | "closed">("all");
   const [open, setOpen] = useState(false);
@@ -73,6 +102,7 @@ export default function TradingPage() {
 
   const items: any[] = data?.items ?? [];
   const sum = data?.summary ?? {};
+  const day = conf?.day ?? {};
   const presets: number[] = conf?.sell_presets?.length ? conf.sell_presets : [25, 50, 100];
 
   function reload() {
@@ -83,9 +113,11 @@ export default function TradingPage() {
     setBusy(id);
     setErr("");
     try { await fn(); reload(); }
-    catch (e: any) { setErr(String(e?.message || e)); }
+    catch (e: any) { setErr(String(e?.message || e).replace(/^Error:\s*/, "")); }
     finally { setBusy(null); }
   }
+
+  const patch = (body: any) => apiSend("/api/trading/settings", "PATCH", body);
 
   return (
     <div className="space-y-5">
@@ -95,13 +127,31 @@ export default function TradingPage() {
       <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/10 px-4 py-3
                       text-xs leading-relaxed text-accent-amber">
         <b>Paper trading.</b> Every buy and sell here is recorded at the real price
-        at that moment, and nothing is sent to a chain. GMGN's trading API signs
+        at that moment, and nothing is sent to a chain. GMGN&apos;s trading API signs
         with a private key rather than an API key and serves Solana only — so
         until that changes, this answers whether the strategy works without
         risking anything on finding out.
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Why auto-buy is off, when something turned it off. Shown loudly: a
+          toggle that is mysteriously off costs more than the stop it came from. */}
+      {conf?.stopped_reason && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-accent-red/40
+                        bg-accent-red/10 px-4 py-3 text-xs text-accent-red">
+          <Power size={14} className="shrink-0" />
+          <span className="mr-auto">
+            <b>Auto-buy is stopped</b> — {conf.stopped_reason}. Nothing is buying on
+            its own. Open positions and the auto-sell rules are untouched.
+          </span>
+          <Button size="sm" variant="outline" disabled={busy === "resume"}
+                  onClick={() => act("resume", () => patch({ auto_buy: true }))}>
+            {busy === "resume" ? <Loader2 size={13} className="animate-spin" />
+                               : <Play size={13} />} Turn auto-buy back on
+          </Button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Open">{sum.open ?? 0}</Stat>
         <Stat label="Held value">{fmtUsd(sum.open_value ?? 0)}</Stat>
         <Stat label="Unrealised">
@@ -119,6 +169,19 @@ export default function TradingPage() {
             </span>
           </span>
         </Stat>
+        {/* The number the daily loss limit actually watches. */}
+        <Stat label="Today">
+          {day.trades ? (
+            <span className="flex items-baseline gap-2">
+              <Money usd={day.pnl ?? 0} pct={day.pct ?? 0} />
+              {conf?.loss_limit_on && (
+                <span className="text-[11px] font-normal text-text-dim">
+                  stops at −{conf.loss_limit_pct}%
+                </span>
+              )}
+            </span>
+          ) : <span className="text-text-dim">—</span>}
+        </Stat>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-bg-card/60">
@@ -129,9 +192,36 @@ export default function TradingPage() {
               ? <Badge variant="green" className="ml-2">auto-buy on</Badge>
               : <Badge variant="gray" className="ml-2">auto-buy off</Badge>}
           </h2>
+
+          <Switch on={!!conf?.auto_sell} busy={busy === "autosell"}
+                  label={conf?.auto_sell
+                    ? `Auto-sell on · TP ${conf.take_profit_pct}% / SL ${conf.stop_loss_pct}%`
+                    + (conf.trailing_pct ? ` / trail ${conf.trailing_pct}%` : "")
+                    : "Auto-sell off"}
+                  onChange={(v) => act("autosell", () => patch({ auto_sell: v }))} />
+
+          <Switch on={!!conf?.loss_limit_on} busy={busy === "losslimit"}
+                  label={conf?.loss_limit_on
+                    ? `Daily loss limit ${conf.loss_limit_pct}%`
+                    : "Daily loss limit off"}
+                  onChange={(v) => act("losslimit", () => patch({ loss_limit_on: v }))} />
+
+          {/* Only there when there is something to kill. */}
+          {conf?.auto_buy && (
+            <button disabled={busy === "kill"}
+              onClick={() => act("kill", () => apiSend("/api/trading/stop", "POST", {}))}
+              className="inline-flex items-center gap-1.5 rounded-md border border-accent-red/50
+                         bg-accent-red/10 px-2.5 py-1 text-[11px] font-semibold text-accent-red
+                         transition-colors hover:bg-accent-red/20 disabled:opacity-50">
+              {busy === "kill" ? <Loader2 size={12} className="animate-spin" />
+                               : <Power size={12} />} Kill switch
+            </button>
+          )}
+
           <FilterTabs value={tab} onChange={setTab} options={TABS} />
           <Button size="sm" variant="outline"
-                  onClick={() => act("refresh", () => apiSend("/api/trading/refresh", "POST"))}>
+                  onClick={() => act("refresh", () => apiSend("/api/trading/rules", "POST"))}
+                  title="Mark every open position to market and run the auto-sell rules now">
             {busy === "refresh" ? <Loader2 size={13} className="animate-spin" />
                                 : <RefreshCw size={13} />} Prices
           </Button>
@@ -212,7 +302,14 @@ export default function TradingPage() {
                   <td className="px-3 py-3"><Money usd={p.pnl_usd} pct={p.pnl_pct} /></td>
                   <td className="px-3 py-3">
                     {p.status === "closed" ? (
-                      <span className="text-[11px] text-text-dim">closed</span>
+                      // What closed it, not just that it is closed — a position
+                      // the account never touched needs to say why it is gone.
+                      <span className="text-[11px] text-text-dim"
+                            title={p.closed_reason || "closed"}>
+                        {p.closed_reason && p.closed_reason !== "manual"
+                          ? p.closed_reason
+                          : "closed by hand"}
+                      </span>
                     ) : (
                       <span className="flex flex-wrap gap-1">
                         {presets.map((pc) => (
@@ -244,6 +341,8 @@ export default function TradingPage() {
           </div>
         )}
       </div>
+
+      <CallerPnl />
 
       {open && conf && (
         <QuickSettings conf={conf} onClose={() => setOpen(false)} onSaved={reload} />

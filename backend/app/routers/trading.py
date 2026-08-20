@@ -29,6 +29,7 @@ async def get_settings(owner: dict = Depends(security.require_customer)):
     # Said here rather than only in the UI copy, so any client that grows
     # around this API inherits the warning.
     conf["paper"] = True
+    conf["day"] = await trading.day_pnl(owner["username"])
     conf["paper_note"] = ("Positions are recorded, not executed. GMGN's trading "
                           "API signs with a private key and serves Solana only, "
                           "so nothing here can place a real order yet.")
@@ -45,9 +46,25 @@ async def patch_settings(payload: dict = Body(...),
         patch.pop("gmgn_key", None)
     if "chains" in patch:
         patch["chains"] = [c for c in patch["chains"] if c in trading.CHAINS]
+    if "callers" in patch:
+        ids = []
+        for c in patch["callers"] or []:
+            try:
+                ids.append(int(c))
+            except (TypeError, ValueError):
+                continue
+        patch["callers"] = ids
     for field, lo, hi in (("buy_usd", 1, 100000), ("max_open", 1, 200),
                           ("daily_buys", 1, 500),
-                          ("buy_slippage", 0, 100), ("sell_slippage", 0, 100)):
+                          ("buy_slippage", 0, 100), ("sell_slippage", 0, 100),
+                          # 0 turns a rule off, which is why these floor at 0
+                          # rather than at 1. Take-profit is allowed past 100%
+                          # because a 10x is the whole point of the exercise.
+                          ("take_profit_pct", 0, 100000),
+                          ("stop_loss_pct", 0, 100),
+                          ("trailing_pct", 0, 100),
+                          ("loss_limit_pct", 0, 100),
+                          ("sell_check_min_sells", 0, 100)):
         if field in patch:
             try:
                 patch[field] = max(lo, min(hi, float(patch[field])))
@@ -121,7 +138,8 @@ async def sell(pid: str, payload: dict = Body(default=None),
     try:
         async with aiohttp.ClientSession() as s:
             row = await trading.close_position(owner["username"], pid,
-                                               part=part, session=s)
+                                               part=part, session=s,
+                                               reason="manual")
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {"ok": True, "position": trading.view(row)}
@@ -158,3 +176,42 @@ async def clear_demo(owner: dict = Depends(security.require_customer)):
     res = await db.get_collection("trading_positions").delete_many(
         {"user": owner["username"], "source": "demo"})
     return {"removed": getattr(res, "deleted_count", 0)}
+
+
+@router.post("/stop")
+async def stop(payload: dict = Body(default=None),
+               owner: dict = Depends(security.require_customer)):
+    """The kill switch. One press and nothing buys on its own any more.
+
+    Open positions are left exactly as they are, and so are the auto-sell
+    rules: this stops the account taking on anything new, it does not abandon
+    what it is already holding. Turning auto-buy back on clears the reason.
+    """
+    why = str((payload or {}).get("reason") or "").strip() or "kill switch"
+    conf = await trading.stop_auto_buy(owner["username"], why)
+    conf.pop("gmgn_key", "")
+    return {"ok": True, "settings": conf}
+
+
+@router.get("/callers")
+async def callers(owner: dict = Depends(security.require_customer)):
+    """Which callers made money and which ate it.
+
+    `available` is the starred groups, for the picker that decides whose calls
+    auto-buy follows — the same list the sound alert uses, so a group starred
+    once is starred everywhere.
+    """
+    return {"items": await trading.caller_stats(owner["username"]),
+            "available": await trading.starred_callers()}
+
+
+@router.post("/rules")
+async def rules(owner: dict = Depends(security.require_customer)):
+    """Run the auto-sell and loss-limit pass now, rather than on the minute.
+
+    The same code the background worker runs — so a rule that would fire in
+    forty seconds can be made to fire immediately, and what it did comes back
+    in the response instead of only reaching a log.
+    """
+    async with aiohttp.ClientSession() as s:
+        return await trading.run_rules(owner["username"], s)
