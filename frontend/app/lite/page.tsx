@@ -54,9 +54,10 @@ export default function LiteDashboard() {
     <div className="flex h-screen flex-col overflow-hidden">
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <Link href="/" className="text-sm font-semibold text-text hover:text-brand-soft">
-            LITE Dashboard
-          </Link>
+          {/* Where you are, not somewhere to go. It used to link to `/`, which
+              on this branch is the product's front page — so the label for the
+              page you are already on took you off the app entirely. */}
+          <span className="text-sm font-semibold text-text">LITE Dashboard</span>
           <Link href="/dashboard"
                 title="Main Dashboard"
                 className="hidden items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-text-dim
