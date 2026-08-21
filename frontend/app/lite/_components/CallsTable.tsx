@@ -38,6 +38,9 @@ export type Call = {
   // see CallActions.
   mcap?: number;
   mcap_at?: number;
+  // What it was worth when it was called. Stamped once by the backend and
+  // never re-read — see calls._stamp_mcap.
+  mcap_call?: number;
 };
 
 type GroupEntry = {
@@ -183,7 +186,8 @@ export function CallsTable(
                 </div>
                 <CallActions chain={c.chain} address={c.address}
                              symbol={c.symbol} name={c.name}
-                             mcap={c.mcap} mcapAt={c.mcap_at} />
+                             mcap={c.mcap} mcapAt={c.mcap_at}
+                             mcapCall={c.mcap_call} />
               </td>
 
               {/* Every caller, each chip opening its own message. Width-capped

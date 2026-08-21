@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { mutate } from "swr";
-import { Gauge, Loader2 } from "lucide-react";
+import { Clock, Gauge, Loader2 } from "lucide-react";
 import { apiSend } from "@/lib/api";
 import { TradeButton } from "@/components/features/TradeButton";
 import { fmtUsd } from "@/lib/utils";
@@ -20,14 +20,10 @@ import { fmtUsd } from "@/lib/utils";
  * daily allowance and the per-chain switches. One question, one answer, one
  * place that decides it. */
 
-// The reader has no Base support, so the button is not offered there rather
-// than offered and always failing.
-const NO_MCAP = new Set(["base"]);
-
 export function CallActions(
-  { chain, address, symbol, name, mcap, mcapAt }: {
+  { chain, address, symbol, name, mcap, mcapAt, mcapCall }: {
     chain?: string; address: string; symbol?: string; name?: string;
-    mcap?: number; mcapAt?: number;
+    mcap?: number; mcapAt?: number; mcapCall?: number;
   },
 ) {
   const [busy, setBusy] = useState(false);
@@ -60,11 +56,22 @@ export function CallActions(
       <div className="flex flex-wrap items-center gap-1.5">
         <TradeButton chain={chain} address={address} symbol={symbol} name={name} />
 
-        {!NO_MCAP.has(chain || "") && (
+        {/* What it was worth when the caller spoke. Stamped once, never
+            re-read — it is the number the caller is judged on. */}
+        {mcapCall ? (
+          <span title="Market cap when this token was called"
+                className="inline-flex items-center gap-1 rounded-md border
+                           border-border-soft px-1.5 py-0.5 text-[11px]
+                           tabular-nums text-text-dim">
+            <Clock size={10} /> {fmtUsd(mcapCall)}
+          </span>
+        ) : null}
+
+        {(
           shown ? (
             <button onClick={check} disabled={busy}
                     title={mcapAt
-                      ? `Market cap, read ${new Date(mcapAt * 1000).toLocaleTimeString("en-GB")} — click to read it again`
+                      ? `Market cap now, read ${new Date(mcapAt * 1000).toLocaleTimeString("en-GB")} — click to read it again`
                       : "Click to read it again"}
                     className="inline-flex items-center gap-1 rounded-md border
                                border-border px-1.5 py-0.5 text-[11px] tabular-nums

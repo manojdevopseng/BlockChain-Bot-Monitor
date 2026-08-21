@@ -17,6 +17,7 @@ anything — it is handed what the premium capture already resolved.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 from datetime import datetime, timedelta, timezone
@@ -137,6 +138,11 @@ async def record(
     # not a feed. Only on a real insert: an upsert that matched an existing row
     # is the same call arriving twice and has nothing to announce.
     if getattr(res, "upserted_id", None) is not None:
+        # What it was worth when somebody called it. Read once, in the
+        # background, and never written over — a caller is judged on the price
+        # at the moment they spoke, and a figure that drifts afterwards is not
+        # that. The MC button on the row reads the current one beside it.
+        _spawn(_stamp_mcap(chain, addr))
         await _push("premium_call", {k: v for k, v in doc.items() if k != "dt"})
         # And, for any account that asked for it, a paper position. Guarded
         # because a trading feature must never be the reason a call goes
@@ -285,3 +291,50 @@ async def _push(event: str, payload: dict) -> None:
         await hub.broadcast(event, payload)
     except Exception:  # noqa: BLE001
         pass
+
+
+# ── the market cap at call time ─────────────────────────────────────────────
+
+# asyncio keeps only weak references to tasks, so one handed to create_task and
+# forgotten can be collected mid-flight. Same bug that lost tracker media.
+_bg: set = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.ensure_future(coro)
+    _bg.add(task)
+    task.add_done_callback(_bg.discard)
+
+
+async def _stamp_mcap(chain: str, address: str) -> None:
+    """Record what this token was worth when it was called.
+
+    Off the critical path: the row is already written and pushed before this
+    starts, so a slow endpoint delays nothing anybody is watching. Failure is
+    silent by design — a call with no market cap beside it is a call with no
+    market cap beside it, not an error worth waking anybody for.
+
+    Written only where it is missing, so the first caller's figure is the one
+    that stands even when three more groups call the same token afterwards.
+    """
+    try:
+        from .scanners import mcap_price
+        ready, _why = mcap_price.endpoint_ready(chain)
+        if not ready:
+            return
+        read_chain = "bsc" if chain == "bnb" else chain
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            reading = await mcap_price.MarketCapReader(session).read(
+                read_chain, address)
+        if not reading or not reading.mcap:
+            return
+        await db.get_collection("premium_calls").update_many(
+            {"chain": chain, "address": address,
+             "mcap_call": {"$exists": False}},
+            {"$set": {"mcap_call": reading.mcap,
+                      "mcap_call_at": time.time(),
+                      "mcap_call_source": reading.source}})
+    except Exception as exc:  # noqa: BLE001
+        from .scanners.slog import get_logger
+        get_logger(__name__).debug(f"[CALLS] market cap not stamped: {exc}")

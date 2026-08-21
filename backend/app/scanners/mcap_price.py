@@ -104,6 +104,79 @@ def sol_http() -> str:
             or config.SOL_RPC_HTTP or "")
 
 
+# What DexScreener calls the chains we name differently.
+_DS_CHAIN = {"rbh": "robinhood", "eth": "ethereum", "bsc": "bsc",
+             "bnb": "bsc", "sol": "solana", "base": "base"}
+_DS_TOKENS = "https://api.dexscreener.com/latest/dex/tokens/"
+
+
+def endpoint_ready(chain: str) -> tuple[bool, str]:
+    """(can this chain be read, what to tell somebody when it cannot).
+
+    Three different answers hide behind one "no price found", and they need
+    three different things done about them: an endpoint that was never filled
+    in, a chain nothing here can read yet, and a token that genuinely has no
+    pool. Only the last is about the token, and only the first is worth
+    interrupting somebody over.
+    """
+    chain = (chain or "").lower()
+    if chain == "sol":
+        return (bool(sol_http()),
+                "Pls connect RPC — no Solana endpoint is set")
+    # The calls feed says "bnb"; this feature has always said "bsc".
+    spec = chains().get("bsc" if chain == "bnb" else chain)
+    if spec is None:
+        return False, f"Market cap is not read on {chain.upper()} yet"
+    return (bool(spec.http),
+            f"Pls connect RPC — no {spec.label} endpoint is set")
+
+
+async def from_dexscreener(session, chain: str, address: str) -> Optional["Reading"]:
+    """The market cap of a token whose pool we could not find ourselves.
+
+    Reached only after the on-chain read comes back empty. Robinhood's
+    launchpads mint into hooked V4 pools whose id cannot be derived from the
+    token alone, so there is a whole class of real, liquid tokens the pool
+    walk will never locate — and an aggregator that indexes the swaps rather
+    than the pools has them all.
+
+    Never used to override a reading we took ourselves: on-chain is the
+    figure the watcher and its alerts are built on, and one source has to
+    stay authoritative.
+    """
+    want = _DS_CHAIN.get((chain or "").lower())
+    if not want or not address:
+        return None
+    try:
+        async with session.get(_DS_TOKENS + address, timeout=_TIMEOUT) as r:
+            body = await r.json(content_type=None)
+    except Exception:  # noqa: BLE001
+        return None
+
+    best, best_liq = None, -1.0
+    for pair in (body or {}).get("pairs") or []:
+        if (pair.get("chainId") or "") != want:
+            continue
+        base = ((pair.get("baseToken") or {}).get("address") or "")
+        if base.lower() != address.lower():
+            continue
+        liq = float((pair.get("liquidity") or {}).get("usd") or 0)
+        if liq > best_liq:
+            best, best_liq = pair, liq
+    if not best:
+        return None
+
+    # marketCap is what the aggregator publishes; fdv is the same number for
+    # a token with no locked supply and the only one it has for some.
+    mcap = float(best.get("marketCap") or best.get("fdv") or 0)
+    price = float(best.get("priceUsd") or 0)
+    if not mcap or not price:
+        return None
+    return Reading(mcap=mcap, price_usd=price,
+                   supply=mcap / price if price else 0.0,
+                   source="dexscreener")
+
+
 @dataclass
 class Reading:
     """One market cap check. `mcap` is dollars; the rest is how it got there."""
@@ -135,8 +208,15 @@ class MarketCapReader:
         """
         chain, address = chain.lower(), address.strip()
         if chain == "sol":
-            return await self._read_sol(address)
-        return await self._read_evm(chain, address.lower())
+            got = await self._read_sol(address)
+        else:
+            got = await self._read_evm(chain, address.lower())
+        if got is not None:
+            return got
+        # Nothing on chain. Before reporting a token as unreadable, ask the
+        # aggregator — see from_dexscreener for why a real token can be
+        # invisible to a pool walk.
+        return await from_dexscreener(self._session, chain, address)
 
     async def _read_evm(self, chain: str, address: str) -> Optional[Reading]:
         native_per_token = await self._pools.price(chain, address)

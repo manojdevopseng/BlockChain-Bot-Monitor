@@ -97,6 +97,15 @@ def _cluster(docs: list[dict], limit: int) -> list[dict]:
                 "post_url": d.get("post_url") or "",
                 "ts": d.get("ts"),
             })
+        # The call-time market cap belongs to the first call on this token,
+        # not the newest — the head row is the newest, so it is carried over
+        # from whichever row actually has it.
+        if not head.get("mcap_call"):
+            for d in rows:
+                if d.get("mcap_call"):
+                    head["mcap_call"] = d["mcap_call"]
+                    head["mcap_call_at"] = d.get("mcap_call_at")
+                    break
         head["group_entries"] = entries
         head["count"] = len(entries)      # callers, as the detections panel counts
         head["calls"] = len(rows)         # posts, which is not the same number
@@ -131,11 +140,6 @@ async def list_calls(
 # Premium Calls says "bnb"; the market cap reader says "bsc". One place knows
 # both, and it is here rather than in the browser.
 _MCAP_CHAIN = {"bnb": "bsc"}
-# Base has no market cap reader, so the button is not offered for it at all
-# rather than offered and always failing.
-_MCAP_UNSUPPORTED = {"base"}
-
-
 @router.post("/mcap")
 async def read_mcap(payload: dict = Body(...),
                     owner: dict = Depends(security.require_customer)):
@@ -156,8 +160,13 @@ async def read_mcap(payload: dict = Body(...),
     address = str(payload.get("address") or "").strip()
     if not address:
         raise HTTPException(400, "no token address")
-    if chain in _MCAP_UNSUPPORTED:
-        raise HTTPException(409, f"Market cap is not read on {chain.upper()} yet")
+    # "No price" covers three different problems and only one of them is about
+    # the token. An endpoint nobody filled in is said plainly, so it can be
+    # filled in, rather than blamed on a token that may be perfectly fine.
+    from ..scanners import mcap_price
+    ready, why = mcap_price.endpoint_ready(chain)
+    if not ready:
+        raise HTTPException(409, why)
 
     from .mcap import check as mcap_check
     res = await mcap_check({"chain": _MCAP_CHAIN.get(chain, chain),
