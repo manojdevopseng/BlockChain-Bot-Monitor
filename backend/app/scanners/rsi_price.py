@@ -329,6 +329,25 @@ class PriceReader:
         ref.kind, ref.pool_id, ref.token_is_0 = "v4", best[0], best[1]
         ref.address = spec.v4_poolmanager or spec.v4_stateview
 
+    @staticmethod
+    def _quotes_for(spec: ChainSpec) -> set:
+        """What a price may be quoted in and still mean dollars downstream.
+
+        The reader multiplies whatever a pool says by the native coin's dollar
+        price. That is only true when the other side of the pool IS the native
+        coin — a TOKEN/OTHERTOKEN pool priced that way is not wrong by a little,
+        it is a different number entirely.
+        """
+        return {q for q in (_NATIVE, (spec.wnative or "").lower()) if q}
+
+    def _quoted_in_native(self, spec: ChainSpec, token: str,
+                          currency0: str, currency1: str) -> bool:
+        """Is this pool the token against the native coin, either way round?"""
+        t = token.lower()
+        c0, c1 = (currency0 or "").lower(), (currency1 or "").lower()
+        quotes = self._quotes_for(spec)
+        return (c0 == t and c1 in quotes) or (c1 == t and c0 in quotes)
+
     async def _v4_candidates(self, spec: ChainSpec,
                              token: str) -> list[tuple[str, bool]]:
         """(pool id, is the token currency0) for every pool worth trying.
@@ -338,7 +357,7 @@ class PriceReader:
         somebody else's server.
         """
         out: list[tuple[str, bool]] = []
-        quotes = [q for q in (_NATIVE, (spec.wnative or "").lower()) if q]
+        quotes = sorted(self._quotes_for(spec))
         # Hookless standard pools first, then the same tiers under each hook we
         # know about — a launchpad runs one hook for every token it mints, so
         # one address turns "cannot be guessed" back into "computed".
@@ -375,8 +394,18 @@ class PriceReader:
         except Exception as exc:  # noqa: BLE001
             log.debug(f"[{self._tag}] v4_pools lookup failed: {exc}")
             return []
+        # Only pools quoted in the native coin. Every token here has one of
+        # each — a launchpad pool against the coin, and a pool against some
+        # other token — and this used to return both, in whatever order the
+        # database gave them. The first that answered won, so a token could be
+        # priced in a currency the reader then treated as ETH: CLANKER came out
+        # at $25.5bn against a real $159,701, off by a factor of 160,000.
         return [(r["pool_id"], str(r.get("currency0", "")).lower() == token.lower())
-                for r in rows if r.get("pool_id")]
+                for r in rows
+                if r.get("pool_id")
+                and self._quoted_in_native(spec, token,
+                                           r.get("currency0", ""),
+                                           r.get("currency1", ""))]
 
     async def _v4_from_explorer(self, spec: ChainSpec,
                                 token: str) -> list[tuple[str, bool]]:
@@ -409,6 +438,11 @@ class PriceReader:
                 if len(topics) < 4:
                     continue
                 currency0 = "0x" + topics[2][-40:]
+                currency1 = "0x" + topics[3][-40:]
+                # Same rule as the records above: a pool against another token
+                # cannot be turned into dollars by the native coin's price.
+                if not self._quoted_in_native(spec, token, currency0, currency1):
+                    continue
                 found.append((topics[1], currency0.lower() == token.lower()))
         return found
 
