@@ -52,6 +52,24 @@ KINDS = (EVM, SOL, TRON)
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
+def _b58decode(s: str) -> bytes:
+    """Base58 without a dependency.
+
+    Addresses and keys are short, the arithmetic is six lines, and one fewer
+    package is one fewer thing to keep patched.
+    """
+    num = 0
+    for ch in s:
+        idx = _B58.find(ch)
+        if idx < 0:
+            raise ValueError("not base58")
+        num = num * 58 + idx
+    raw = num.to_bytes((num.bit_length() + 7) // 8, "big")
+    # Leading zero bytes encode as '1' and are lost by the arithmetic above.
+    pad = len(s) - len(s.lstrip("1"))
+    return b"\x00" * pad + raw
+
+
 def _b58encode(raw: bytes) -> str:
     num = int.from_bytes(raw, "big")
     out = ""
@@ -156,7 +174,6 @@ def _parse(kind: str, text: str) -> tuple[bytes, str]:
         if kind in (EVM, TRON):
             raw = bytes.fromhex(text[2:] if text.startswith("0x") else text)
         else:
-            from .wallets import _b58decode
             raw = (bytes.fromhex(text[2:]) if text.startswith("0x")
                    else _b58decode(text))
     except Exception:  # noqa: BLE001
@@ -246,6 +263,23 @@ async def listing(user: str) -> list[dict]:
     return [{"kind": r.get("kind"), "address": r.get("address", ""),
              "source": r.get("source", ""), "created_at": r.get("created_at")}
             for r in sorted(rows, key=lambda r: r.get("created_at") or 0)]
+
+
+async def addresses(user: str) -> dict[str, list[str]]:
+    """{keyspace: [addresses]} — what the balance reader should ask about.
+
+    A mapping rather than one argument per keyspace, so adding a chain is a
+    row in a table instead of a change to every caller's unpacking. The lists
+    hold at most one address each today; the shape allows more without
+    anything downstream having to learn about it.
+    """
+    rows = await db.get_collection("trading_keys").find(
+        {"user": user}).to_list(20)
+    out: dict[str, list[str]] = {k: [] for k in KINDS}
+    for r in rows:
+        if r.get("address"):
+            out.setdefault(r.get("kind", ""), []).append(r["address"])
+    return out
 
 
 async def forget(user: str, kind: str) -> bool:

@@ -9,9 +9,10 @@ import { fmtUsd } from "@/lib/utils";
 /* What the account's own wallet holds, above the positions it is pretending
    to hold.
  *
- * Watch-only: an address is saved on Profile and read here. Nothing on this
- * strip can move anything, and it says so — the wallet sitting next to a
- * paper P&L is exactly where somebody might assume otherwise.
+ * These are the trading wallets from the vault — the addresses the engine
+ * spends from. Showing them here rather than some separately-remembered
+ * address means the money above the positions is the money those positions
+ * are competing for.
  *
  * Asked for rather than polled. A balance changes when the person themselves
  * moves funds, so a timer would spend five RPC calls a minute per open tab to
@@ -59,7 +60,7 @@ export function WalletStrip() {
       <div className="mb-2.5 flex flex-wrap items-center gap-2">
         <Wallet size={14} className="text-text-dim" />
         <span className="text-sm font-medium text-text">Wallet</span>
-        <Badge variant="gray">watch-only</Badge>
+        <Badge variant="gray">trading wallets</Badge>
 
         {anyAddress && (
           <span className="ml-auto flex items-center gap-3">
@@ -82,10 +83,11 @@ export function WalletStrip() {
 
       {!anyAddress && !isLoading ? (
         <p className="text-xs leading-relaxed text-text-dim">
-          No wallet connected. Connect MetaMask or Phantom on{" "}
-          <a href="/profile" className="text-brand-soft hover:underline">Profile</a>,
-          or paste an address to watch — an address only, never a key. One EVM
-          wallet covers Robinhood, Ethereum, BNB and Base; Solana takes its own.
+          No trading wallet yet. Create one on{" "}
+          <a href="/profile" className="text-brand-soft hover:underline">Profile</a>{" "}
+          and send it what you want to trade with. One EVM wallet covers
+          Robinhood, Ethereum, BNB and Base — the same address on all four.
+          Solana and Tron take their own.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">

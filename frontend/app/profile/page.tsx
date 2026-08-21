@@ -12,7 +12,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { WalletConnect } from "@/components/features/WalletConnect";
 import { TradingWallet } from "@/components/features/TradingWallet";
 
 /* Profile — the account's own page.
@@ -322,16 +321,10 @@ function TradingCard() {
 
         {/* Wallets — the only credential this page deals in, and not really
             a credential at all: an address is public by construction. */}
-        <div>
-          <label className="mb-2 block text-xs text-text-muted">
-            Wallets — read-only
-          </label>
-          <WalletConnect />
-        </div>
-
-        {/* Kept below the read-only wallets and visibly apart from them. These
-            two panels look similar and mean opposite things: one holds an
-            address, the other holds a key. */}
+        {/* The only wallet concept left. Browser-wallet connect was removed
+            because it could never do what this page promises: MetaMask will
+            not sign without somebody present, so one-click and automatic
+            were both impossible through it. */}
         <div className="rounded-lg border border-accent-red/20 p-3">
           <label className="mb-2 block text-xs text-text-muted">
             Trading wallet — can spend

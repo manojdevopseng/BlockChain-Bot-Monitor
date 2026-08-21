@@ -1,20 +1,20 @@
 """What an address actually holds, read from the chain itself.
 
-Watch-only, and that is the whole design. An address is enough to read a
-balance; spending needs a private key, and this app never asks for one — the
-same reason the trading engine records instead of executing. Paste an address
-and you can see it. Nothing here can move anything.
+This reads; it never signs. What it reads are the trading wallets in the
+vault — the addresses the engine will actually spend from — so the balance
+above the positions is the money those positions are competing for, not a
+separate wallet somebody has to remember to keep in step.
 
 The balance comes from the chain, not from an aggregator. `eth_getBalance` is
 one call and it is the truth; an indexer's answer is a copy of that truth with
 a delay and nobody to ask when it disagrees. GMGN was considered and does not
 answer this question at all — its API serves tokens and pairs.
 
-Addresses are grouped by keyspace, not by chain. One EVM address covers
+Addresses are grouped by keyspace, not by chain. One EVM key covers
 Robinhood, Ethereum, BNB and Base, because all four derive addresses the same
-way — the string is asked of each and usually holds a balance on only one.
-Solana and Tron are separate keyspaces and get their own, rather than being
-guessed at from an EVM address that cannot exist there.
+way — the same string is asked of each, and usually holds a balance on only
+one. Solana is a different curve entirely and Tron encodes its addresses its
+own way, so both keep their own.
 
 Tron is the odd one: it answers `eth_getBalance` like an EVM chain, but its
 addresses are base58 and its coin has six decimals rather than eighteen. Read
@@ -67,7 +67,7 @@ def _tron_to_hex(addr: str) -> str:
     A Tron address is a 0x41 prefix, twenty bytes of body, and a four-byte
     checksum, all base58-encoded. The EVM-compatible RPC wants the body alone.
     """
-    from .wallets import _b58decode
+    from .keys import _b58decode
     raw = _b58decode(addr)
     if len(raw) < 25:
         raise ValueError("not a Tron address")
@@ -131,7 +131,7 @@ def valid_one(kind: str, address: str) -> str:
     # them is what they decode to — a Solana address is exactly a 32-byte
     # public key, a Tron address is 25 bytes of prefix, body and checksum.
     if kind == "sol":
-        from .wallets import _b58decode
+        from .keys import _b58decode
         try:
             if len(_b58decode(address)) != 32:
                 raise ValueError
@@ -191,7 +191,7 @@ async def _one(session: aiohttp.ClientSession, spec: dict,
     kind = _kind_of(spec["id"])
     addrs = by_kind.get(kind, [])
     if not addrs:
-        out["why"] = f"no {_KIND_LABEL[kind]} wallet linked"
+        out["why"] = f"no {_KIND_LABEL[kind]} trading wallet yet"
         return out
     if not spec["http"]:
         out["why"] = "no RPC endpoint configured for this chain"
