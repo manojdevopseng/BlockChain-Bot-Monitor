@@ -260,6 +260,18 @@ class Settings(BaseSettings):
     # discovery scanner, no WSS, just "is this address a contract on Base".
     # Two endpoints because one public RPC going quiet must not take the chain
     # off the board; the pool tries them in order.
+    # The V2-style router each chain's swaps go through. Verified at runtime
+    # against that chain's factory and wrapped native before anything is sent
+    # — a wrong router does not throw, it accepts the payment and keeps it.
+    #
+    # Robinhood Chain is left blank on purpose: its factory is known but its
+    # router address is not something to guess at, and guessing here costs
+    # real money rather than an error message.
+    eth_v2_router: str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+    bnb_v2_router: str = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+    base_v2_router: str = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+    rbh_v2_router: str = ""
+
     # Seals every trading-wallet key in the vault. Deliberately here and not
     # in Mongo: a database dump is the ordinary way this goes wrong, and
     # without this string the stored keys are noise. Losing it loses every
