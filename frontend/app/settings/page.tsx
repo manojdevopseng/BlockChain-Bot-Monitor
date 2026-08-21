@@ -381,42 +381,54 @@ export default function SettingsPage() {
           has gone quiet, and the reason is usually a key nobody filled in. */}
       <ConfigAudit />
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      {/* Columns rather than a grid, and the reason is the shape of this page.
+          Three grid columns held one card, four and ten: the page was as long
+          as the longest, with a screen of empty space beside the shortest, and
+          hand-balancing rots the moment a group gains a switch.
+
+          CSS multi-column balances the heights itself — the browser fills to
+          an even depth and re-balances whenever the content changes. Each card
+          says break-inside-avoid so none is ever cut across a column boundary.
+
+          The order is column-major, which reads correctly here: each block is
+          a whole subject and nothing is meant to be read across. */}
+      <div className="columns-1 gap-5 [&>*]:mb-5 [&>*]:break-inside-avoid
+                      lg:columns-2 2xl:columns-3">
         <ServiceGroup cat="bot" items={data?.bot ?? []} />
-        {/* Everything the AI agent needs in one column: its switches first,
-            then the list it is asked to match against. They were spread across
-            Bots and the far column, which meant changing how it behaves took
-            two places on the page. */}
-        <div className="space-y-5">
+        {/* Everything the AI agent needs together: its switches first, then the
+            list it is asked to match against. They were spread across Bots and
+            the far column, which meant changing how it behaves took two places
+            on the page. Wrapped so they stay in that order and travel as one. */}
+        <div className="space-y-5 break-inside-avoid">
           <ServiceGroup cat="ai" items={data?.ai ?? []} />
-          <ServiceGroup cat="dash2" items={data?.dash2 ?? []} />
           <CredentialsManager only="AI" />
-          <NarrativeManager />
         </div>
-        <div className="space-y-5">
-          <ServiceGroup cat="rbhx" items={data?.rbhx ?? []} />
-          <ServiceGroup cat="rsi" items={data?.rsi ?? []} />
-          <ServiceGroup cat="mcap" items={data?.mcap ?? []} />
+        <ServiceGroup cat="dash2" items={data?.dash2 ?? []} />
+        <NarrativeManager />
+        <ServiceGroup cat="rbhx" items={data?.rbhx ?? []} />
+        <ServiceGroup cat="rsi" items={data?.rsi ?? []} />
+        <ServiceGroup cat="mcap" items={data?.mcap ?? []} />
+        {/* Chains and the SOL sources stay together: "SOL is on" and "which SOL
+            source is on" are read one after the other, not hunted separately. */}
+        <div className="space-y-5 break-inside-avoid">
           <ServiceGroup cat="chain" items={data?.chain ?? []} />
-          {/* Directly under Chains: "SOL is on" and "which SOL source is on"
-              are read one after the other, not hunted for separately. */}
           <ServiceGroup cat="sol" items={data?.sol ?? []} />
-          <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
-          {/* The endpoint URLs themselves live on the RPC Monitor page, next to
-              the live connection status they actually affect. */}
-          <KeywordManager />
-          {/* The Launchpad Monitor's own list, matched against the account's
-              bio. Its own collection, so editing one never touches the other. */}
-          <KeywordManager
-            path="/api/launchpad/keywords"
-            title="Robinhood Keywords Match"
-            hint={<>Matched against the X account&rsquo;s bio on every Robinhood launch.
-                    A hit is highlighted in the Launchpad Monitor&rsquo;s Text column and
-                    leads its Telegram alert. Whole-word only — “AI” matches “AI agent”,
-                    not “said”.</>} />
-          <ChatIdFinder />
-          <CredentialsManager exclude={["AI", "RPC Endpoints"]} />
         </div>
+        {/* The endpoint URLs themselves live on the RPC Monitor page, next to
+            the live connection status they actually affect. */}
+        <ServiceGroup cat="rpc" items={data?.rpc ?? []} />
+        <KeywordManager />
+        {/* The Launchpad Monitor's own list, matched against the account's
+            bio. Its own collection, so editing one never touches the other. */}
+        <KeywordManager
+          path="/api/launchpad/keywords"
+          title="Robinhood Keywords Match"
+          hint={<>Matched against the X account&rsquo;s bio on every Robinhood launch.
+                  A hit is highlighted in the Launchpad Monitor&rsquo;s Text column and
+                  leads its Telegram alert. Whole-word only — “AI” matches “AI agent”,
+                  not “said”.</>} />
+        <ChatIdFinder />
+        <CredentialsManager exclude={["AI", "RPC Endpoints"]} />
       </div>
     </div>
   );
