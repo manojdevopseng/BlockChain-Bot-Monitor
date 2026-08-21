@@ -10,6 +10,7 @@ import { StatusBar } from "./StatusBar";
 import { useWebSocket } from "@/lib/ws";
 import { getToken, useApi } from "@/lib/api";
 import { useRole } from "@/lib/hooks";
+import { useAccount } from "@/lib/account";
 import { ThemeProvider } from "@/lib/theme";
 import { Lock } from "lucide-react";
 
@@ -129,9 +130,36 @@ function BuildWatcher() {
 // The nav greys these pages out, but the URL is still typeable and a bookmark
 // still resolves — so the page itself has to say no as well. This is still only
 // presentation: every request the page would make is refused server-side.
+// The pages a trial can see the name of and not the contents. Kept beside the
+// nav's own list rather than derived from it: a page reached by typing its URL
+// has to be refused too, and that is this side's job.
+const PAID_ONLY_PATHS = ["/ai", "/commands"];
+
 function RoleGate({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { blocks } = useRole();
+  const { isTrial } = useAccount();
+
+  if (isTrial && PAID_ONLY_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
+    return (
+      <div className="mx-auto mt-16 max-w-md rounded-xl border border-border bg-bg-card/60 p-8 text-center">
+        <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-full bg-bg-soft text-text-dim">
+          <Lock size={20} />
+        </div>
+        <h2 className="text-base font-semibold text-text">Comes with a paid plan</h2>
+        <p className="mt-1.5 text-sm text-text-muted">
+          Your trial has the dashboard and your own tokens. This page opens on
+          any paid plan.
+        </p>
+        <a href="/plan"
+           className="mt-4 inline-block rounded-lg bg-brand px-4 py-2 text-sm
+                      font-medium text-white transition-colors hover:bg-brand/90">
+          See the plans
+        </a>
+      </div>
+    );
+  }
+
   if (!blocks(path)) return <>{children}</>;
   return (
     <div className="mx-auto mt-16 max-w-md rounded-xl border border-border bg-bg-card/60 p-8 text-center">

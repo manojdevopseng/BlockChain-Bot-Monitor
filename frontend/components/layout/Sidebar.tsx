@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X, CandlestickChart } from "lucide-react";
 import { useRole } from "@/lib/hooks";
+import { useAccount } from "@/lib/account";
 import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
 
@@ -18,10 +19,10 @@ const NAV = [
   { href: "/detections", label: "Detections", icon: Crosshair },
   { href: "/rsi", label: "RSI", icon: Activity },
   { href: "/trading", label: "Trading", icon: CandlestickChart },
-  { href: "/ai", label: "AI Narrative", icon: Brain },
+  { paidOnly: true, href: "/ai", label: "AI Narrative", icon: Brain },
   { hideFromUser: true, href: "/admin", label: "Admin", icon: ShieldCheck },
   { hideFromUser: true, href: "/forwarder", label: "Forwarder", icon: Send },
-  { href: "/commands", label: "Commands", icon: Terminal },
+  { paidOnly: true, href: "/commands", label: "Commands", icon: Terminal },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   // The account's own two pages. Every plan sees them, including an expired
   // one — paying is how it stops being expired.
@@ -53,6 +54,9 @@ export function Sidebar({
   const path = usePathname();
   const uptime = useUptime();
   const { blocks, known, isAdmin } = useRole();
+  // Two different reasons a page can be shut, and they deserve two different
+  // sentences: "not for this account, ever" and "comes with a paid plan".
+  const { isTrial } = useAccount();
   // On mobile the rail is always full-width inside the drawer; only desktop collapses.
   const isCollapsed = collapsed;
 
@@ -96,9 +100,11 @@ export function Sidebar({
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-          {NAV.map(({ href, label, icon: Icon, hideFromUser }) => {
+          {NAV.map(({ href, label, icon: Icon, hideFromUser, paidOnly }) => {
             const active = href === "/" ? path === "/" : path.startsWith(href);
-            const locked = blocks(href);
+            const forAdmin = blocks(href);
+            const forPaid = !!paidOnly && isTrial;
+            const locked = forAdmin || forPaid;
             // Hidden until we know, then hidden for anyone but an admin. The
             // remembered role means an admin does not watch their own nav
             // build itself on every load.
@@ -112,7 +118,9 @@ export function Sidebar({
                 <div
                   key={href}
                   aria-disabled
-                  title={isCollapsed ? `${label} — admin only` : "Admin only"}
+                  title={forPaid
+                    ? `${label} — comes with a paid plan`
+                    : (isCollapsed ? `${label} — admin only` : "Admin only")}
                   className={cn(
                     "flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-dim",
                     isCollapsed && "lg:justify-center lg:px-2",

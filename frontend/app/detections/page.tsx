@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Layers, Fuel, ExternalLink, ArrowRightLeft } from "lucide-react";
 import { useApi } from "@/lib/api";
+import { useAccount } from "@/lib/account";
 import { useDebounced } from "@/lib/hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -266,6 +267,9 @@ function CrossChainSection() {
 /* ── page ───────────────────────────────────────────────────────────────── */
 
 export default function DetectionsPage() {
+  // Whether this account has admin-level ceilings — see accounts.plan_of. It
+  // decides one thing here: whether the gas panel is drawn at all.
+  const { hasNoLimits } = useAccount();
   return (
     <TickProvider>
     <div className="space-y-5">
@@ -281,7 +285,12 @@ export default function DetectionsPage() {
           { id: "premium", node: <PremiumSection /> },
           { id: "launchpad", node: <LaunchpadSection /> },
           { id: "crosschain", node: <CrossChainSection /> },
-          { id: "gas", node: <GasSection /> },
+          // ETH Gas Fees is not a plan feature — it is the operator watching
+          // their own chain, and the numbers in it are only actionable by
+          // somebody who can act on them. Shown to accounts with no ceiling
+          // (the operator, and anybody they have handed that to) and to
+          // nobody else, paid or not.
+          ...(hasNoLimits ? [{ id: "gas", node: <GasSection /> }] : []),
         ]}
       />
     </div>

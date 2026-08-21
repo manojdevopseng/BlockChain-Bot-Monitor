@@ -21,7 +21,12 @@ export default function ChainsPage() {
       <Badge variant={statusTone(r.status)}>{r.status}</Badge>
     )},
     { key: "ws_configured", header: "WebSocket", render: (r) => (
-      <Badge variant={r.ws_configured ? "green" : "gray"}>{r.ws_configured ? "configured" : "not set"}</Badge>
+      // "not needed" and "not set" look the same in a table and mean opposite
+      // things: BNB and Base are read on demand when a caller names a token,
+      // so they have no socket to be missing.
+      r.check_only
+        ? <Badge variant="gray">not needed</Badge>
+        : <Badge variant={r.ws_configured ? "green" : "gray"}>{r.ws_configured ? "configured" : "not set"}</Badge>
     )},
     { key: "rpc_configured", header: "RPC", render: (r) => (
       <Badge variant={r.rpc_configured ? "green" : "gray"}>{r.rpc_configured ? "configured" : "not set"}</Badge>
@@ -31,7 +36,8 @@ export default function ChainsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Chains" subtitle="Chains this bot monitors, and their live connection state" />
+      <PageHeader title="Supported Chains"
+                  subtitle="Every chain this bot reads, and its live connection state" />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {chains.map((c: any) => (
           <Card key={c.id} className={cn(!c.enabled && "opacity-40")}>
@@ -47,8 +53,10 @@ export default function ChainsPage() {
                 </div>
                 <div>
                   <div className="text-text-dim">WebSocket</div>
-                  <div className={cn("mt-0.5 font-semibold", c.ws_configured ? "text-accent-green" : "text-text-dim")}>
-                    {c.ws_configured ? "configured" : "not set"}
+                  <div className={cn("mt-0.5 font-semibold",
+                                     c.check_only ? "text-text-dim"
+                                     : c.ws_configured ? "text-accent-green" : "text-text-dim")}>
+                    {c.check_only ? "not needed" : c.ws_configured ? "configured" : "not set"}
                   </div>
                 </div>
               </div>
@@ -58,7 +66,7 @@ export default function ChainsPage() {
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Chain Overview</CardTitle>
+          <CardTitle>Supported Chains</CardTitle>
           <span className="text-[11px] text-text-dim">
             {stats?.connected ?? 0}/{stats?.total ?? 0} connected
           </span>

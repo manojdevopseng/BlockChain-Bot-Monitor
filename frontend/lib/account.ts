@@ -44,6 +44,8 @@ export type Account = {
   expires_at: number;
   /** Kept working on the house — its expiry is a placeholder, not a date. */
   comped: boolean;
+  /** Admin limits on a non-admin account — see accounts.plan_of. */
+  unlimited: boolean;
   telegram_linked: boolean;
   usable: boolean;
   reason: string;
@@ -87,6 +89,16 @@ export function useAccount() {
     error,
     reload: mutate,
     isAdmin: data?.role === "admin",
+    // The three questions the interface actually asks, answered once so that
+    // four pages cannot disagree about them.
+    //
+    // Each fails in the safe direction while the account is still loading:
+    // `isTrial` is false, so a paying account never watches a lock appear and
+    // vanish; `hasNoLimits` is false, so an operator-only panel is never shown
+    // to somebody it turns out is not entitled to it. The remembered copy
+    // means a returning account answers instantly either way.
+    isTrial: data ? data.plan === "trial" && data.role !== "admin" : false,
+    hasNoLimits: data ? (data.role === "admin" || !!data.unlimited) : false,
     // Undefined while it loads: a page that guesses "expired" for a frame
     // shows a paywall to somebody who has paid.
     usable: data ? data.usable : undefined,

@@ -61,7 +61,14 @@ export default function AlertRulesPage() {
   }
 
   const plan = data.plan ?? {};
+  // `paid` already meant "this plan can be sent Telegram", which since the
+  // trial lost Telegram is the same question as "may this account change any
+  // of these rules". Shown to a trial rather than hidden — the page is the
+  // clearest description of what a paid plan does — but every control on it
+  // is inert, because saving a rule that can never fire is a lie the page
+  // would be telling.
   const paid: boolean = !!plan.telegram_alerts;
+  const ro = !paid;          // read-only
   const linked: boolean = !!data.telegram_linked;
 
   async function save(patch: Partial<Rules>) {
@@ -130,7 +137,7 @@ export default function AlertRulesPage() {
           </CardTitle>
           <div className="flex items-center gap-2 text-xs text-text-muted">
             All alerts
-            <Switch checked={rules.enabled}
+            <Switch disabled={ro} checked={rules.enabled}
                     onCheckedChange={(v) => save({ enabled: v })} />
           </div>
         </CardHeader>
@@ -143,7 +150,7 @@ export default function AlertRulesPage() {
             <label key={f.id}
                    className="flex items-center justify-between gap-3 rounded-lg border border-border-soft px-3 py-2">
               <span className="text-sm text-text">{f.label}</span>
-              <Switch checked={!!rules.feeds?.[f.id]}
+              <Switch disabled={ro} checked={!!rules.feeds?.[f.id]}
                       onCheckedChange={(v) =>
                         save({ feeds: { ...rules.feeds, [f.id]: v } })} />
             </label>
@@ -156,9 +163,9 @@ export default function AlertRulesPage() {
           <CardTitle className="flex items-center gap-2"><Filter size={15} /> Filters</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <Chips label="Chains" all={data.chains ?? []} chosen={rules.chains}
+          <Chips disabled={ro} label="Chains" all={data.chains ?? []} chosen={rules.chains}
                  onChange={(chains) => save({ chains })} />
-          <Chips label="Launchpads" all={data.launchpads ?? []}
+          <Chips disabled={ro} label="Launchpads" all={data.launchpads ?? []}
                  chosen={rules.launchpads} emptyMeansAll
                  onChange={(launchpads) => save({ launchpads })} />
 
@@ -361,7 +368,8 @@ function WhyPanel() {
 
 /* ── the small pieces ─────────────────────────────────────────────────────── */
 
-function Chips({ label, all, chosen, onChange, emptyMeansAll = false }: {
+function Chips({ label, all, chosen, onChange, emptyMeansAll = false, disabled = false }: {
+  disabled?: boolean;
   label: string;
   all: { id: string; label: string }[];
   chosen: string[];
@@ -380,6 +388,7 @@ function Chips({ label, all, chosen, onChange, emptyMeansAll = false }: {
       <div className="flex flex-wrap gap-2">
         {all.map((item) => (
           <button key={item.id}
+                  disabled={disabled}
                   onClick={() => onChange(has(item.id)
                     ? chosen.filter((c) => c !== item.id)
                     : [...chosen, item.id])}
