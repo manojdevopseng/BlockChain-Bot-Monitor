@@ -183,6 +183,23 @@ async def require_customer(request: Request,
     return doc
 
 
+async def require_no_limits(doc: dict = Depends(account)) -> dict:
+    """An account with no ceiling — the operator, or somebody they handed it to.
+
+    Not the same question as `require_admin`, and that is the point. Some
+    panels are the operator watching their own machine rather than a feature
+    anybody buys: gas fees on their own chain, for instance, which is only
+    actionable by somebody who can act on it. Those follow the ceiling, not
+    the role, so that handing an account admin limits hands it those panels
+    too without handing it the controls.
+    """
+    from . import accounts
+    if doc.get("role") == ADMIN or doc.get("unlimited"):
+        return doc
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This panel is for accounts with no plan limits")
+
+
 async def require_customer_read(request: Request,
                                 doc: dict = Depends(require_customer)) -> dict:
     """The shared panels: a live account may read them, only an admin writes.

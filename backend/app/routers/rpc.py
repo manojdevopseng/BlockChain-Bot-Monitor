@@ -17,6 +17,13 @@ from ..util import clean_list, ist_date_str
 
 router = APIRouter(prefix="/api/rpc", tags=["rpc"])
 
+# The gas panel is the operator watching their own chain — the numbers in it
+# are only actionable by somebody who can act on them — so it follows the
+# ceiling rather than the role: an account handed admin limits gets it, a
+# paying account does not. The endpoints themselves stay here beside the RPC
+# state they are read against.
+gas_router = APIRouter(prefix="/api/rpc", tags=["rpc"])
+
 # Which registry toggle governs a chain's RPC.
 _RPC_TOGGLE = {"eth": "rpc_eth", "rbh": "rpc_rbh", "sol": "rpc_sol"}
 
@@ -144,7 +151,7 @@ async def stats():
     }
 
 
-@router.get("/gas")
+@gas_router.get("/gas")
 async def gas():
     """ETH Gas Fees summary — high-gas early-buy hits.
 
@@ -171,7 +178,7 @@ async def gas():
     }
 
 
-@router.get("/gas/dates")
+@gas_router.get("/gas/dates")
 async def gas_dates():
     """IST days that have a high-gas buy, newest first — the History dropdown.
 
@@ -184,7 +191,7 @@ async def gas_dates():
                             reverse=True)}
 
 
-@router.get("/gas/recent")
+@gas_router.get("/gas/recent")
 async def gas_recent(limit: int = 50, q: str | None = None, date: str | None = None,
                      dex: str | None = None):
     """Recent high-gas early buys — feeds the dashboard's ETH Gas Fees panel.

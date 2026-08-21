@@ -197,6 +197,18 @@ _SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
 _OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router,
              admin_router)
 
+# The detection panel, split out of the operator's forwarder controls so a
+# customer opening Detections reads the rows instead of "No detections yet".
+# Mounted by hand because _SHARED holds modules and this is one router out of
+# a module that stays operator-only.
+app.include_router(forwarder.public,
+                   dependencies=[Depends(security.require_customer_read)])
+
+# Its own rule, and the only thing on it: the gas panel is for accounts with
+# no ceiling, which is neither "any live account" nor "an admin".
+app.include_router(rpc.gas_router,
+                   dependencies=[Depends(security.require_no_limits)])
+
 app.include_router(auth.router)
 # Sign-up, email confirmation and password reset cannot sit behind a login,
 # and the routes that do need one carry their own dependency.

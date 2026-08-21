@@ -18,6 +18,16 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
 
+# The same prefix, a different rule. Everything on `router` is the operator's
+# controls — adding a group, styling a chip, switching a source off. These four
+# are the detection panel every account is sold, and they were behind the
+# operator gate purely because they happened to live in this file: a customer
+# opened Detections and read "No detections yet" while the rows were there.
+#
+# Mounted under the shared rule instead, which lets any live account GET and
+# nobody but an admin write.
+public = APIRouter(prefix="/api/forwarder", tags=["forwarder"])
+
 # How many rows a search pass reads before counting. Only reached when `q` is
 # set; the plain view counts in Mongo instead.
 _MATCH_SCAN_CAP = 20000
@@ -311,7 +321,7 @@ async def set_source_ic(key: str, payload: dict = Body(...)):
     return {"key": key, "ic": on, "live": live}
 
 
-@router.get("/group-chips")
+@public.get("/group-chips")
 async def group_chips():
     """Per-group presentation state: chip colours, tracker box colours, and
     which callers are starred for Important Caller.
@@ -527,7 +537,7 @@ def _match_q(doc: dict, q: str) -> bool:
     return any(q in str(g).lower() for g in (doc.get("groups") or []))
 
 
-@router.get("/detections")
+@public.get("/detections")
 async def detections(
     chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$"),
     q: str | None = None,
@@ -560,7 +570,7 @@ async def detections(
     return {"total": total, "items": clean_list(docs)}
 
 
-@router.get("/detections/stats")
+@public.get("/detections/stats")
 async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$")):
     col = db.get_collection("premium_detections")
     base: dict = {} if chain == "all" else {"chain": chain}
@@ -571,7 +581,7 @@ async def detections_stats(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|
     }
 
 
-@router.get("/detections/dates")
+@public.get("/detections/dates")
 async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$")):
     """Days the History dropdown offers, newest first.
 
@@ -591,7 +601,7 @@ async def detection_dates(chain: str = Query("eth", pattern="^(all|eth|rbh|sol|b
     return {"dates": sorted(days, key=lambda s: datetime.strptime(s, "%d-%m-%Y"), reverse=True)}
 
 
-@router.get("/detections/history")
+@public.get("/detections/history")
 async def detection_history(
     chain: str = Query("eth", pattern="^(all|eth|rbh|sol|bnb)$"),
     date: str = "",
