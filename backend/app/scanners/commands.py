@@ -487,12 +487,16 @@ class TelegramCommands:
             await mcap_panel.pending_address(chat_id, text)
             return
 
-        # One exception before any of the chat rules: a private chat may send
-        # `/start <token>` to connect an account, and that is ALL it may do
-        # there. The token is one-shot and fifteen minutes old at most, so an
-        # unknown person opening a private chat gets nothing but this.
+        # A private chat is a customer's chat, and it gets a different bot from
+        # the one the operator's group gets. Two command sets on one token:
+        # /start connects an account, and a connected account may ask about
+        # itself. What it may never do is touch the box — /stop, /restart,
+        # /services and the rest turn scanners off for everybody, and a
+        # customer pressing one would be turning the product off for the other
+        # customers. Those are not refused here so much as never offered: the
+        # menu published for a private chat does not contain them.
         if (msg.get("chat") or {}).get("type") == "private":
-            await self._connect_account(msg, text)
+            await self._private_command(msg, text)
             return
 
         # Commands are answered in one group only, with one exception: the RSI
@@ -533,6 +537,107 @@ class TelegramCommands:
             log.error(f"[CMD] /{cmd} failed: {exc}")
             ok = False
         await self._record(cmd, ok, time.perf_counter() - started, user_id)
+
+    # What a customer may ask in their own chat. Deliberately short: everything
+    # here answers "what about my account", and nothing here changes the box.
+    CUSTOMER_COMMANDS = ("start", "help", "plan", "myalerts", "ping")
+
+    async def _private_command(self, msg: dict, text: str) -> None:
+        """A command in somebody's own chat with the bot.
+
+        Answered from their account rather than from the box: the chat id is
+        what telegram_link bound to a username, so who is asking is already
+        known and their plan decides the answer. An unconnected chat gets the
+        one instruction that leads somewhere — how to connect — and nothing
+        else, because there is nothing else it could be entitled to.
+        """
+        from app import notifier, telegram_link
+
+        chat_id = (msg.get("chat") or {}).get("id")
+        word = (text.split() or [""])[0].lstrip("/").split("@")[0].lower()
+
+        # /start carries the connect token and is the one command that works
+        # before there is an account behind the chat.
+        if word == "start":
+            await self._connect_account(msg, text)
+            return
+
+        username = await telegram_link.username_for(chat_id)
+        if not username:
+            await notifier.send_to(
+                chat_id,
+                "\U0001F44B This bot sends alerts for your dashboard account.\n\n"
+                "Open <b>Profile \u2192 Connect Telegram</b> on the site and tap "
+                "the link there — it connects this chat to your account.")
+            return
+
+        if word not in self.CUSTOMER_COMMANDS:
+            await notifier.send_to(
+                chat_id,
+                "That one is not available here. In your own chat this bot "
+                "answers <code>/plan</code>, <code>/myalerts</code>, "
+                "<code>/ping</code> and <code>/help</code>.\n\n"
+                "<i>Everything else lives on the dashboard.</i>")
+            return
+
+        await self._answer_customer(chat_id, username, word)
+
+    async def _answer_customer(self, chat_id, username: str, word: str) -> None:
+        """The four answers a customer's own chat can give."""
+        from app import accounts, alert_subs, notifier
+
+        if word == "ping":
+            await notifier.send_to(chat_id, "\u2705 Here.")
+            return
+
+        doc = await accounts.by_username(username)
+        if doc is None:
+            await notifier.send_to(chat_id, "\u26A0\uFE0F That account no longer exists.")
+            return
+        plan = accounts.plan_of(doc)
+        state = accounts.access(doc)
+
+        if word == "help":
+            await notifier.send_to(
+                chat_id,
+                f"\U0001F4AC <b>Your chat with SightLine</b>\n"
+                f"Connected as <b>{username}</b>.\n\n"
+                f"<code>/plan</code> — what you are on and how long is left\n"
+                f"<code>/myalerts</code> — which feeds you have switched on\n"
+                f"<code>/ping</code> — check the bot is awake\n\n"
+                f"<i>Everything else is on the dashboard.</i>")
+            return
+
+        if word == "plan":
+            left = f"{state.days_left} day{'s' if state.days_left != 1 else ''} left" \
+                if state.days_left else state.reason or "not active"
+            await notifier.send_to(
+                chat_id,
+                f"\U0001F4E6 <b>{plan.label}</b> — {state.status}\n"
+                f"{left}\n\n"
+                f"Telegram alerts: <b>{'yes' if plan.telegram_alerts else 'dashboard only'}</b>\n"
+                f"Up to <b>{plan.alerts_per_day}</b> a day\n"
+                f"RSI tokens <b>{plan.rsi_tokens}</b> · "
+                f"Market Cap tokens <b>{plan.mcap_tokens}</b>")
+            return
+
+        if word == "myalerts":
+            sub = await alert_subs.get(username)
+            on = [alert_subs.FEEDS[k] for k, v in (sub.get("feeds") or {}).items()
+                  if v and k in alert_subs.FEEDS]
+            chains = ", ".join(alert_subs.CHAINS.get(c, c)
+                               for c in (sub.get("chains") or [])) or "none"
+            body = ("\n".join(f"\u2022 {f}" for f in on) if on
+                    else "<i>Nothing switched on yet — Alert Rules on the site.</i>")
+            await notifier.send_to(
+                chat_id,
+                f"\U0001F514 <b>Your feeds</b>\n{body}\n\n"
+                f"Chains: {chains}\n"
+                f"Mode: {sub.get('mode', 'instant')} · "
+                f"cap {sub.get('daily_cap')} a day"
+                + ("\n\n<i>Alerts are switched off in Alert Rules.</i>"
+                   if not sub.get("enabled", True) else ""))
+            return
 
     async def _connect_account(self, msg: dict, text: str) -> None:
         """`/start <token>` from somebody's own chat with the bot.

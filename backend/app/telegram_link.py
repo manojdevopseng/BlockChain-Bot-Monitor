@@ -114,6 +114,29 @@ async def chat_for(username: str) -> Optional[int]:
     return doc.get("telegram_chat_id")
 
 
+async def username_for(chat_id) -> Optional[str]:
+    """Which account this chat belongs to, if any.
+
+    The reverse of `chat_for`, and the whole reason a customer can talk to the
+    bot at all: a message arrives carrying a chat id and nothing else, and this
+    is what turns that into "who is asking". Unbound chats answer None, which
+    is how somebody who has never connected gets the instructions rather than
+    somebody else's account.
+    """
+    if chat_id is None:
+        return None
+    doc = await _users().find_one({"telegram_chat_id": chat_id},
+                                  {"_id": 0, "username": 1})
+    if doc:
+        return doc.get("username")
+    # Telegram sends the id as a number; a row written from a different path
+    # may hold the string. Cheap to check, and the alternative is an account
+    # that connected successfully and is then not recognised.
+    doc = await _users().find_one({"telegram_chat_id": str(chat_id)},
+                                  {"_id": 0, "username": 1})
+    return doc.get("username") if doc else None
+
+
 async def alert_target(username: str, fallback) -> tuple[Optional[int], str]:
     """(where to send, why) for one account's alert.
 
