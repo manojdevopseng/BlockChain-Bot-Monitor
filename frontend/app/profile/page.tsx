@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { mutate } from "swr";
 import { BadgeCheck, CandlestickChart, KeyRound, Loader2, Mail, Send,
@@ -277,8 +277,20 @@ function CredentialsCard() {
 function TradingCard() {
   const { data: conf } = useApi<any>("/api/trading/settings");
   const [key, setKey] = useState("");
+  const [evm, setEvm] = useState("");
+  const [sol, setSol] = useState("");
+
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Seeded from the server once it answers, then left alone — re-seeding on
+  // every revalidation would overwrite an address halfway through being typed.
+  useEffect(() => {
+    if (conf) {
+      setEvm((v) => v || conf.wallet_evm || "");
+      setSol((v) => v || conf.wallet_sol || "");
+    }
+  }, [conf]);
 
   async function save(patch: any, tag: string) {
     setBusy(tag);
@@ -318,6 +330,44 @@ function TradingCard() {
             className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--brand)]"
           />
         </label>
+
+        {/* Watch-only addresses. Kept next to the key because both are
+            "things about your own money that this page stores", and kept
+            visibly apart from it because one is a secret and these are not —
+            an address is public by construction. */}
+        <div>
+          <label className="mb-1 block text-xs text-text-muted">
+            Wallet address — EVM{" "}
+            <span className="text-text-dim">(Robinhood, Ethereum, BNB, Base)</span>
+          </label>
+          <div className="flex gap-2">
+            <Input value={evm} onChange={(e) => setEvm(e.target.value)}
+                   placeholder="0x…" />
+            <Button size="sm" variant="outline" disabled={busy === "evm"}
+                    onClick={() => save({ wallet_evm: evm.trim() }, "evm")}>
+              {busy === "evm" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
+            </Button>
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs text-text-muted">
+            Wallet address — Solana
+          </label>
+          <div className="flex gap-2">
+            <Input value={sol} onChange={(e) => setSol(e.target.value)}
+                   placeholder="Base58 address" />
+            <Button size="sm" variant="outline" disabled={busy === "sol"}
+                    onClick={() => save({ wallet_sol: sol.trim() }, "sol")}>
+              {busy === "sol" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
+            </Button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-text-dim">
+            Read-only. The balance is fetched from each chain; nothing here can
+            move funds, and a private key is never asked for. Leave either blank
+            to skip those chains.
+          </p>
+        </div>
 
         <div>
           <label className="mb-1 block text-xs text-text-muted">

@@ -15,6 +15,7 @@ import { FilterTabs } from "@/components/SectionFilters";
 import { fmtUsd, shortAddr } from "@/lib/utils";
 import { QuickSettings } from "./_components/QuickSettings";
 import { CallerPnl } from "./_components/CallerPnl";
+import { WalletStrip } from "./_components/WalletStrip";
 
 /* Trading — what the account bought, holds, and made or lost.
  *
@@ -132,6 +133,11 @@ export default function TradingPage() {
         until that changes, this answers whether the strategy works without
         risking anything on finding out.
       </div>
+
+      {/* The real wallet, above the pretend one. Deliberately adjacent: the
+          paper P&L below is easier to read honestly when what you actually
+          hold is on the same screen. */}
+      <WalletStrip />
 
       {/* Why auto-buy is off, when something turned it off. Shown loudly: a
           toggle that is mysteriously off costs more than the stop it came from. */}

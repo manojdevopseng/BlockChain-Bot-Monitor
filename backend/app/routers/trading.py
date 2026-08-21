@@ -12,7 +12,7 @@ import time
 import aiohttp
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from .. import db, security, trading
+from .. import db, security, trading, wallet
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
@@ -44,6 +44,22 @@ async def patch_settings(payload: dict = Body(...),
     # save from a form that does not show the key would wipe it.
     if not str(patch.get("gmgn_key") or "").strip():
         patch.pop("gmgn_key", None)
+    # Checked before it is stored rather than when it is next read: a typo
+    # saved silently becomes a chain that reports "could not read" for ever,
+    # and the person who typed it has long since moved on.
+    if "wallet_evm" in patch or "wallet_sol" in patch:
+        conf_now = await trading.settings_for(owner["username"])
+        try:
+            evm, sol = wallet.valid(
+                patch.get("wallet_evm", conf_now.get("wallet_evm", "")),
+                patch.get("wallet_sol", conf_now.get("wallet_sol", "")))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        if "wallet_evm" in patch:
+            patch["wallet_evm"] = evm
+        if "wallet_sol" in patch:
+            patch["wallet_sol"] = sol
+
     if "chains" in patch:
         patch["chains"] = [c for c in patch["chains"] if c in trading.CHAINS]
     if "callers" in patch:
@@ -73,6 +89,19 @@ async def patch_settings(payload: dict = Body(...),
     conf = await trading.save_settings(owner["username"], patch)
     conf.pop("gmgn_key", "")
     return {"ok": True, "settings": conf}
+
+
+@router.get("/wallet")
+async def wallet_balances(owner: dict = Depends(security.require_customer)):
+    """What the saved addresses hold, right now, on all five chains.
+
+    Read on request rather than polled. A balance is looked at, not watched —
+    putting it on a timer would mean five RPC calls a minute per open tab for
+    a number that changes when the person themselves moves funds.
+    """
+    conf = await trading.settings_for(owner["username"])
+    return await wallet.read(conf.get("wallet_evm", ""),
+                             conf.get("wallet_sol", ""))
 
 
 @router.get("/positions")

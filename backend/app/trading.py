@@ -96,6 +96,12 @@ DEFAULTS: dict[str, Any] = {
     "stopped_reason": "",
     "stopped_at": 0.0,
 
+    # The wallet the strip reads. Watch-only — an address, never a key. One
+    # EVM string serves Robinhood, Ethereum, BNB and Base because they share a
+    # keyspace; Solana does not, so it gets its own.
+    "wallet_evm": "",
+    "wallet_sol": "",
+
     # Telegram. Where it goes is not a setting — an account that connected its
     # own chat gets its own trades there and nobody else's; see
     # telegram_link.alert_target.
