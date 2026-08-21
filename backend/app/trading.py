@@ -31,6 +31,19 @@ from . import db
 # most of the calls land.
 CHAINS = ("rbh", "eth", "bnb", "base", "sol")
 
+# What you actually spend on each chain. A wallet holds ETH, BNB or SOL — not
+# dollars — so a buy is sized in the coin that leaves the wallet. The dollar
+# figure is worked out from it for the P&L, which is the one place a common
+# unit is needed.
+NATIVE = {"rbh": "ETH", "eth": "ETH", "bnb": "BNB", "base": "ETH", "sol": "SOL"}
+
+# Wrapped native per chain, for pricing the coin itself. Solana's native has no
+# contract, so wrapped SOL stands in — it is the same asset.
+_WRAPPED = {
+    "sol": "So11111111111111111111111111111111111111112",
+}
+
+
 # DexScreener's own chain ids, which are not ours.
 _DS_CHAIN = {"rbh": "robinhood", "eth": "ethereum", "bnb": "bsc",
              "base": "base", "sol": "solana"}
@@ -40,11 +53,77 @@ _BATCH = 30            # addresses per request, DexScreener's documented ceiling
 
 # What a fresh account starts with. Deliberately small: the first thing anyone
 # does is turn auto-buy on and forget it is on.
+# Everything that describes *how an order is executed*, kept per chain. Gas on
+# BNB and gas on Ethereum are different numbers with different sane values; a
+# slippage that is right for a Solana launch would be reckless on Ethereum;
+# and the amount is denominated in a different coin on each. One shared set of
+# these was a single field pretending to be five.
+#
+# Defaults are roughly fifty dollars' worth at the time of writing, chosen so
+# a new account is not sized by accident.
+CHAIN_DEFAULTS: dict[str, dict] = {
+    "rbh":  {"buy_amount": 0.02, "buy_gas_gwei": 0.04, "sell_gas_gwei": 0.04},
+    "eth":  {"buy_amount": 0.02, "buy_gas_gwei": 5.0,  "sell_gas_gwei": 5.0},
+    "bnb":  {"buy_amount": 0.08, "buy_gas_gwei": 1.0,  "sell_gas_gwei": 1.0},
+    "base": {"buy_amount": 0.02, "buy_gas_gwei": 0.02, "sell_gas_gwei": 0.02},
+    # Solana prices its urgency in micro-lamports per compute unit, not Gwei.
+    # The field is named for what it is rather than reused, because a number
+    # labelled Gwei on Solana is a number nobody can sanity-check.
+    "sol":  {"buy_amount": 0.5,  "priority_fee": 100000},
+}
+
+# The rest of a chain's settings, identical wherever they are not overridden.
+CHAIN_COMMON: dict[str, Any] = {
+    "buy_slippage": 30.0,
+    "sell_slippage": 30.0,
+    "sell_presets": [25, 50, 75, 100],
+    "take_profit_pct": 100.0,
+    "stop_loss_pct": 50.0,
+    # 0 turns the trailing stop off. It arms only after a position has actually
+    # been in profit, so it can never fire on the way up from the entry.
+    "trailing_pct": 0.0,
+    # Send through a private relay instead of the public mempool. Defaulted on
+    # wherever a relay exists, because the cost of it is a little latency and
+    # the cost of going without is being sandwiched on every buy worth
+    # sandwiching. See app/mev.py — on a chain with no public mempool this is
+    # reported as not applicable rather than switched quietly on.
+    "mev_protect": True,
+}
+
+
+def chain_conf(conf: dict, chain: str) -> dict:
+    """One chain's execution settings: common, then its own, then the account's.
+
+    Three layers rather than one stored blob, so a default that improves
+    reaches every account that never touched that field — and an account that
+    did keeps exactly what it chose.
+    """
+    chain = (chain or "").lower()
+    out = dict(CHAIN_COMMON)
+    out.update(CHAIN_DEFAULTS.get(chain, {}))
+    out.update((conf.get("chains_conf") or {}).get(chain) or {})
+    out["native"] = NATIVE.get(chain, "")
+    out["mev_supported"] = _mev_supported(chain)
+    if not out["mev_supported"]:
+        out["mev_protect"] = False
+    return out
+
+
+def _mev_supported(chain: str) -> bool:
+    # Imported here rather than at module scope: mev reads settings, and this
+    # module is imported early enough that the order matters.
+    try:
+        from . import mev
+        return mev.available(chain)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 DEFAULTS: dict[str, Any] = {
     "auto_buy": False,
-    # Paper dollars per position. Named the same as the real thing would be, so
-    # the number people tune here is the number that would be spent later.
-    "buy_usd": 50.0,
+    # Per chain, keyed by chain id. Only what an account actually changed is
+    # stored; chain_conf() layers it over the defaults above.
+    "chains_conf": {},
     "chains": list(CHAINS),
     # Empty means every starred caller. A list means only these — and it can
     # only ever narrow that set, never widen it: a caller outside the starred
@@ -58,13 +137,6 @@ DEFAULTS: dict[str, Any] = {
     "auto_buy_gas": False,
     "max_open": 20,
     "daily_buys": 20,
-    # Held for the day this runs for real. Stored, shown, and not yet used —
-    # said plainly in the UI rather than implied by a disabled field.
-    "buy_slippage": 30.0,
-    "sell_slippage": 30.0,
-    "buy_gas_gwei": 0.04,
-    "sell_gas_gwei": 0.04,
-    "sell_presets": [25, 50, 75, 100],
     # ── the sellability guard ──
     # Asked only of gas-fee tokens, and only of them on purpose: they are
     # minutes old, no human has vouched for them, and they are where the
@@ -74,12 +146,10 @@ DEFAULTS: dict[str, Any] = {
     "sell_check_min_sells": 3,
 
     # ── auto-sell ──
+    # The master switch is one decision for the account; the levels it fires at
+    # live per chain, because what counts as a stop differs by what you are
+    # trading on.
     "auto_sell": False,
-    "take_profit_pct": 100.0,
-    "stop_loss_pct": 50.0,
-    # 0 turns the trailing stop off. It arms only after a position has actually
-    # been in profit, so it can never fire on the way up from the entry.
-    "trailing_pct": 0.0,
 
     # ── the daily loss limit ──
     "loss_limit_on": False,
@@ -172,9 +242,31 @@ async def prices(session: aiohttp.ClientSession,
     return found
 
 
+async def native_price(session: aiohttp.ClientSession, chain: str) -> float:
+    """One ETH / BNB / SOL in dollars, for the chain asked about.
+
+    Read through the same DexScreener path as everything else, from the
+    wrapped native — which is the same asset and the only one of the pair that
+    has a contract to quote.
+    """
+    chain = (chain or "").lower()
+    addr = _WRAPPED.get(chain) or _wrapped_evm(chain)
+    if not addr:
+        return 0.0
+    got = await prices(session, [(chain, addr)])
+    return float(got.get((chain, _key(chain, addr))) or 0)
+
+
+def _wrapped_evm(chain: str) -> str:
+    from .scanners import scfg
+    return {"eth": scfg.ETH_WETH, "rbh": scfg.RBH_WETH,
+            "bnb": scfg.BNB_WBNB, "base": scfg.BASE_WETH}.get(chain, "")
+
+
 # ── positions ───────────────────────────────────────────────────────────────
 
 async def open_position(*, user: str, chain: str, address: str, symbol: str = "",
+                        amount_native: Optional[float] = None,
                         name: str = "", usd: float = 0.0, source: str = "manual",
                         caller: str = "", caller_id: Optional[int] = None,
                         session: aiohttp.ClientSession | None = None,
@@ -193,7 +285,20 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         raise ValueError("no token address")
 
     conf = await settings_for(user)
-    spend = float(usd or conf["buy_usd"])
+    cc = chain_conf(conf, chain)
+
+    # Sized in the chain's own coin. A wallet holds ETH, BNB or SOL, so that is
+    # what a buy spends; the dollar figure is derived for the P&L, which is the
+    # one place every chain has to share a unit.
+    #
+    # A caller may still pass an explicit dollar amount — the Buy button on a
+    # detection row does — and that is honoured as given.
+    spend_native = 0.0
+    native_usd = 0.0
+    if amount_native is not None:
+        spend_native = float(amount_native)
+    elif not usd:
+        spend_native = float(cc.get("buy_amount") or 0)
 
     # Before buying a gas-fee token, ask whether anyone has managed to sell it.
     # Refused rather than warned about: the whole value of the check is that it
@@ -213,22 +318,48 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
             raise ValueError(why)
 
     price = demo_price
-    if price is None:
-        own = session is None
-        session = session or aiohttp.ClientSession()
-        try:
+    own = session is None
+    session = session or aiohttp.ClientSession()
+    try:
+        if price is None:
             price = (await prices(session, [(chain, addr)])).get((chain, addr))
-        finally:
-            if own:
-                await session.close()
+        if spend_native > 0:
+            native_usd = await native_price(session, chain)
+    finally:
+        if own:
+            await session.close()
+            session = None
     if not price or price <= 0:
         raise ValueError("no price for that token right now — nothing to record")
+
+    if spend_native > 0:
+        if native_usd <= 0:
+            # Refused rather than guessed, for the same reason an unpriced
+            # token is: a size invented here is averaged into every number the
+            # account is judged on afterwards.
+            raise ValueError(f"no {NATIVE.get(chain, 'native')} price right now "
+                             f"— cannot size a buy in it")
+        spend = spend_native * native_usd
+    else:
+        spend = float(usd or 0)
+    if spend <= 0:
+        raise ValueError("nothing to spend — set an amount per buy for this chain")
 
     now = time.time()
     doc = {
         "user": user, "chain": chain, "address": addr,
         "symbol": symbol or "", "name": name or "",
         "usd": spend, "entry": float(price), "qty": spend / float(price),
+        # What left the wallet, and what that coin was worth at the time. The
+        # dollar figure alone cannot be turned back into it later, because the
+        # coin will have moved too.
+        "spent_native": spend_native or None,
+        "native": NATIVE.get(chain, "") if spend_native else "",
+        "native_usd_at_entry": native_usd or None,
+        # Where this order would have been sent. Recorded at the moment of the
+        # decision — the setting can be changed afterwards, and then it no
+        # longer describes this trade.
+        "mev_protect": bool(cc.get("mev_protect")),
         "source": source, "caller": caller or "",
         # The id is what the P&L groups on; the name is only what it was called
         # on the day. A group renamed on Telegram used to split its own history
@@ -343,6 +474,11 @@ def view(row: dict) -> dict:
         "chain": row.get("chain"), "address": row.get("address"),
         "symbol": row.get("symbol") or "", "name": row.get("name") or "",
         "usd": cost, "qty": qty,
+        # What actually left the wallet. The dollar figure is derived and moves
+        # with the coin; this is the number the person chose.
+        "spent_native": row.get("spent_native"),
+        "native": row.get("native") or "",
+        "mev_protect": bool(row.get("mev_protect")),
         "entry": row.get("entry"), "last": last, "exit": row.get("exit"),
         "pnl_usd": pnl, "pnl_pct": pct,
         "realised_usd": row.get("realised_usd") or 0,
@@ -448,7 +584,7 @@ async def on_call(*, chain: str, address: str, symbol: str = "", name: str = "",
             try:
                 row = await open_position(
                     user=user, chain=chain, address=address, symbol=symbol,
-                    name=name, usd=float(conf["buy_usd"]), source="auto",
+                    name=name, source="auto",
                     caller=group or str(chat_id or ""), caller_id=chat_id,
                     session=session)
                 made.append(view(row))
@@ -708,10 +844,14 @@ async def run_rules(user: str, session: aiohttp.ClientSession,
     if rows:
         quotes = await prices(session, [(r["chain"], r["address"]) for r in rows])
         now = time.time()
-        tp = float(conf.get("take_profit_pct") or 0)
-        sl = float(conf.get("stop_loss_pct") or 0)
-        tr = float(conf.get("trailing_pct") or 0)
+        # Worked out once per chain rather than once per row: an account with
+        # forty open positions on five chains needs five answers, not forty.
+        levels = {c: chain_conf(conf, c) for c in {r["chain"] for r in rows}}
         for r in rows:
+            cc = levels.get(r["chain"], {})
+            tp = float(cc.get("take_profit_pct") or 0)
+            sl = float(cc.get("stop_loss_pct") or 0)
+            tr = float(cc.get("trailing_pct") or 0)
             usd = quotes.get((r["chain"], r["address"]))
             if not usd:
                 continue
@@ -948,7 +1088,7 @@ async def sweep_pending(session: aiohttp.ClientSession) -> dict:
             row = await open_position(
                 user=r["user"], chain=r["chain"], address=r["address"],
                 symbol=r.get("symbol") or "", name=r.get("name") or "",
-                usd=float(conf["buy_usd"]), source="gas", session=session)
+                source="gas", session=session)
             await col.delete_one({"_id": r["_id"]})
             bought.append(view(row))
         except ValueError as exc:

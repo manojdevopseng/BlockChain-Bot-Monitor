@@ -104,7 +104,12 @@ export default function TradingPage() {
   const items: any[] = data?.items ?? [];
   const sum = data?.summary ?? {};
   const day = conf?.day ?? {};
-  const presets: number[] = conf?.sell_presets?.length ? conf.sell_presets : [25, 50, 100];
+  // The sell buttons belong to the position's chain, not to the account —
+  // each chain carries its own presets now.
+  function presetsFor(chain: string): number[] {
+    const own = conf?.chains_conf_resolved?.[chain]?.sell_presets;
+    return own?.length ? own : [25, 50, 100];
+  }
 
   function reload() {
     mutate((k) => typeof k === "string" && k.startsWith("/api/trading"));
@@ -199,10 +204,11 @@ export default function TradingPage() {
               : <Badge variant="gray" className="ml-2">auto-buy off</Badge>}
           </h2>
 
+          {/* The levels moved to each chain, so naming one chain's numbers here
+              would be wrong on the other four. */}
           <Switch on={!!conf?.auto_sell} busy={busy === "autosell"}
                   label={conf?.auto_sell
-                    ? `Auto-sell on · TP ${conf.take_profit_pct}% / SL ${conf.stop_loss_pct}%`
-                    + (conf.trailing_pct ? ` / trail ${conf.trailing_pct}%` : "")
+                    ? "Auto-sell on · levels per chain"
                     : "Auto-sell off"}
                   onChange={(v) => act("autosell", () => patch({ auto_sell: v }))} />
 
@@ -294,7 +300,20 @@ export default function TradingPage() {
                             title={p.caller}>{p.caller}</span>
                     )}
                   </td>
-                  <td className="px-3 py-3 tabular-nums text-text-muted">{fmtUsd(p.usd)}</td>
+                  {/* The coin first where we have it: that is what was spent.
+                      The dollar figure is a conversion, and it drifts. */}
+                  <td className="px-3 py-3 tabular-nums text-text-muted">
+                    {p.spent_native ? (
+                      <>
+                        <span className="block text-text">
+                          {Number(p.spent_native)} {p.native}
+                        </span>
+                        <span className="block text-[10px] text-text-dim">
+                          {fmtUsd(p.usd)} at entry
+                        </span>
+                      </>
+                    ) : fmtUsd(p.usd)}
+                  </td>
                   <td className="px-3 py-3">
                     <span className="font-mono text-[11px] text-text-muted">
                       {p.entry?.toPrecision(4)}
@@ -318,7 +337,7 @@ export default function TradingPage() {
                       </span>
                     ) : (
                       <span className="flex flex-wrap gap-1">
-                        {presets.map((pc) => (
+                        {presetsFor(p.chain).map((pc) => (
                           <button key={pc} disabled={busy === p.id}
                             onClick={() => act(p.id, () =>
                               apiSend(`/api/trading/sell/${p.id}`, "POST", { percent: pc }))}

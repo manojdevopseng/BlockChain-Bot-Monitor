@@ -260,6 +260,15 @@ class Settings(BaseSettings):
     # discovery scanner, no WSS, just "is this address a contract on Base".
     # Two endpoints because one public RPC going quiet must not take the chain
     # off the board; the pool tries them in order.
+    # Where a protected transaction is sent instead of the public mempool.
+    # Blank falls back to the public relay named in app/mev.py; set these to
+    # put a paid or private endpoint in its place without touching code.
+    eth_mev_rpc: str = ""
+    bnb_mev_rpc: str = ""
+    sol_mev_rpc: str = ""
+    base_mev_rpc: str = ""
+    rbh_mev_rpc: str = ""
+
     base_rpc_http: str = "https://mainnet.base.org"
     base_rpc_http_fallback: str = "https://base.llamarpc.com"
     # WETH on Base, the token a Base pair is priced against.

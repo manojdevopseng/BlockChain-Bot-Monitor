@@ -12,7 +12,7 @@ import time
 import aiohttp
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from .. import db, security, trading, wallet, wallets
+from .. import db, mev, security, trading, wallet, wallets
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
@@ -21,6 +21,11 @@ router = APIRouter(prefix="/api/trading", tags=["trading"])
 async def get_settings(owner: dict = Depends(security.require_customer)):
     conf = await trading.settings_for(owner["username"])
     conf["chains_available"] = list(trading.CHAINS)
+    # Resolved here rather than in the browser: the three-layer merge is the
+    # rule for what a setting *is*, and two implementations of one rule
+    # eventually disagree.
+    conf["chains_conf_resolved"] = {
+        c: trading.chain_conf(conf, c) for c in trading.CHAINS}
     # Said here rather than only in the UI copy, so any client that grows
     # around this API inherits the warning.
     conf["paper"] = True
@@ -44,15 +49,8 @@ async def patch_settings(payload: dict = Body(...),
             except (TypeError, ValueError):
                 continue
         patch["callers"] = ids
-    for field, lo, hi in (("buy_usd", 1, 100000), ("max_open", 1, 200),
+    for field, lo, hi in (("max_open", 1, 200),
                           ("daily_buys", 1, 500),
-                          ("buy_slippage", 0, 100), ("sell_slippage", 0, 100),
-                          # 0 turns a rule off, which is why these floor at 0
-                          # rather than at 1. Take-profit is allowed past 100%
-                          # because a 10x is the whole point of the exercise.
-                          ("take_profit_pct", 0, 100000),
-                          ("stop_loss_pct", 0, 100),
-                          ("trailing_pct", 0, 100),
                           ("loss_limit_pct", 0, 100),
                           ("sell_check_min_sells", 0, 100)):
         if field in patch:
@@ -60,6 +58,54 @@ async def patch_settings(payload: dict = Body(...),
                 patch[field] = max(lo, min(hi, float(patch[field])))
             except (TypeError, ValueError):
                 raise HTTPException(400, f"{field} must be a number")
+
+    # One chain's execution settings at a time, merged rather than replaced:
+    # a save from the Solana panel must not wipe what Ethereum was set to.
+    if "chains_conf" in patch:
+        incoming = patch.get("chains_conf") or {}
+        if not isinstance(incoming, dict):
+            raise HTTPException(400, "chains_conf must be an object")
+        current = (await trading.settings_for(owner["username"])).get("chains_conf") or {}
+        merged = {c: dict(v) for c, v in current.items()}
+        for chain, block in incoming.items():
+            if chain not in trading.CHAINS:
+                raise HTTPException(400, f"{chain} is not a chain this trades on")
+            if not isinstance(block, dict):
+                raise HTTPException(400, f"{chain} settings must be an object")
+            clean = dict(merged.get(chain) or {})
+            for field, lo, hi in (("buy_amount", 0, 1_000_000),
+                                  ("buy_slippage", 0, 100),
+                                  ("sell_slippage", 0, 100),
+                                  ("buy_gas_gwei", 0, 100_000),
+                                  ("sell_gas_gwei", 0, 100_000),
+                                  ("priority_fee", 0, 100_000_000),
+                                  # 0 turns a rule off, which is why these
+                                  # floor at 0. Take-profit is allowed past
+                                  # 100% because a 10x is the whole point.
+                                  ("take_profit_pct", 0, 100_000),
+                                  ("stop_loss_pct", 0, 100),
+                                  ("trailing_pct", 0, 100)):
+                if field in block:
+                    try:
+                        clean[field] = max(lo, min(hi, float(block[field])))
+                    except (TypeError, ValueError):
+                        raise HTTPException(400, f"{chain}: {field} must be a number")
+            if "sell_presets" in block:
+                clean["sell_presets"] = [
+                    max(1, min(100, int(float(x))))
+                    for x in (block["sell_presets"] or []) if str(x).strip()][:6]
+            if "mev_protect" in block:
+                # Refused rather than stored-and-ignored. A switch that saves
+                # on a chain with nothing to route through would show green
+                # for ever while every order went out the ordinary way.
+                want = bool(block["mev_protect"])
+                if want and not mev.available(chain):
+                    raise HTTPException(
+                        400, f"There is no protected route for {chain.upper()} "
+                             f"— nothing to send through.")
+                clean["mev_protect"] = want
+            merged[chain] = clean
+        patch["chains_conf"] = merged
     conf = await trading.save_settings(owner["username"], patch)
     return {"ok": True, "settings": conf}
 
@@ -134,6 +180,17 @@ async def wallet_unlink(address: str,
     if not gone:
         raise HTTPException(404, "That wallet is not linked to this account")
     return {"ok": True, "address": address}
+
+
+@router.get("/mev")
+async def mev_status(owner: dict = Depends(security.require_customer)):
+    """Per chain: is there a protected route, and does it answer.
+
+    Probed rather than assumed. A toggle reading "protected" while the relay
+    is unreachable is worse than no toggle at all — the order still goes out,
+    the ordinary way, with the switch showing green.
+    """
+    return {"items": await mev.status()}
 
 
 @router.get("/positions")

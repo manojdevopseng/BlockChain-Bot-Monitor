@@ -2,18 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Loader2, ShieldCheck, X } from "lucide-react";
+import { Check, Loader2, Shield, ShieldCheck, ShieldOff, X } from "lucide-react";
 import { apiSend, useApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-/* Quick Buy / Sell settings, in the shape a trader already knows from GMGN:
-   two tabs, the sell presets across the top, then slippage and gas.
-
-   Slippage and gas are stored for the day this executes for real and do
-   nothing today. That is said out loud on the panel rather than shown as a
-   greyed-out field — a control that looks live and is not is worse than one
-   that admits it. Everything else here is live. */
+/* Quick Buy / Sell settings, in the shape a trader already knows from GMGN —
+   but one panel per chain, because that is what they actually are.
+ *
+ * A buy is sized in the coin that leaves the wallet: ETH on Ethereum, BNB on
+ * BNB Chain, SOL on Solana. Nobody holds dollars in a wallet, so sizing in
+ * dollars meant the number on this panel was never the number that moved. The
+ * dollar figure is worked out from it afterwards, for the P&L, which is the
+ * one place every chain has to share a unit.
+ *
+ * Gas follows the same logic. Five Gwei is ordinary on Ethereum and absurd on
+ * Robinhood; Solana does not price in Gwei at all. One shared field was a
+ * single number pretending to be five.
+ *
+ * Account-wide risk stays account-wide: the master auto-buy switch, which
+ * callers to follow, how many positions, the daily loss limit. Those are
+ * decisions about the account, not about a chain. */
 
 const CHAINS = [
   { id: "rbh", label: "RBH" },
@@ -34,7 +43,7 @@ function Field({ label, value, onChange, suffix, hint }: {
       <span className="mb-1 block text-[11px] text-text-dim">{label}</span>
       <span className="relative block">
         <Input value={value ?? ""} onChange={(e) => onChange(e.target.value)}
-               className="h-9 pr-12 text-sm" />
+               className="h-9 pr-14 text-sm" />
         {suffix && (
           <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2
                            text-[11px] text-text-dim">{suffix}</span>
@@ -45,17 +54,23 @@ function Field({ label, value, onChange, suffix, hint }: {
   );
 }
 
-function Toggle({ title, note, on, onChange }: {
+function Toggle({ title, note, on, onChange, disabled, icon }: {
   title: string; note: string; on: boolean; onChange: (v: boolean) => void;
+  disabled?: boolean; icon?: React.ReactNode;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 rounded-lg border
-                      border-border bg-bg-soft/50 px-3 py-2.5">
-      <span>
-        <span className="block text-sm text-text">{title}</span>
-        <span className="block text-[11px] leading-snug text-text-dim">{note}</span>
+    <label className={`flex items-center justify-between gap-3 rounded-lg border
+                       border-border bg-bg-soft/50 px-3 py-2.5 ${
+                         disabled ? "opacity-60" : ""}`}>
+      <span className="flex items-start gap-2">
+        {icon && <span className="mt-0.5 shrink-0">{icon}</span>}
+        <span>
+          <span className="block text-sm text-text">{title}</span>
+          <span className="block text-[11px] leading-snug text-text-dim">{note}</span>
+        </span>
       </span>
-      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)}
+      <input type="checkbox" checked={on} disabled={disabled}
+             onChange={(e) => onChange(e.target.checked)}
              className="h-4 w-4 shrink-0 accent-[var(--brand)]" />
     </label>
   );
@@ -65,7 +80,8 @@ export function QuickSettings(
   { conf, onClose, onSaved }:
   { conf: Conf; onClose: () => void; onSaved: (c: Conf) => void },
 ) {
-  const [tab, setTab] = useState<"buy" | "sell">("buy");
+  const [tab, setTab] = useState<"buy" | "sell" | "account">("buy");
+  const [chain, setChain] = useState("rbh");
   const [draft, setDraft] = useState<Conf>(conf);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -77,6 +93,18 @@ export function QuickSettings(
   const available: any[] = callerData?.available ?? [];
   const picked: number[] = (draft.callers || []).map(Number);
 
+  // Whether each relay is actually reachable, asked of the server rather than
+  // assumed. A switch reading "protected" over a dead relay is worse than no
+  // switch: the order still goes out, the ordinary way, showing green.
+  const { data: mevData } = useApi<any>("/api/trading/mev", { refreshInterval: 0 });
+  const relays: Record<string, any> = Object.fromEntries(
+    (mevData?.items ?? []).map((r: any) => [r.chain, r]));
+
+  // Per-chain values start from what the server resolved — defaults layered
+  // under whatever this account changed — and are edited in place.
+  const [cc, setCc] = useState<Record<string, any>>(
+    () => ({ ...(conf.chains_conf_resolved || {}) }));
+
   useEffect(() => setMounted(true), []);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -84,12 +112,20 @@ export function QuickSettings(
     return () => document.removeEventListener("keydown", esc);
   }, [onClose]);
 
+  const here = cc[chain] || {};
+  const isSol = chain === "sol";
+  const native = here.native || "";
+  const relay = relays[chain] || {};
+
   function set(k: string, v: any) { setDraft((d) => ({ ...d, [k]: v })); }
+  function setHere(k: string, v: any) {
+    setCc((c) => ({ ...c, [chain]: { ...(c[chain] || {}), [k]: v } }));
+  }
 
   function setPreset(i: number, v: string) {
-    const next = [...(draft.sell_presets || [])];
+    const next = [...(here.sell_presets || [])];
     next[i] = Number(v) || 0;
-    set("sell_presets", next);
+    setHere("sell_presets", next);
   }
 
   function toggleCaller(id: number) {
@@ -102,9 +138,26 @@ export function QuickSettings(
     setBusy(true);
     setErr("");
     try {
+      // Only the chain being edited is sent; the server merges it over the
+      // others, so saving from the Solana panel cannot wipe Ethereum.
+      const block: Conf = {
+        buy_amount: Number(here.buy_amount) || 0,
+        buy_slippage: Number(here.buy_slippage) || 0,
+        sell_slippage: Number(here.sell_slippage) || 0,
+        sell_presets: (here.sell_presets || []).map(Number).filter(Boolean),
+        take_profit_pct: Number(here.take_profit_pct) || 0,
+        stop_loss_pct: Number(here.stop_loss_pct) || 0,
+        trailing_pct: Number(here.trailing_pct) || 0,
+        mev_protect: !!here.mev_protect,
+      };
+      if (isSol) block.priority_fee = Number(here.priority_fee) || 0;
+      else {
+        block.buy_gas_gwei = Number(here.buy_gas_gwei) || 0;
+        block.sell_gas_gwei = Number(here.sell_gas_gwei) || 0;
+      }
+
       const body: Conf = {
         auto_buy: !!draft.auto_buy,
-        buy_usd: Number(draft.buy_usd) || 0,
         max_open: Number(draft.max_open) || 1,
         daily_buys: Number(draft.daily_buys) || 1,
         chains: draft.chains,
@@ -112,17 +165,10 @@ export function QuickSettings(
         auto_buy_gas: !!draft.auto_buy_gas,
         sell_check: !!draft.sell_check,
         tg_alerts: !!draft.tg_alerts,
-        buy_slippage: Number(draft.buy_slippage) || 0,
-        sell_slippage: Number(draft.sell_slippage) || 0,
-        buy_gas_gwei: Number(draft.buy_gas_gwei) || 0,
-        sell_gas_gwei: Number(draft.sell_gas_gwei) || 0,
-        sell_presets: (draft.sell_presets || []).map(Number).filter(Boolean),
         auto_sell: !!draft.auto_sell,
-        take_profit_pct: Number(draft.take_profit_pct) || 0,
-        stop_loss_pct: Number(draft.stop_loss_pct) || 0,
-        trailing_pct: Number(draft.trailing_pct) || 0,
         loss_limit_on: !!draft.loss_limit_on,
         loss_limit_pct: Number(draft.loss_limit_pct) || 0,
+        chains_conf: { [chain]: block },
       };
       const r: any = await apiSend("/api/trading/settings", "PATCH", body);
       onSaved(r.settings);
@@ -150,37 +196,121 @@ export function QuickSettings(
           </button>
         </div>
 
-        <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-border bg-bg-soft p-1">
-          {(["buy", "sell"] as const).map((t) => (
+        {/* Which chain is being configured. Above the tabs because it changes
+            what every field below means — the amount is in a different coin
+            and the gas is on a different scale. */}
+        <div className="mb-3">
+          <span className="mb-1.5 block text-[11px] text-text-dim">
+            Settings for
+          </span>
+          <div className="grid grid-cols-5 gap-1 rounded-lg border border-border bg-bg-soft p-1">
+            {CHAINS.map((c) => (
+              <button key={c.id} onClick={() => setChain(c.id)}
+                className={`rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                  chain === c.id ? "bg-brand/20 text-brand-soft"
+                                 : "text-text-dim hover:text-text"
+                }`}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-4 grid grid-cols-3 gap-1 rounded-lg border border-border bg-bg-soft p-1">
+          {(["buy", "sell", "account"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
                 tab === t ? "bg-brand/20 text-brand-soft" : "text-text-dim hover:text-text"
               }`}>
-              {t} settings
+              {t === "account" ? "Account" : `${t} · ${chain.toUpperCase()}`}
             </button>
           ))}
         </div>
 
         {tab === "buy" ? (
           <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Amount per buy" suffix={native} value={here.buy_amount}
+                     onChange={(v) => setHere("buy_amount", v)}
+                     hint={`Spent in ${native}, straight from the wallet`} />
+              <Field label="Slippage" suffix="%" value={here.buy_slippage}
+                     onChange={(v) => setHere("buy_slippage", v)}
+                     hint="Held for live trading" />
+            </div>
+
+            {isSol ? (
+              <Field label="Priority fee" suffix="µlamports" value={here.priority_fee}
+                     onChange={(v) => setHere("priority_fee", v)}
+                     hint="Per compute unit — Solana's version of gas" />
+            ) : (
+              <Field label="Buy gas" suffix="Gwei" value={here.buy_gas_gwei}
+                     onChange={(v) => setHere("buy_gas_gwei", v)}
+                     hint="Held for live trading" />
+            )}
+
+            <MevToggle chain={chain} here={here} relay={relay} setHere={setHere} />
+          </div>
+        ) : tab === "sell" ? (
+          <div className="flex flex-col gap-3">
+            <div>
+              <span className="mb-1.5 block text-[11px] text-text-dim">
+                Sell buttons — the percentages offered on a position
+              </span>
+              <div className="grid grid-cols-4 gap-2">
+                {[0, 1, 2, 3].map((i) => (
+                  <span key={i} className="relative">
+                    <Input value={(here.sell_presets || [])[i] ?? ""}
+                           onChange={(e) => setPreset(i, e.target.value)}
+                           className="h-9 pr-6 text-center text-sm" />
+                    <span className="pointer-events-none absolute right-2 top-1/2
+                                     -translate-y-1/2 text-[11px] text-text-dim">%</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Take profit" suffix="%" value={here.take_profit_pct}
+                     onChange={(v) => setHere("take_profit_pct", v)} hint="0 = off" />
+              <Field label="Stop loss" suffix="%" value={here.stop_loss_pct}
+                     onChange={(v) => setHere("stop_loss_pct", v)} hint="0 = off" />
+              <Field label="Trailing" suffix="%" value={here.trailing_pct}
+                     onChange={(v) => setHere("trailing_pct", v)} hint="0 = off" />
+            </div>
+            <p className="rounded-lg border border-border bg-bg-soft/40 px-3 py-2
+                          text-[10px] leading-relaxed text-text-dim">
+              These levels are {chain.toUpperCase()}&apos;s own — the master auto-sell
+              switch is on the Account tab. The trailing stop arms only once a position
+              has actually been in profit, and never fires on the way up from the entry.
+            </p>
+
+            <Field label="Sell slippage" suffix="%" value={here.sell_slippage}
+                   onChange={(v) => setHere("sell_slippage", v)}
+                   hint="Held for live trading" />
+            {!isSol && (
+              <Field label="Sell gas" suffix="Gwei" value={here.sell_gas_gwei}
+                     onChange={(v) => setHere("sell_gas_gwei", v)}
+                     hint="Held for live trading" />
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
             <Toggle title="Auto-buy starred callers" on={!!draft.auto_buy}
                     onChange={(v) => set("auto_buy", v)}
-                    note="When a caller below names a token, open a position for it." />
+                    note="When a caller below names a token, open a position for it,
+                          sized by that chain's own Buy tab." />
+
+            <Toggle title="Auto-sell" on={!!draft.auto_sell}
+                    onChange={(v) => set("auto_sell", v)}
+                    note="Close a position by itself when one of its chain's rules is
+                          hit. Checked once a minute, whether or not this page is open." />
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Amount per buy" suffix="USD" value={draft.buy_usd}
-                     onChange={(v) => set("buy_usd", v)} />
               <Field label="Max open positions" value={draft.max_open}
                      onChange={(v) => set("max_open", v)} />
               <Field label="Automatic buys per day" value={draft.daily_buys}
                      onChange={(v) => set("daily_buys", v)} />
-              <Field label="Slippage" suffix="%" value={draft.buy_slippage}
-                     onChange={(v) => set("buy_slippage", v)}
-                     hint="Held for live trading" />
             </div>
-
-            <Field label="Buy gas" suffix="Gwei" value={draft.buy_gas_gwei}
-                   onChange={(v) => set("buy_gas_gwei", v)} hint="Held for live trading" />
 
             <div>
               <span className="mb-1.5 block text-[11px] text-text-dim">Chains to buy on</span>
@@ -275,60 +405,12 @@ export function QuickSettings(
                      onChange={(v) => set("loss_limit_pct", v)}
                      hint="Measured against what today's positions cost, from midnight IST." />
             )}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div>
-              <span className="mb-1.5 block text-[11px] text-text-dim">
-                Sell buttons — the percentages offered on a position
-              </span>
-              <div className="grid grid-cols-4 gap-2">
-                {[0, 1, 2, 3].map((i) => (
-                  <span key={i} className="relative">
-                    <Input value={(draft.sell_presets || [])[i] ?? ""}
-                           onChange={(e) => setPreset(i, e.target.value)}
-                           className="h-9 pr-6 text-center text-sm" />
-                    <span className="pointer-events-none absolute right-2 top-1/2
-                                     -translate-y-1/2 text-[11px] text-text-dim">%</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <Toggle title="Auto-sell" on={!!draft.auto_sell}
-                    onChange={(v) => set("auto_sell", v)}
-                    note="Close a position by itself when one of the three rules below
-                          is hit. Checked once a minute, whether or not this page is open." />
-
-            <div className="grid grid-cols-3 gap-3">
-              <Field label="Take profit" suffix="%" value={draft.take_profit_pct}
-                     onChange={(v) => set("take_profit_pct", v)} hint="0 = off" />
-              <Field label="Stop loss" suffix="%" value={draft.stop_loss_pct}
-                     onChange={(v) => set("stop_loss_pct", v)} hint="0 = off" />
-              <Field label="Trailing stop" suffix="%" value={draft.trailing_pct}
-                     onChange={(v) => set("trailing_pct", v)} hint="0 = off" />
-            </div>
-            <p className="rounded-lg border border-border bg-bg-soft/40 px-3 py-2
-                          text-[10px] leading-relaxed text-text-dim">
-              The trailing stop arms only once a position has actually been in profit,
-              and then closes it if it falls that far from its high. It never fires on
-              the way up from the entry.
-            </p>
 
             <Toggle title="Telegram alerts" on={!!draft.tg_alerts}
                     onChange={(v) => set("tg_alerts", v)}
                     note="Every buy and sell on this account, in your own Telegram.
                           Connect one in Alert Rules — nothing is sent until you do,
                           and it only ever goes to your own chat." />
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Slippage" suffix="%" value={draft.sell_slippage}
-                     onChange={(v) => set("sell_slippage", v)}
-                     hint="Held for live trading" />
-              <Field label="Sell gas" suffix="Gwei" value={draft.sell_gas_gwei}
-                     onChange={(v) => set("sell_gas_gwei", v)}
-                     hint="Held for live trading" />
-            </div>
           </div>
         )}
 
@@ -336,10 +418,9 @@ export function QuickSettings(
                         bg-accent-amber/10 p-3 text-[11px] leading-relaxed text-accent-amber">
           <ShieldCheck size={14} className="mt-0.5 shrink-0" />
           <span>
-            Positions are recorded, not executed. GMGN&apos;s trading API signs with a
-            private key rather than an API key, and serves Solana only — so slippage
-            and gas are stored here for the day this runs live, and do nothing today.
-            Everything else on this panel is live now.
+            Positions are recorded, not executed — so slippage, gas and the MEV route
+            are stored here for the day this runs live, and do nothing today. Amounts,
+            rules, callers and limits are all live now.
           </span>
         </div>
 
@@ -349,12 +430,54 @@ export function QuickSettings(
           <Button variant="primary" size="sm" disabled={busy} onClick={save}
                   className="flex-1 justify-center">
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-            Save
+            Save {chain.toUpperCase()}
           </Button>
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
         </div>
       </div>
     </div>,
     document.body,
+  );
+}
+
+/* MEV protection, told honestly per chain.
+ *
+ * On a chain with a public mempool this is the difference between paying the
+ * price you saw and paying whatever a bot leaves you. On a chain that orders
+ * through one sequencer there is no mempool to be watched in, so the switch
+ * would be theatre — it is disabled and says why, rather than sitting there
+ * green and implying a protection nobody is providing. */
+function MevToggle({ chain, here, relay, setHere }: {
+  chain: string; here: any; relay: any; setHere: (k: string, v: any) => void;
+}) {
+  const supported = !!here.mev_supported;
+  const on = supported && !!here.mev_protect;
+  const reachable = !!relay.reachable;
+
+  return (
+    <div>
+      <Toggle
+        title="MEV protection"
+        on={on}
+        disabled={!supported}
+        onChange={(v) => setHere("mev_protect", v)}
+        icon={on ? <Shield size={14} className="text-accent-green" />
+                 : <ShieldOff size={14} className="text-text-dim" />}
+        note={supported
+          ? `Send through ${relay.relay || "a private relay"} instead of the public
+             mempool, so the order cannot be read and raced before it lands.`
+          : relay.note || "No protected route for this chain."}
+      />
+      {supported && on && (
+        <p className="mt-1 flex items-center gap-1.5 px-1 text-[10px] text-text-dim">
+          <span className={`h-1.5 w-1.5 rounded-full ${
+            reachable ? "bg-accent-green" : "bg-accent-red"}`} />
+          {reachable
+            ? `${relay.relay} is answering`
+            : `${relay.relay || "The relay"} is not answering right now${
+                relay.why ? ` — ${relay.why}` : ""}`}
+        </p>
+      )}
+    </div>
   );
 }
