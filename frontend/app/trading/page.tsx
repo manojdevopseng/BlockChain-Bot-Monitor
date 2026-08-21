@@ -128,10 +128,10 @@ export default function TradingPage() {
       <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/10 px-4 py-3
                       text-xs leading-relaxed text-accent-amber">
         <b>Paper trading.</b> Every buy and sell here is recorded at the real price
-        at that moment, and nothing is sent to a chain. GMGN&apos;s trading API signs
-        with a private key rather than an API key and serves Solana only — so
-        until that changes, this answers whether the strategy works without
-        risking anything on finding out.
+        at that moment, and nothing is sent to a chain. Executing for real means
+        something has to hold a key and sign — a decision about custody, not a
+        setting. Until that is made, this answers whether the strategy works
+        without risking anything on finding out.
       </div>
 
       {/* The real wallet, above the pretend one. Deliberately adjacent: the

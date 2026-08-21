@@ -124,7 +124,6 @@ export function QuickSettings(
         loss_limit_on: !!draft.loss_limit_on,
         loss_limit_pct: Number(draft.loss_limit_pct) || 0,
       };
-      if (String(draft.gmgn_key || "").trim()) body.gmgn_key = draft.gmgn_key;
       const r: any = await apiSend("/api/trading/settings", "PATCH", body);
       onSaved(r.settings);
       onClose();

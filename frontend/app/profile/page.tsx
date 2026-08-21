@@ -277,27 +277,9 @@ function CredentialsCard() {
  * explains that the key alone cannot trade anyway. */
 function TradingCard() {
   const { data: conf } = useApi<any>("/api/trading/settings");
-  const [key, setKey] = useState("");
 
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  // Its own route rather than saving a blank string: the settings PATCH
-  // treats blank as "leave it alone", which is right for a field that cannot
-  // show what it holds and would otherwise make removal impossible.
-  async function forgetKey() {
-    setBusy("forget");
-    setMsg(null);
-    try {
-      await apiSend("/api/trading/gmgn-key", "DELETE");
-      mutate("/api/trading/settings");
-      setMsg({ ok: true, text: "GMGN key removed." });
-    } catch (e: any) {
-      setMsg({ ok: false, text: String(e?.message || e) });
-    } finally {
-      setBusy("");
-    }
-  }
 
   async function save(patch: any, tag: string) {
     setBusy(tag);
@@ -305,7 +287,6 @@ function TradingCard() {
     try {
       await apiSend("/api/trading/settings", "PATCH", patch);
       mutate("/api/trading/settings");
-      setKey("");
       setMsg({ ok: true, text: "Saved." });
     } catch (e: any) {
       setMsg({ ok: false, text: String(e?.message || e) });
@@ -338,48 +319,18 @@ function TradingCard() {
           />
         </label>
 
-        {/* Wallets. Next to the key because both are "things about your own
-            money that this page holds", and deliberately unlike it: the key
-            is a secret, an address is public by construction. */}
+        {/* Wallets — the only credential this page deals in, and not really
+            a credential at all: an address is public by construction. */}
         <div>
           <label className="mb-2 block text-xs text-text-muted">Wallets</label>
           <WalletConnect />
         </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-text-muted">
-            GMGN API key{" "}
-            {conf?.gmgn_key_set && <Badge variant="green">stored</Badge>}
-          </label>
-          <div className="flex gap-2">
-            <Input value={key} onChange={(e) => setKey(e.target.value)}
-                   placeholder={conf?.gmgn_key_set ? "•••••••• — enter a new key to replace it"
-                                                   : "x-route-key from GMGN"}
-                   type="password" />
-            <Button size="sm" variant="outline" disabled={!key.trim() || busy === "key"}
-                    onClick={() => save({ gmgn_key: key.trim() }, "key")}>
-              {busy === "key" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
-            </Button>
-          </div>
-          <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-text-dim">
-            <span>Never shown again once saved.</span>
-            {conf?.gmgn_key_set && (
-              <button onClick={() => forgetKey()} disabled={busy === "forget"}
-                      title="Delete the stored key. Nothing else changes."
-                      className="text-accent-red hover:underline disabled:opacity-40">
-                {busy === "forget" ? "removing…" : "Disconnect GMGN"}
-              </button>
-            )}
-          </p>
-        </div>
-
         <div className="rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3
                         text-[11px] leading-relaxed text-accent-amber">
-          <b>Positions are recorded, not executed.</b> GMGN's trading API signs
-          each order with your private key rather than the API key, and serves
-          Solana only — while most calls here are on Robinhood. So this follows
-          your callers and keeps the score without placing an order. Nothing on
-          this page can move funds, and no private key is ever asked for.
+          <b>Positions are recorded, not executed.</b> This follows your callers
+          and keeps the score without placing an order. Nothing on this page can
+          move funds, and no private key is ever asked for.
         </div>
 
         {msg && (

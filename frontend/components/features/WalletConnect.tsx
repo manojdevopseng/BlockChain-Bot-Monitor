@@ -222,34 +222,42 @@ export function WalletConnect() {
                 }`} />
                 {connectedHere(w.address) ? "connected here" : "not connected here"}
               </span>
+              {/* Named rather than drawn. A bin icon beside a wallet address
+                  is the one control on this panel nobody should have to guess
+                  at, and "disconnect" is the word the person came looking for. */}
               <button onClick={() => disconnect(w)} disabled={!!busy}
-                      title="Disconnect — the address is forgotten. Nothing is revoked on the chain, because nothing was ever granted."
-                      className="ml-auto grid h-6 w-6 place-items-center rounded
-                                 text-text-dim transition-colors hover:text-accent-red
+                      title="Forget this address. Nothing is revoked on the chain, because nothing was ever granted."
+                      className="ml-auto inline-flex items-center gap-1 rounded-md border
+                                 border-accent-red/40 px-2 py-1 text-[11px] font-medium
+                                 text-accent-red transition-colors hover:bg-accent-red/10
                                  disabled:opacity-40">
-                {busy === w.address ? <Loader2 size={13} className="animate-spin" />
-                                    : <Trash2 size={13} />}
+                {busy === w.address ? <Loader2 size={12} className="animate-spin" />
+                                    : <Trash2 size={12} />}
+                Disconnect Wallet
               </button>
             </div>
           ))}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" disabled={!has.mm || !!busy}
-                onClick={() => sign("evm")}
-                title={has.mm ? "Connect MetaMask — one signature, no transaction"
-                              : "MetaMask was not detected in this browser"}>
-          {busy === "metamask" ? <Loader2 size={13} className="animate-spin" />
-                               : <Plug size={13} />} MetaMask
-        </Button>
-        <Button size="sm" variant="outline" disabled={!has.ph || !!busy}
-                onClick={() => sign("sol")}
-                title={has.ph ? "Connect Phantom — one signature, no transaction"
-                              : "Phantom was not detected in this browser"}>
-          {busy === "phantom" ? <Loader2 size={13} className="animate-spin" />
-                              : <Plug size={13} />} Phantom
-        </Button>
+      <div>
+        <span className="mb-1.5 block text-[11px] text-text-dim">Connect Wallet</span>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={!has.mm || !!busy}
+                  onClick={() => sign("evm")}
+                  title={has.mm ? "Connect MetaMask — one signature, no transaction"
+                                : "MetaMask was not detected in this browser"}>
+            {busy === "metamask" ? <Loader2 size={13} className="animate-spin" />
+                                 : <Plug size={13} />} Connect MetaMask
+          </Button>
+          <Button size="sm" variant="outline" disabled={!has.ph || !!busy}
+                  onClick={() => sign("sol")}
+                  title={has.ph ? "Connect Phantom — one signature, no transaction"
+                                : "Phantom was not detected in this browser"}>
+            {busy === "phantom" ? <Loader2 size={13} className="animate-spin" />
+                                : <Plug size={13} />} Connect Phantom
+          </Button>
+        </div>
       </div>
 
       {!has.secure && (
@@ -267,7 +275,11 @@ export function WalletConnect() {
       )}
 
       {/* Watch an address without proving it. Honest about what it is. */}
-      <div className="flex flex-wrap gap-2">
+      <div>
+        <span className="mb-1.5 block text-[11px] text-text-dim">
+          Or watch an address — read-only, no wallet needed
+        </span>
+        <div className="flex flex-wrap gap-2">
         <select value={kind} onChange={(e) => setKind(e.target.value as any)}
                 className="h-9 rounded-lg border border-border bg-bg-soft px-2
                            text-xs text-text">
@@ -283,6 +295,7 @@ export function WalletConnect() {
                 title="Watch this address. It stays marked unverified — anything that spends will require a signature.">
           {busy === "manual" ? <Loader2 size={13} className="animate-spin" /> : "Watch"}
         </Button>
+        </div>
       </div>
 
       {err && <p className="text-[11px] text-accent-red">{err}</p>}

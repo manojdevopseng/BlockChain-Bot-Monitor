@@ -20,19 +20,13 @@ router = APIRouter(prefix="/api/trading", tags=["trading"])
 @router.get("/settings")
 async def get_settings(owner: dict = Depends(security.require_customer)):
     conf = await trading.settings_for(owner["username"])
-    # The key is never handed back, only whether one is stored. A field that
-    # returns what was typed into it is a field that leaks it to anything that
-    # can read one response.
-    key = conf.pop("gmgn_key", "")
-    conf["gmgn_key_set"] = bool(key)
     conf["chains_available"] = list(trading.CHAINS)
     # Said here rather than only in the UI copy, so any client that grows
     # around this API inherits the warning.
     conf["paper"] = True
     conf["day"] = await trading.day_pnl(owner["username"])
-    conf["paper_note"] = ("Positions are recorded, not executed. GMGN's trading "
-                          "API signs with a private key and serves Solana only, "
-                          "so nothing here can place a real order yet.")
+    conf["paper_note"] = ("Positions are recorded, not executed. Nothing here "
+                          "signs a transaction or moves funds.")
     return conf
 
 
@@ -40,26 +34,6 @@ async def get_settings(owner: dict = Depends(security.require_customer)):
 async def patch_settings(payload: dict = Body(...),
                          owner: dict = Depends(security.require_customer)):
     patch = dict(payload)
-    # An empty string means "leave it alone", not "clear it" — otherwise every
-    # save from a form that does not show the key would wipe it.
-    if not str(patch.get("gmgn_key") or "").strip():
-        patch.pop("gmgn_key", None)
-    # Checked before it is stored rather than when it is next read: a typo
-    # saved silently becomes a chain that reports "could not read" for ever,
-    # and the person who typed it has long since moved on.
-    if "wallet_evm" in patch or "wallet_sol" in patch:
-        conf_now = await trading.settings_for(owner["username"])
-        try:
-            evm, sol = wallet.valid(
-                patch.get("wallet_evm", conf_now.get("wallet_evm", "")),
-                patch.get("wallet_sol", conf_now.get("wallet_sol", "")))
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
-        if "wallet_evm" in patch:
-            patch["wallet_evm"] = evm
-        if "wallet_sol" in patch:
-            patch["wallet_sol"] = sol
-
     if "chains" in patch:
         patch["chains"] = [c for c in patch["chains"] if c in trading.CHAINS]
     if "callers" in patch:
@@ -87,7 +61,6 @@ async def patch_settings(payload: dict = Body(...),
             except (TypeError, ValueError):
                 raise HTTPException(400, f"{field} must be a number")
     conf = await trading.save_settings(owner["username"], patch)
-    conf.pop("gmgn_key", "")
     return {"ok": True, "settings": conf}
 
 
@@ -161,20 +134,6 @@ async def wallet_unlink(address: str,
     if not gone:
         raise HTTPException(404, "That wallet is not linked to this account")
     return {"ok": True, "address": address}
-
-
-@router.delete("/gmgn-key")
-async def gmgn_disconnect(owner: dict = Depends(security.require_customer)):
-    """Forget the stored GMGN key.
-
-    Its own route rather than a blank string through the settings PATCH,
-    because that path deliberately treats blank as "leave it alone" — which is
-    right for a form that cannot show what it holds, and would otherwise make
-    removing the key impossible.
-    """
-    await db.get_collection("trading_settings").update_one(
-        {"user": owner["username"]}, {"$unset": {"gmgn_key": ""}})
-    return {"ok": True}
 
 
 @router.get("/positions")
@@ -291,7 +250,6 @@ async def stop(payload: dict = Body(default=None),
     """
     why = str((payload or {}).get("reason") or "").strip() or "kill switch"
     conf = await trading.stop_auto_buy(owner["username"], why)
-    conf.pop("gmgn_key", "")
     return {"ok": True, "settings": conf}
 
 

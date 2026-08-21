@@ -5,11 +5,10 @@ for; a sell records the price at the moment it was closed; the difference is
 the answer. That is the whole engine.
 
 It is built this way on purpose rather than as a stepping stone that got left
-in. GMGN's trading API signs with the caller's *private key*, not an API key,
-and it serves Solana only — while the calls this is meant to follow are mostly
-on Robinhood. So the strategy cannot be executed through it today, and the
-question worth answering first is whether the strategy is worth executing at
-all. This answers that, on every chain, for nothing.
+in. Executing for real means something must hold a key and sign, which is a
+decision about custody rather than a feature to add — and the question worth
+answering before making it is whether the strategy is worth executing at all.
+This answers that, on every chain, for nothing.
 
 Prices come from DexScreener because it is the one source that covers all five
 chains — Robinhood included — and quotes in dollars, which is what a profit and
@@ -66,10 +65,6 @@ DEFAULTS: dict[str, Any] = {
     "buy_gas_gwei": 0.04,
     "sell_gas_gwei": 0.04,
     "sell_presets": [25, 50, 75, 100],
-    # An API key can be stored; it cannot trade on its own. See the module
-    # docstring — signing needs a private key, and this never asks for one.
-    "gmgn_key": "",
-
     # ── the sellability guard ──
     # Asked only of gas-fee tokens, and only of them on purpose: they are
     # minutes old, no human has vouched for them, and they are where the
@@ -95,12 +90,6 @@ DEFAULTS: dict[str, Any] = {
     # mysteriously off and leaving the reason in a log file.
     "stopped_reason": "",
     "stopped_at": 0.0,
-
-    # The wallet the strip reads. Watch-only — an address, never a key. One
-    # EVM string serves Robinhood, Ethereum, BNB and Base because they share a
-    # keyspace; Solana does not, so it gets its own.
-    "wallet_evm": "",
-    "wallet_sol": "",
 
     # Telegram. Where it goes is not a setting — an account that connected its
     # own chat gets its own trades there and nobody else's; see
