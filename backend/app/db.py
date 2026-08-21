@@ -168,13 +168,49 @@ class _MemDB:
 
 _mem_db = _MemDB()
 
+# Set only when this stack reads somebody else's feed — see connect().
+_feed_db = None
+
+
+# What one operator collects and every stack reading this deployment shares.
+#
+# The split is not "big" versus "small": it is whose row it is. Everything here
+# is produced by the scanners and the userbot and belongs to nobody in
+# particular — a detection is a detection whoever is looking at it. Everything
+# not here belongs to an account (its tokens, its orders, its positions) or
+# controls one stack's own behaviour, and two stacks sharing either of those
+# would be two stacks pretending to be one.
+#
+# `services` is the one that would hurt most and is deliberately absent: it is
+# the registry of switches, and sharing it would mean turning a scanner off on
+# the test box turns it off in production.
+SHARED_COLLECTIONS = frozenset({
+    # the premium feed
+    "premium_calls", "premium_messages", "premium_media",
+    "premium_detections", "premium_archive", "premium_groups",
+    # the detection panels
+    "alerts", "gas_alerts", "tokens", "outcomes",
+    "launchpad_tokens", "launchpad_watch", "launchpad_skip",
+    "rbhx_tokens", "rbhx_watch", "rbhx_skip", "rbhx_keywords",
+    "x_links", "x_drops", "x_accounts",
+    # what the scanners read and remember about the feed
+    "ai_narratives", "ai_decisions", "ai_seen", "scanner_state",
+    "chats_seen", "mutes", "keywords", "filter_keywords", "otto_rules",
+    "forwarder_counters",
+})
+
+
+def feed_shared() -> bool:
+    """Is the feed coming from somebody else's database?"""
+    return _feed_db is not None
+
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
 async def connect() -> None:
     """Try Mongo; on any failure fall back to the in-memory store."""
-    global DB_OK, _backend, _mongo_client, _mongo_db
+    global DB_OK, _backend, _mongo_client, _mongo_db, _feed_db
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -183,6 +219,16 @@ async def connect() -> None:
         )
         await _mongo_client.admin.command("ping")
         _mongo_db = _mongo_client[settings.mongo_db]
+        # A second stack reading the feed the first one collects. Same server,
+        # so this is a handle rather than a connection — no copy, no lag, and
+        # nothing to keep in step.
+        want = (settings.feed_db or "").strip()
+        _feed_db = (_mongo_client[want]
+                    if want and want != settings.mongo_db else None)
+        if _feed_db is not None:
+            print(f"[db] feed read from '{want}' "
+                  f"({len(SHARED_COLLECTIONS)} collections); "
+                  f"everything else in '{settings.mongo_db}'")
         DB_OK = True
         _backend = "mongo"
     except Exception as exc:  # noqa: BLE001
@@ -202,6 +248,8 @@ def backend_name() -> str:
 
 def get_collection(name: str):
     if _backend == "mongo" and _mongo_db is not None:
+        if _feed_db is not None and name in SHARED_COLLECTIONS:
+            return _feed_db[name]
         return _mongo_db[name]
     return _mem_db[name]
 
@@ -427,6 +475,12 @@ async def ensure_indexes() -> None:
         ("launchpad_watch",    "handle"),
     ]
     for coll, keys in plan:
+        # The stack that owns a collection owns its indexes. A reader creating
+        # them is at best redundant and at worst destructive: _ensure_ttl below
+        # would re-point the owner's retention at this stack's setting, and
+        # mongod deletes what falls outside it without asking anybody.
+        if _feed_db is not None and coll in SHARED_COLLECTIONS:
+            continue
         try:
             # A dict entry carries options — unique, sparse — beside its keys.
             if isinstance(keys, dict):
@@ -442,6 +496,8 @@ async def ensure_indexes() -> None:
     if _backend != "mongo":
         return
     for coll, setting in _TTL_COLLECTIONS.items():
+        if _feed_db is not None and coll in SHARED_COLLECTIONS:
+            continue          # not ours to expire — see the loop above
         await _backfill_dt(coll)
         await _ensure_ttl(coll, int(getattr(settings, setting, 0)))
 

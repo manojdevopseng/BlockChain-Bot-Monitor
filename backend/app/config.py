@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # ── Database ────────────────────────────────────────────
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db: str = "blockchain_bot"
+    # The database the operator's feed is read from, when it is not this
+    # stack's own. Blank means "there is only one database", which is what a
+    # single deployment always is — see db.SHARED_COLLECTIONS.
+    feed_db: str = ""
 
     # ── Data retention (days) ───────────────────────────────
     # Enforced by MongoDB TTL indexes: mongod expires old documents in its own
