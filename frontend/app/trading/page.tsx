@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { mutate } from "swr";
 import {
-  ExternalLink, Loader2, Play, Power, RefreshCw, Settings2, Sparkles, Trash2,
+  ExternalLink, Loader2, Play, Power, RefreshCw, Settings2, Shield, Sparkles,
+  Trash2,
 } from "lucide-react";
 import { useApi, apiSend } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -308,8 +309,15 @@ export default function TradingPage() {
                   <td className="px-3 py-3 tabular-nums text-text-muted">
                     {p.spent_native ? (
                       <>
-                        <span className="block text-text">
+                        <span className="flex items-center gap-1 text-text">
                           {Number(p.spent_native)} {p.native}
+                          {/* Recorded at the moment of the decision, so it
+                              still describes this trade after the setting is
+                              changed. */}
+                          {p.mev_protect && (
+                            <Shield size={10} className="text-accent-green"
+                                    aria-label="Routed away from the public mempool" />
+                          )}
                         </span>
                         <span className="block text-[10px] text-text-dim">
                           {fmtUsd(p.usd)} at entry

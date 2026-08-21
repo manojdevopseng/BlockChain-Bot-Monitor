@@ -97,6 +97,46 @@ def routes() -> dict[str, dict]:
     }
 
 
+# ── what a browser wallet may be handed ─────────────────────────────────────
+#
+# The routes above carry an API key, so they can never be given to a browser:
+# every customer would receive the operator's credential and could spend the
+# quota it pays for. These are the credential-free equivalents — public relays
+# built to be handed to end users, which is exactly what Flashbots Protect and
+# 48Club are for.
+#
+# Only the chains where it changes something are listed. Base and Robinhood
+# order through a single sequencer with no public mempool, so pointing a
+# wallet at a different endpoint there protects against nothing — offering the
+# switch would be asking somebody to change their wallet settings for no
+# reason. Solana and Tron have no such wallet method at all.
+WALLET_NETWORKS = {
+    "eth": {
+        "chain_id": "0x1", "name": "Ethereum (Flashbots Protect)",
+        "rpc": "https://rpc.flashbots.net/fast",
+        "explorer": "https://etherscan.io",
+        "symbol": "ETH", "decimals": 18,
+        "relay": "Flashbots Protect",
+        "why": "Your wallet sends straight to block builders instead of the "
+               "public mempool, so a buy cannot be read and raced.",
+    },
+    "bnb": {
+        "chain_id": "0x38", "name": "BNB Chain (48Club Private)",
+        "rpc": "https://rpc.48.club",
+        "explorer": "https://bscscan.com",
+        "symbol": "BNB", "decimals": 18,
+        "relay": "48Club Private RPC",
+        "why": "A private relay to BNB Chain validators, instead of a mempool "
+               "that sandwich bots read continuously.",
+    },
+}
+
+
+def wallet_networks() -> dict[str, dict]:
+    """The chains a browser wallet can usefully be switched to, and how."""
+    return WALLET_NETWORKS
+
+
 def endpoint(chain: str) -> str:
     """Where a protected transaction for this chain would go. "" when none."""
     return (routes().get((chain or "").lower(), {}) or {}).get("url", "")

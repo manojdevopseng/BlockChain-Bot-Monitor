@@ -189,7 +189,11 @@ async def mev_status(owner: dict = Depends(security.require_customer)):
     is unreachable is worse than no toggle at all — the order still goes out,
     the ordinary way, with the switch showing green.
     """
-    return {"items": await mev.status()}
+    return {"items": await mev.status(),
+            # The credential-free relays a browser wallet can be pointed at.
+            # Deliberately not the routes above: those carry the operator's
+            # API key, and handing one to a customer hands them the quota.
+            "wallet_networks": mev.wallet_networks()}
 
 
 @router.get("/positions")

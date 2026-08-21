@@ -13,6 +13,7 @@ minute however many accounts are on the box.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import aiohttp
 
@@ -42,7 +43,61 @@ async def _accounts() -> list[str]:
 
 
 
+# How often the protected relays are checked. Rarely, because this is not a
+# thing that changes minute to minute — and because the check itself costs a
+# request to each of them.
+RELAY_EVERY = 15 * 60
+_relay_checked = 0.0
+# Which chains were already reported down, so a relay that stays down for a
+# day is one notice rather than ninety-six.
+_relay_down: set[str] = set()
+
+
+async def _check_relays() -> None:
+    """Tell the operator when a protected route stops answering.
+
+    This is the quietest failure in the whole trading path. Nothing breaks:
+    the switch stays on, the panel keeps saying "protected", and every order
+    goes out the ordinary way — the relay is simply not there any more. It
+    can only be found by asking, so it is asked.
+    """
+    global _relay_checked
+    now = time.time()
+    if now - _relay_checked < RELAY_EVERY:
+        return
+    _relay_checked = now
+
+    from . import mev, notifications
+    for row in await mev.status():
+        if not row["supported"]:
+            continue
+        chain = row["chain"]
+        if row["reachable"]:
+            if chain in _relay_down:
+                _relay_down.discard(chain)
+                log.info(f"[TRADING] {chain.upper()} relay is answering again")
+            continue
+        if chain in _relay_down:
+            continue
+        _relay_down.add(chain)
+        log.warning(f"[TRADING] {chain.upper()} MEV relay unreachable: "
+                    f"{row['why']}")
+        try:
+            await notifications.notify(
+                "admin", notifications.SYSTEM,
+                f"{chain.upper()} MEV relay is not answering",
+                f"{row['relay'] or 'The relay'} stopped responding"
+                + (f" ({row['why']})" if row["why"] else "")
+                + f". Orders on {chain.upper()} would go out unprotected until "
+                  f"it returns.",
+                "/trading", key=f"relay-down-{chain}-{int(now // 3600)}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def _tick(session: aiohttp.ClientSession) -> None:
+    await _check_relays()
+
     # Queued gas-fee buys first: a token that has just become sellable should
     # be opened before this pass prices anything, not a minute after.
     try:

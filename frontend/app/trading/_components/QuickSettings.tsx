@@ -100,6 +100,9 @@ export function QuickSettings(
   const { data: mevData } = useApi<any>("/api/trading/mev", { refreshInterval: 0 });
   const relays: Record<string, any> = Object.fromEntries(
     (mevData?.items ?? []).map((r: any) => [r.chain, r]));
+  // Credential-free relays a browser wallet can be pointed at. Only the
+  // chains where switching changes something appear here.
+  const networks: Record<string, any> = mevData?.wallet_networks ?? {};
 
   // Per-chain values start from what the server resolved — defaults layered
   // under whatever this account changed — and are edited in place.
@@ -260,7 +263,8 @@ export function QuickSettings(
                      hint="Held for live trading" />
             )}
 
-            <MevToggle chain={chain} here={here} relay={relay} setHere={setHere} />
+            <MevToggle chain={chain} here={here} relay={relay} setHere={setHere}
+                       network={networks[chain]} />
           </div>
         ) : tab === "sell" ? (
           <div className="flex flex-col gap-3">
@@ -459,12 +463,40 @@ export function QuickSettings(
  * through one sequencer there is no mempool to be watched in, so the switch
  * would be theatre — it is disabled and says why, rather than sitting there
  * green and implying a protection nobody is providing. */
-function MevToggle({ chain, here, relay, setHere }: {
+function MevToggle({ chain, here, relay, setHere, network }: {
   chain: string; here: any; relay: any; setHere: (k: string, v: any) => void;
+  network?: any;
 }) {
   const supported = !!here.mev_supported;
   const on = supported && !!here.mev_protect;
   const reachable = !!relay.reachable;
+  const [switching, setSwitching] = useState("");
+
+  /* The setting above governs orders this app sends. It cannot govern the
+     ones your own wallet sends — MetaMask broadcasts through whatever RPC it
+     has for that chain, and no dApp setting changes that. The only way is to
+     ask the wallet to use a protected endpoint, which it will do if the
+     person agrees. That is what this button does, and why it needs its own
+     explanation rather than being folded into the toggle. */
+  async function useProtectedRpc() {
+    setSwitching(chain);
+    try {
+      const w = (window as any).ethereum;
+      if (!w) throw new Error("No wallet extension found in this browser");
+      await w.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: network.chain_id,
+          chainName: network.name,
+          rpcUrls: [network.rpc],
+          blockExplorerUrls: [network.explorer],
+          nativeCurrency: { name: network.symbol, symbol: network.symbol,
+                            decimals: network.decimals },
+        }],
+      });
+    } catch { /* declining is an answer, and an allowed one */ }
+    finally { setSwitching(""); }
+  }
 
   return (
     <div>
@@ -480,6 +512,31 @@ function MevToggle({ chain, here, relay, setHere }: {
              mempool, so the order cannot be read and raced before it lands.`
           : relay.note || "No protected route for this chain."}
       />
+      {/* Your own wallet's orders, which the setting above cannot reach. */}
+      {network && (
+        <div className="mt-1.5 rounded-lg border border-border-soft bg-bg-soft/30 px-3 py-2">
+          <p className="text-[10px] leading-relaxed text-text-dim">
+            The switch above covers orders <b>this app</b> sends. When you trade
+            from your own MetaMask, it broadcasts through its own RPC and no
+            setting here can change that — the wallet has to be asked.
+          </p>
+          <button onClick={useProtectedRpc} disabled={!!switching}
+                  title={`Ask MetaMask to use ${network.relay} for this chain`}
+                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border
+                             border-accent-green/40 px-2 py-1 text-[11px] font-medium
+                             text-accent-green transition-colors hover:bg-accent-green/10
+                             disabled:opacity-40">
+            {switching ? <Loader2 size={12} className="animate-spin" />
+                       : <Shield size={12} />}
+            Protect my wallet on {chain.toUpperCase()}
+          </button>
+          <p className="mt-1 text-[10px] leading-relaxed text-text-dim">
+            {network.why} You can undo it in MetaMask by switching the network
+            back.
+          </p>
+        </div>
+      )}
+
       {supported && on && (
         <p className="mt-1 flex items-center gap-1.5 px-1 text-[10px] text-text-dim">
           <span className={`h-1.5 w-1.5 rounded-full ${

@@ -128,6 +128,20 @@ async def audit() -> list[dict]:
             say("error", "Payments", "PAY_* addresses",
                 "Orders can be created and nothing can ever be seen arriving.")
 
+    # A relay that has stopped answering is the quietest failure here: every
+    # switch stays green, the panel keeps saying "protected", and the orders
+    # go out the ordinary way. Nothing raises, because nothing is broken —
+    # the endpoint simply is not there any more.
+    from . import mev
+    for row in await mev.status():
+        if not row["supported"] or row["reachable"]:
+            continue
+        say("warn", f"MEV protection — {row['chain'].upper()}",
+            f"{row['chain'].upper()}_MEV_RPC",
+            f"{row['relay'] or 'The relay'} is not answering"
+            + (f" ({row['why']})" if row["why"] else "")
+            + ". Orders on this chain would go out unprotected.")
+
     return out
 
 
