@@ -40,13 +40,17 @@ RULE = "━━━━━━━━━━━━━━━━━━━━"
 SPACER = " "
 
 # What each chain is called in the places a button has to point at.
+# Base was missing from all three, which is not a missing button: with no slug
+# there is no GMGN and no chart, so a Base alert arrived with an empty keyboard
+# and no chain on its header line. It has had its own detection panel for a
+# while — the maps just never caught up.
 _GMGN = {"eth": "eth", "ethereum": "eth", "rbh": "robinhood",
          "robinhood": "robinhood", "sol": "sol", "solana": "sol",
-         "bsc": "bsc", "bnb": "bsc"}
+         "bsc": "bsc", "bnb": "bsc", "base": "base"}
 _DEX = {"eth": "ethereum", "rbh": "robinhood", "sol": "solana",
-        "bsc": "bsc", "bnb": "bsc"}
+        "bsc": "bsc", "bnb": "bsc", "base": "base"}
 _CHAIN_LABEL = {"eth": "Ethereum", "rbh": "Robinhood", "sol": "Solana",
-                "bsc": "BNB Chain", "bnb": "BNB Chain"}
+                "bsc": "BNB Chain", "bnb": "BNB Chain", "base": "Base"}
 
 
 def esc(value) -> str:

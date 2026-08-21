@@ -760,7 +760,7 @@ _bg: set = set()
 _TONE = {"buy": "\U0001F7E2", "sell": "\U0001F534"}
 
 
-async def _notify(user: str, text: str) -> None:
+async def _notify(user: str, text: str, keyboard: list | None = None) -> None:
     """One line to whoever this account belongs to, and nobody else.
 
     Where it lands is not a setting on this page. `alert_target` already
@@ -780,20 +780,54 @@ async def _notify(user: str, text: str) -> None:
             user, getattr(scfg, "TRADING_ALERT_CHAT_ID", "") or None)
         if not chat:
             return
-        await alert_dispatch.send_personal(user, chat, text)
+        await alert_dispatch.send_personal(user, chat, text, keyboard)
     except Exception as exc:  # noqa: BLE001
         from .scanners.slog import get_logger
         get_logger(__name__).debug(f"[TRADING] notify failed: {exc}")
 
 
-def _notify_bg(user: str, text: str) -> None:
-    task = asyncio.ensure_future(_notify(user, text))
+def _notify_bg(user: str, text: str, keyboard: list | None = None) -> None:
+    task = asyncio.ensure_future(_notify(user, text, keyboard))
     _bg.add(task)
     task.add_done_callback(_bg.discard)
 
 
 def _fmt(x: float) -> str:
     return f"{x:,.2f}"
+
+
+def _buttons(row: dict) -> list:
+    """The same buttons every other alert carries, plus the page this came from.
+
+    Built by tgstyle so a position notice offers exactly what a detection
+    offers — chart first, because that is the reflex — rather than growing its
+    own idea of what a token is worth looking at. The mute actions belong to
+    the feeds, not to somebody's own position, so they are left off.
+    """
+    from . import tgstyle
+    back = _dash_url("/trading")
+    extra = [[{"text": "🖥 Open Trading", "url": back}]] if back else None
+    return tgstyle.keyboard(
+        chain=row.get("chain") or "", address=row.get("address") or "",
+        mute=False, extra=extra)
+
+
+def _dash_url(path: str) -> str:
+    """A link back into the dashboard, or "" when there is nowhere to link to.
+
+    Telegram refuses a message whose button carries an unreachable URL — the
+    whole notice fails, not just the button — and PUBLIC_URL ships defaulted to
+    localhost. So a deployment that has not said where it lives gets the alert
+    without the button rather than no alert at all.
+    """
+    from .config import settings
+    base = (getattr(settings, "public_url", "") or "").strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        return ""
+    host = base.split("//", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
+    if host in ("localhost", "127.0.0.1", "0.0.0.0") or not host:
+        return ""
+    return f"{base}{path}"
 
 
 def notify_open(row: dict) -> None:
@@ -808,7 +842,9 @@ def notify_open(row: dict) -> None:
         line += f"\nCaller: {who}"
     elif row.get("source") == "gas":
         line += "\nSource: ETH Gas Fees"
-    _notify_bg(row.get("user") or "", line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>")
+    _notify_bg(row.get("user") or "",
+               line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>",
+               _buttons(row))
 
 
 def notify_close(row: dict, *, part: float, reason: str) -> None:
@@ -823,7 +859,9 @@ def notify_close(row: dict, *, part: float, reason: str) -> None:
         head += f" ({part:.0f}%)"
     line = (f"{head}\n{sign}${_fmt(abs(pnl))} "
             f"({sign}{abs(v['pnl_pct']):.1f}%)\nClosed by: {reason}")
-    _notify_bg(row.get("user") or "", line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>")
+    _notify_bg(row.get("user") or "",
+               line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>",
+               _buttons(row))
 
 
 # ── gas-fee tokens, queued rather than bought on sight ──────────────────────
