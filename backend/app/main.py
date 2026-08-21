@@ -125,6 +125,14 @@ async def lifespan(app: FastAPI):
         await _announce_start()
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] start notification failed (continuing): {exc}")
+    # Everything switched on that has nowhere to go. Reported, never raised —
+    # a misconfiguration is not a reason to refuse to start, it is a reason to
+    # be told. See app/config_audit.py.
+    try:
+        from . import config_audit
+        await config_audit.log_report()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] config audit skipped (continuing): {exc}")
     print(f"[startup] DB backend: {db.backend_name()} | ready on :{settings.api_port}")
     try:
         yield

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { CredentialsManager } from "@/components/features/CredentialsManager";
+import { ConfigAudit } from "@/components/features/ConfigAudit";
 
 type Svc = { id: string; label: string; enabled: boolean; category: string;
              // Optional sub-heading inside a section. Set in the registry, so
@@ -375,6 +376,10 @@ export default function SettingsPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Settings" subtitle="Toggle bots, chains, RPC endpoints, keywords and groups" />
+
+      {/* At the top on purpose: this is the page somebody opens when a feature
+          has gone quiet, and the reason is usually a key nobody filled in. */}
+      <ConfigAudit />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <ServiceGroup cat="bot" items={data?.bot ?? []} />

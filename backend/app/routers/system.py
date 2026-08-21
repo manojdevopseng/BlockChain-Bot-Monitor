@@ -92,6 +92,23 @@ async def metrics():
     return out
 
 
+@router.get("/config-audit")
+async def config_audit_route():
+    """Which switched-on features have nowhere to send what they produce.
+
+    Its own route rather than a field on /overview: this is the page you open
+    when something is mysteriously silent, and it should be possible to look
+    without loading everything else.
+    """
+    from .. import config_audit
+    rows = await config_audit.audit()
+    return {
+        "items": rows,
+        "errors": sum(1 for r in rows if r["level"] == "error"),
+        "warnings": sum(1 for r in rows if r["level"] == "warn"),
+    }
+
+
 @router.get("/retention")
 async def retention():
     """Data-retention policy + live counts.
