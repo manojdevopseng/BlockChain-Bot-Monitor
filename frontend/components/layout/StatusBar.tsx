@@ -2,6 +2,7 @@
 
 import { Cpu, HardDrive, MemoryStick, Wifi } from "lucide-react";
 import { useApi } from "@/lib/api";
+import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
 // Anything we can't actually measure shows a dash — never a placeholder number.
@@ -17,9 +18,21 @@ function tone(pct: number | null | undefined, warn: number, crit: number): strin
 }
 
 export function StatusBar({ backend }: { backend?: string }) {
+  // How full the operator's disk is, and how hot their CPU, is the operator's
+  // business — a customer has no use for it and no way to act on it. Unknown
+  // reads as not-admin, so it is absent while that is being confirmed rather
+  // than appearing and being taken away.
+  const { known, isAdmin } = useRole();
+  const mine = known && isAdmin;
+
   // Measured on the server the backend runs on, refreshed slowly — this is a
-  // status bar, not a monitoring tool.
-  const { data: m } = useApi<any>("/api/system/metrics", { refreshInterval: 10000 });
+  // status bar, not a monitoring tool. Not asked for at all when it will not
+  // be shown: a poll every ten seconds per customer, for a number none of them
+  // sees, is a request nobody needed.
+  const { data: m } = useApi<any>(mine ? "/api/system/metrics" : null,
+                                  { refreshInterval: 10000 });
+
+  if (!mine) return null;
 
   return (
     <footer className="flex h-8 shrink-0 items-center justify-between gap-3 border-t border-border px-3 text-[11px] text-text-muted sm:px-6">

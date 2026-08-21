@@ -135,6 +135,11 @@ async def edit_user(username: str, payload: dict = Body(...),
         if payload["plan"] not in accounts.PLANS:
             raise HTTPException(400, "Unknown plan")
         changed["plan"] = payload["plan"]
+    if "unlimited" in payload:
+        # The ceilings, not the keys. role is untouched on purpose: it is what
+        # every admin gate reads, and this must not open one of them.
+        changed["unlimited"] = bool(payload["unlimited"])
+        changed["unlimited_by"] = claims["username"] if payload["unlimited"] else ""
     if "blocked" in payload:
         changed["blocked"] = bool(payload["blocked"])
         changed["blocked_reason"] = str(payload.get("reason") or

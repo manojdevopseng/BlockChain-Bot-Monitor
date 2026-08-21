@@ -21,7 +21,6 @@ import { HistorySelect, SearchBox } from "@/components/SectionFilters";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { fmtDateTime, rowKey, timeAgo } from "@/lib/utils";
 import { Age, PAGE, TickProvider, TokenCell, TONE, VERDICTS, XLink } from "./_components/shared";
-import { OGSection } from "./_components/OGSection";
 import { McapCheck } from "./_components/McapCheck";
 import { FactCheck } from "./_components/FactCheck";
 import { XCheck } from "./_components/XCheck";
@@ -223,7 +222,6 @@ export default function AiPage() {
 
       <XCheck />
 
-      <OGSection />
     </div>
     </TickProvider>
   );

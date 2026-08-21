@@ -145,7 +145,11 @@ export function Sidebar({
           })}
         </nav>
 
-        {/* Uptime card — hidden when the desktop rail is collapsed */}
+        {/* Uptime card — the operator's, and hidden when the rail is collapsed.
+            How long the bot has been up is a fact about the operator's server;
+            a customer buys the alerts, not the box. Same rule as the nav:
+            unknown reads as not-admin, so it never appears and then vanishes. */}
+        {known && isAdmin && (
         <div className={cn("m-3 rounded-lg border border-border bg-bg-card/50 p-3 text-xs", isCollapsed && "lg:hidden")}>
           <div className="flex items-center gap-2 text-text-muted">
             <span className="h-2 w-2 animate-pulse-soft rounded-full bg-accent-green" />
@@ -156,6 +160,7 @@ export function Sidebar({
             <span>Version</span><span>0.1.0</span>
           </div>
         </div>
+        )}
 
         {/* Desktop collapse toggle */}
         <button

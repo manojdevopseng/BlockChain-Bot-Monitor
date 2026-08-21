@@ -18,7 +18,6 @@ import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
 import { CopyButton } from "@/components/CopyButton";
 import { fmtDateTime, fmtEth, shortAddr, rowKey } from "@/lib/utils";
 import { Age, TickProvider } from "@/components/Age";
-import { RbhXSection } from "./_components/RbhXSection";
 import { LaunchpadSection } from "./_components/LaunchpadSection";
 
 /* ── shared section chrome ─────────────────────────────────────────────── */
@@ -280,7 +279,6 @@ export default function DetectionsPage() {
         storageKey="detections_section_order"
         sections={[
           { id: "premium", node: <PremiumSection /> },
-          { id: "rbhx", node: <RbhXSection /> },
           { id: "launchpad", node: <LaunchpadSection /> },
           { id: "crosschain", node: <CrossChainSection /> },
           { id: "gas", node: <GasSection /> },

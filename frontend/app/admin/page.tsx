@@ -189,6 +189,17 @@ function Accounts() {
     } finally { setBusy(""); }
   }
 
+  // Admin limits on a non-admin account: every ceiling lifted, no control
+  // gained. The role is deliberately not touched — it is what hides Settings,
+  // Forwarder, RPC and User Management, and this must not open any of them.
+  async function unlimited(username: string, on: boolean) {
+    setBusy(username);
+    try {
+      await apiSend(`/api/admin/users/${username}`, "PATCH", { unlimited: on });
+      mutate(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    } finally { setBusy(""); }
+  }
+
   async function block(username: string, blocked: boolean) {
     setBusy(username);
     try {
@@ -235,6 +246,7 @@ function Accounts() {
               <Badge variant={STATUS_TONE[u.status] ?? "gray"}>{u.status}</Badge>
               <span className="text-xs text-text-muted">{u.plan_label}</span>
               {u.comped && <Badge variant="purple">granted</Badge>}
+              {u.unlimited && <Badge variant="cyan">no limits</Badge>}
               {u.telegram_linked && <Badge variant="blue">telegram</Badge>}
               <span className="ml-auto text-[11px] text-text-dim">{u.email}</span>
             </div>
@@ -263,6 +275,14 @@ function Accounts() {
                         className="text-brand-soft hover:underline">+7d</button>
                 <button onClick={() => grant(u.username, 30)} disabled={busy === u.username}
                         className="text-brand-soft hover:underline">+30d</button>
+                <button onClick={() => unlimited(u.username, !u.unlimited)}
+                        disabled={busy === u.username}
+                        title={u.unlimited
+                          ? "Put this account back on its plan's limits"
+                          : "Admin limits — every ceiling lifted. No admin controls, and the operator navs stay hidden."}
+                        className="text-accent-cyan hover:underline">
+                  {u.unlimited ? "limits back on" : "no limits"}
+                </button>
                 <button onClick={() => block(u.username, !u.blocked)}
                         disabled={busy === u.username}
                         className="text-accent-red hover:underline">

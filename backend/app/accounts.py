@@ -141,6 +141,7 @@ def public(doc: dict) -> dict:
         "email": doc.get("email", ""),
         "role": doc.get("role", USER),
         "email_verified": bool(doc.get("email_verified")),
+        "unlimited": bool(doc.get("unlimited")),
         "plan": plan.id,
         "plan_label": plan.label,
         "status": state.status,
@@ -167,7 +168,20 @@ def public(doc: dict) -> dict:
 
 
 def plan_of(doc: dict) -> Plan:
-    if doc.get("role") == ADMIN:
+    """What this account may use. Not what it may operate.
+
+    `unlimited` is the operator handing somebody the ceilings without the keys:
+    the same limits an admin has — every token, every check, every alert — on
+    an account whose role is still `user`. That distinction is the whole point.
+    Roles decide what is reachable; plans decide how much of it. Raising the
+    plan cannot expose Settings or the Forwarder, because nothing reads the
+    plan to answer that question — see security.require_admin and the nav's
+    hideFromUser, both of which read the role and only the role.
+
+    So the person gets a yearly plan with no ceiling, and still cannot change
+    an endpoint, a keyword or anybody else's account.
+    """
+    if doc.get("role") == ADMIN or doc.get("unlimited"):
         return ADMIN_PLAN
     return PLANS.get(str(doc.get("plan") or "trial"), PLANS["trial"])
 
