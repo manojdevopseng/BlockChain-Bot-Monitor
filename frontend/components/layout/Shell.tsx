@@ -267,7 +267,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <BuildWatcher />
           <Topbar connected={connected} onOpenMobile={() => setMobileOpen(true)} />
           <main className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5">
-            <div className="animate-fade-in">
+            {/* Keyed on the route so the fade replays on every navigation,
+                not once per session. Without the key React keeps the same DOM
+                node across pages and the animation never re-runs, which is why
+                the first page eased in and every one after it appeared.
+
+                motion-reduce turns it off rather than shortening it: somebody
+                who asked the system for no motion meant none. */}
+            <div key={path} className="animate-fade-in motion-reduce:animate-none">
               <RoleGate>{children}</RoleGate>
             </div>
             {/* Once, at the foot of every page inside the app, rather than
