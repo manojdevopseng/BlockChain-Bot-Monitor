@@ -709,6 +709,50 @@ class RbhXMonitor:
                 self._watch_dev_buy(addr, dev, shared["symbol"], first_buy),
                 name=f"rbhx-devbuy-{addr[:10]}")
 
+        # Everything above sends to the operator's groups, as it always has.
+        # This is the customers' copy, and it is last on purpose: whatever the
+        # fan-out does or fails to do, the launch is already recorded and the
+        # operator has already been told.
+        self._fan_out(pad_row, shared, got_profile)
+
+    def _fan_out(self, pad_row: Optional[dict], shared: dict,
+                 got_profile: bool) -> None:
+        """Hand this launch to the subscribers who asked for its kind.
+
+        One event per launch, never two: a launchpad mint that also carries an
+        X account is a launchpad event, so an account subscribed to both feeds
+        is not told about the same token twice.
+        """
+        from app import alert_dispatch
+        from app.alert_subs import Event
+
+        if pad_row is not None:
+            row, feed = pad_row, "launchpad"
+        elif shared.get("handle") and got_profile:
+            row, feed = shared, "rbhx"
+        else:
+            return          # nothing a subscriber has a way to ask for
+        dev = row.get("dev_buy_eth")
+        try:
+            alert_dispatch.deliver(Event(
+                feed=feed,
+                text=_pad_alert_text(row),
+                keyboard=_pad_alert_buttons(row),
+                chain="rbh",
+                address=str(row.get("address") or ""),
+                symbol=str(row.get("symbol") or ""),
+                handle=str(row.get("handle") or ""),
+                followers=int(row.get("followers") or 0),
+                launchpad=str(row.get("launchpad") or ""),
+                dev_buy_eth=float(dev or 0),
+                strong=bool(_strong_dev_buy(row)),
+                watched=bool(row.get("watched")),
+                excerpt=str(row.get("excerpt") or ""),
+                matched_keywords=str(row.get("matched_keywords") or ""),
+            ))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[FANOUT] {row.get('symbol')} not queued: {exc}")
+
     async def _launch_buy(self, tx: str) -> tuple[str, float]:
         """(deployer, ETH it paid) from the launch transaction.
 
@@ -994,7 +1038,7 @@ class RbhXMonitor:
             try:
                 if not await notifier.send_to(_pad_alert_chat(row),
                                               _pad_alert_text(row),
-                                              buttons=_pad_alert_buttons(row)):
+                                              keyboard=_pad_alert_buttons(row)):
                     log.warning(f"[PAD] alert not delivered for {row['symbol']}")
             except Exception as exc:  # noqa: BLE001
                 # The pump outliving one bad message matters more than the
@@ -1005,31 +1049,35 @@ class RbhXMonitor:
     async def _notify(self, row: dict) -> None:
         if not self._on("rbhx_telegram") or not config.DEST_RBH_X_MONITOR:
             return
-        import html
+        from app import tgstyle
         # Same line as the Launchpad Monitor's, because a launch that carries an
         # account is alerted here *instead of* there — leaving it out would drop
         # the marking on exactly the launches that carry both.
         strong = _strong_dev_buy(row)
-        text = (
-            ("👁 <b>WATCHED ACCOUNT</b>\n" if row["watched"] else "")
-            + (f"🟢 <b>Strong Signal</b> — dev bought {strong:.3f} Ξ\n" if strong else "")
-            + f"🔎 <b>ROBINHOOD × TOKEN</b>\n"
-            f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"🪙 <b>{html.escape(row['symbol'])}</b>"
-            + (f" — {html.escape(row['name'])}" if row["name"] else "") + "\n"
-            f"👤 @{html.escape(row['handle'])}"
-            + (" ✅" if row["verified"] else "")
-            + (" 🔒" if row.get("proved") else "") + "\n"
-            f"👥 {row['followers']:,} followers\n"
-            + (f"\n<blockquote>{html.escape(row['excerpt'][:300])}</blockquote>\n"
-               if row["excerpt"] else "")
-            + f"\n<code>{html.escape(row['address'])}</code>"
-        )
-        buttons = [b for b in (
-            ("📊 GMGN", gmgn_url("rbh", row["address"])),
-            ("𝕏 Profile", row["link"]),
-        ) if b[1]]
-        if not await notifier.send_to(config.DEST_RBH_X_MONITOR, text, buttons=buttons):
+        banners = []
+        if row["watched"]:
+            banners.append("👁 <b>WATCHED ACCOUNT</b>")
+        if strong:
+            banners.append(f"🟢 <b>Strong Signal</b> · dev bought {strong:.3f} Ξ")
+
+        marks = ("" if not row["verified"] else " ✅") +                 ("" if not row.get("proved") else " 🔒")
+        lines = [f"👤 @{tgstyle.esc(row['handle'])}{marks}"
+                 + (f" · {row['followers']:,} followers" if row.get("followers") else "")]
+        dev = row.get("dev_buy_eth")
+        if dev and not strong:
+            lines.append(f"💰 dev bought {dev:.3f} Ξ")
+
+        text = tgstyle.card(
+            icon="🔎", kind="ROBINHOOD × TOKEN", chain="rbh",
+            when=row.get("open_timestamp"),
+            symbol=row.get("symbol") or "?", name=row.get("name") or "",
+            banners=banners, lines=lines, quote=row.get("excerpt") or "",
+            address=row["address"])
+        keyboard = tgstyle.keyboard(chain="rbh", address=row["address"],
+                                    x_link=row.get("link") or "",
+                                    website=row.get("website") or "")
+        if not await notifier.send_to(config.DEST_RBH_X_MONITOR, text,
+                                      keyboard=keyboard):
             log.warning(f"[RBHX] alert not delivered for {row['symbol']}")
 
 
@@ -1075,64 +1123,67 @@ def _strong_dev_buy(row: dict) -> float:
 
 
 def _pad_alert_text(row: dict) -> str:
-    """A Launchpad Monitor alert, shaped like the X Monitor's.
+    """A Launchpad Monitor alert, in the house style (see app/tgstyle.py).
 
-    The differences are the ones between the panels: which launchpad minted it
-    leads, and the account may be missing, unread, or taken from a post link —
-    all three say so rather than showing a blank line.
+    What is different from the other alerts is only what is different about a
+    launch: which launchpad minted it, and that the account may be missing,
+    unread, or taken from a post link — all three say so rather than showing a
+    blank line.
     """
-    import html
-    pad = html.escape(row.get("launchpad_label") or row.get("launchpad") or "?")
-    # A watch hit says so on the first line — that is the message the watch
-    # list was asked for — and the launchpad is still named under it.
-    headline = row.get("_headline") or ""
-    # A keyword hit leads, above everything else — it is the reason to read the
-    # rest of the message.
+    from app import tgstyle
+
     matched = str(row.get("matched_keywords") or "")
+    strong = _strong_dev_buy(row)
+    dev = row.get("dev_buy_eth")
     handle, source = row.get("handle"), row.get("handle_source")
+
+    # Above the heading, in the order they earn attention.
+    banners = []
+    if row.get("_headline"):
+        banners.append(row["_headline"])
+    elif row.get("watched"):
+        banners.append("👁 <b>WATCHED ACCOUNT</b>")
+    if matched:
+        banners.append(f"🔑 <b>Keyword</b> · {tgstyle.esc(matched)}")
+    if strong:
+        banners.append(f"🟢 <b>Strong Signal</b> · dev bought {strong:.3f} Ξ")
     # Which launch this is from that account. Only ever above one when the
     # handle came from a profile — a post link is somebody else's tweet and is
-    # deliberately not counted (see app/x_accounts.py).
+    # deliberately not counted (see app/x_accounts.py). The wording changes
+    # above _SERIAL_LAUNCHES because "the 3rd" is a fact and "the 81st" is a
+    # verdict.
     seq = int(row.get("handle_seq") or 0)
+    if seq >= _SERIAL_LAUNCHES:
+        banners.append(f"⚠️ <b>{_ordinal(seq)} launch from this account</b> "
+                       f"· serial launcher")
+    elif seq > 1:
+        banners.append(f"🔁 <b>{_ordinal(seq)} launch from this account</b>")
+
+    lines = []
     if handle:
-        who = (f"👤 @{html.escape(handle)}"
-               + (" ✅" if row.get("verified") else "")
-               + (" 🔒" if row.get("proved") else "")
-               + (f" · {seq} launches" if seq > 1 else "")
-               + (" · from a post" if source == "post" else "") + "\n"
-               + (f"👥 {row['followers']:,} followers\n"
-                  if row.get("followers") else ""))
+        marks = ("" if not row.get("verified") else " ✅") +                 ("" if not row.get("proved") else " 🔒")
+        who = f"👤 @{tgstyle.esc(handle)}{marks}"
+        if row.get("followers"):
+            who += f" · {row['followers']:,} followers"
+        if seq > 1:
+            who += f" · {seq} launches"
+        if source == "post":
+            who += " · from a post"
+        lines.append(who)
     else:
-        who = "👤 no X account named\n"
-    dev = row.get("dev_buy_eth")
-    strong = _strong_dev_buy(row)
-    return (
-        ("🟢 <b>Keyword Matched</b>\n" if matched else "")
-        # Up here with the other headings rather than down in the body: it is
-        # the reason to stop scrolling, and the amount is the whole of it —
-        # which is why the ordinary dev-buy line below stands down for it.
-        + (f"🟢 <b>Strong Signal</b> — dev bought {strong:.3f} Ξ\n" if strong else "")
-        # A repeat from the same account belongs up here with the other reasons
-        # to look. The wording changes above _SERIAL_LAUNCHES because "the 3rd"
-        # and "the 81st" are not the same fact: one is a project having another
-        # go, the other is a factory.
-        + ("" if seq < 2 else
-           f"⚠️ <b>{_ordinal(seq)} launch from this account</b> — serial launcher\n"
-           if seq >= _SERIAL_LAUNCHES else
-           f"🔁 <b>{_ordinal(seq)} launch from this account</b>\n")
-        + (headline + "\n" if headline
-           else "👁 <b>WATCHED ACCOUNT</b>\n" if row.get("watched") else "")
-        + f"🚀 <b>{pad.upper()} LAUNCH</b>\n"
-        f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"🪙 <b>{html.escape(row.get('symbol') or '?')}</b>"
-        + (f" — {html.escape(row['name'])}" if row.get("name") else "") + "\n"
-        + who
-        + (f"💰 dev bought {dev:.3f} Ξ\n" if dev and not strong else "")
-        + (f"\n<blockquote>{html.escape(row['excerpt'][:300])}</blockquote>\n"
-           if row.get("excerpt") else "")
-        + (f"<b>Text Matched KW:</b> {html.escape(matched)}\n" if matched else "")
-        + f"\n<code>{html.escape(row.get('address') or '')}</code>"
-    )
+        lines.append("👤 <i>no X account named</i>")
+    # The plain dev buy only when it is not already the banner above.
+    if dev and not strong:
+        lines.append(f"💰 dev bought {dev:.3f} Ξ")
+
+    pad = row.get("launchpad_label") or row.get("launchpad") or "?"
+    return tgstyle.card(
+        icon="🚀", kind=f"{pad.upper()} LAUNCH", chain="rbh",
+        when=row.get("open_timestamp"),
+        symbol=row.get("symbol") or "?", name=row.get("name") or "",
+        banners=banners, lines=lines,
+        quote=row.get("excerpt") or "",
+        address=row.get("address") or "")
 
 
 def _pad_alert_chat(row: dict):
@@ -1150,12 +1201,17 @@ def _pad_alert_chat(row: dict):
     return config.DEST_RBH_X_MONITOR
 
 
-def _pad_alert_buttons(row: dict) -> list[tuple[str, str]]:
-    return [b for b in (
-        ("📊 GMGN", gmgn_url("rbh", row.get("address") or "")),
-        ("𝕏 Profile", row.get("link") or ""),
-        ("🌐 Website", row.get("website") or ""),
-    ) if b[1]]
+def _pad_alert_buttons(row: dict) -> list[list[dict]]:
+    """Rows, not a flat list: charts, then the account's own links, then mute.
+
+    Everything a launch alert can be acted on with, in the order it gets
+    pressed — and nothing that leads nowhere, so a launchpad with no website
+    simply has no Website button rather than a dead one.
+    """
+    from app import tgstyle
+    return tgstyle.keyboard(
+        chain="rbh", address=row.get("address") or "",
+        x_link=row.get("link") or "", website=row.get("website") or "")
 
 
 def _utc_now():

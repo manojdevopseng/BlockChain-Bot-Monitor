@@ -4,7 +4,13 @@ import useSWR, { SWRConfiguration } from "swr";
 
 // Same-origin: next.config.js rewrites /api/* to the FastAPI backend in dev,
 // nginx does it in production. No CORS juggling on the client.
-const BASE = "";
+//
+// BASE_PATH is normally empty. It is set when this build is served under a
+// prefix — a preview of the next version living beside the live one on the
+// same host, where /beta/api has to reach the preview's backend rather than
+// the live one two directories up.
+export const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+const BASE = BASE_PATH;
 
 let token: string | null = null;
 if (typeof window !== "undefined") {
@@ -15,7 +21,13 @@ export function setToken(t: string | null) {
   token = t;
   if (typeof window !== "undefined") {
     if (t) localStorage.setItem("token", t);
-    else localStorage.removeItem("token");
+    else {
+      // Signing out drops what was remembered about who that was: the next
+      // person to use this browser must not start on the last one's nav.
+      localStorage.removeItem("token");
+      localStorage.removeItem("role");
+      localStorage.removeItem("account");
+    }
   }
 }
 
@@ -29,7 +41,24 @@ export function getToken(): string | null {
 function onUnauthorized() {
   setToken(null);
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-    window.location.href = "/login";
+    window.location.href = `${BASE_PATH}/login`;
+  }
+}
+
+// Pages that must stay reachable with an ended subscription: paying is how you
+// get back in, and being bounced off the page that takes the payment is how an
+// account stays ended.
+const PAYWALL_SAFE = ["/plan", "/profile", "/login", "/register", "/verify",
+                      "/forgot", "/reset"];
+
+// 402 is the server saying "you may, but not until you pay". It is a different
+// answer from 401 (nobody is logged in) and from 403 (not yours), so it gets
+// its own destination rather than a red toast on an empty page.
+function onPaymentRequired() {
+  if (typeof window === "undefined") return;
+  const here = window.location.pathname;
+  if (!PAYWALL_SAFE.some((p) => here === p || here.startsWith(`${p}/`))) {
+    window.location.href = `${BASE_PATH}/plan`;
   }
 }
 
@@ -45,16 +74,22 @@ export async function apiGet<T = any>(path: string): Promise<T> {
     onUnauthorized();
     throw new Error("Not authenticated");
   }
+  if (res.status === 402) {
+    onPaymentRequired();
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch {}
+    throw new Error(detail || "Your access has ended");
+  }
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
   return res.json();
 }
 
-/** Fetch a protected binary — an image, say — as an object URL.
+/** Fetch a protected binary — an image or a clip — as an object URL.
  *
- * An <img src> cannot carry an Authorization header, and the token lives in
- * localStorage rather than a cookie, so anything behind the login has to be
- * fetched and handed to the tag as a blob. The caller owns the URL and must
- * revoke it.
+ * An <img> or <video> src cannot carry an Authorization header, and the token
+ * lives in localStorage rather than a cookie, so anything behind the login has
+ * to be fetched and handed to the tag as a blob. The caller owns the URL and
+ * must revoke it.
  */
 export async function apiBlobUrl(path: string): Promise<string> {
   const res = await fetch(`${BASE}${path}`, {
@@ -66,6 +101,34 @@ export async function apiBlobUrl(path: string): Promise<string> {
   }
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
   return URL.createObjectURL(await res.blob());
+}
+
+/** Fetch a file the API only hands to the signed-in owner, and save it.
+ *
+ * The sibling of the above, for a file that belongs on disk rather than on
+ * screen: same reason the header cannot ride on an <a href>, different ending.
+ */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, { headers: headers() });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch {}
+    throw new Error(detail || `Could not download that file (${res.status})`);
+  }
+  // The server names the file; the caller's name is only the fallback.
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const named = /filename="?([^"]+)"?/.exec(disposition)?.[1];
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = named || fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on the next tick: revoking immediately can beat the click in
+  // Safari and hand the user an empty file.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function apiSend<T = any>(
@@ -82,6 +145,9 @@ export async function apiSend<T = any>(
     onUnauthorized();
     throw new Error("Not authenticated");
   }
+  // A write refused for want of a subscription reads as a message on the page
+  // it was attempted from — "you have used 3 of 3" belongs beside the button,
+  // not on a redirect.
   if (!res.ok) {
     // Routers answer with {"detail": "..."} — surfacing that is far more use
     // than "PUT /x -> 400".
@@ -125,4 +191,20 @@ export function useApi<T = any>(path: string | null, cfg?: SWRConfiguration) {
     keepPreviousData: true,
     ...cfg,
   });
+}
+
+
+/** A call made by somebody who is not signed in — register, verify, reset. */
+export async function apiPublic<T = any>(path: string, body: any): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json())?.detail || ""; } catch {}
+    throw new Error(detail || `That did not work (${res.status})`);
+  }
+  return res.json();
 }

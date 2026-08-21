@@ -4,9 +4,12 @@ Two loops, and deliberately fewer than the RSI tracker has: a market cap is a
 number read now, not a series built over time, so there are no candles to draw
 and nothing to warm up.
 
-  checker    every cadence (15s by default), reads every token on a switched-on
-             chain and stores what it found. One request per token per pass —
-             which is why the cadence is a setting and not a constant.
+  checker    ticks every few seconds and reads the rows whose own cadence has
+             elapsed. Two things make that cheap: the cadence is per row (a
+             trial plan sits on five minutes, a paid one on fifteen seconds),
+             and rows are grouped by token before reading — twenty accounts
+             watching the same token cost ONE request, not twenty, because a
+             market cap is a fact about the token rather than about who asked.
   refresher  every fifteen seconds, re-reads the token list, the settings and
              the switches, so the panel, Telegram and Settings agree without a
              restart.
@@ -47,6 +50,9 @@ DEFAULT_CADENCE = "15s"
 # the RSI tracker uses, and the same reason: it is how long a token you just
 # added sits there doing nothing.
 _REFRESH_SECONDS = 15
+# The heartbeat of the checker. Not the cadence: each row carries its own, and
+# this is only how often the loop looks for rows that are due.
+_TICK_SECONDS = 5
 # Concurrent reads. The endpoints are shared with the rest of the app, and a
 # hundred tokens firing at once is how a provider starts answering 429.
 _READ_GATE = asyncio.Semaphore(6)
@@ -55,6 +61,18 @@ _READ_GATE = asyncio.Semaphore(6)
 def _col(name: str):
     from app import db
     return db.get_collection(name)
+
+
+def _token_key(row: dict) -> str:
+    """One watcher's row. Two accounts watching the same token are two rows —
+    they may be on different cadences — but they share the read."""
+    return f"{row.get('user_id', '')}:{row.get('chain')}:{row.get('address')}"
+
+
+def _cadence_of(row: dict) -> int:
+    """Seconds between reads of this row, floored so a bad value cannot turn
+    into a hot loop."""
+    return max(_TICK_SECONDS, int(row.get("cadence") or CADENCES[DEFAULT_CADENCE]))
 
 
 def _utc_now():
@@ -155,6 +173,9 @@ class McapTracker:
         self._enabled: dict[str, bool] = {}
         self._tokens: list[dict] = []
         self._settings: dict = {}
+        # token key -> when the next read of it is due, so a tick is a
+        # dictionary lookup rather than a query.
+        self._due: dict[str, float] = {}
 
     # ── switches and settings ────────────────────────────────────────────────
 
@@ -210,20 +231,34 @@ class McapTracker:
     async def _checker(self) -> None:
         while True:
             try:
-                await asyncio.sleep(self.cadence)
+                await asyncio.sleep(_TICK_SECONDS)
                 if not self._on("mcap_tracker"):
                     continue
-                due = [t for t in self._tokens if self._chain_on(t.get("chain", ""))]
-                if due:
-                    await asyncio.gather(*(self._check(t) for t in due))
+                now = time.time()
+                due = [t for t in self._tokens
+                       if self._chain_on(t.get("chain", ""))
+                       and now >= self._due.get(_token_key(t), 0.0)]
+                if not due:
+                    continue
+                # Grouped by the token, not by the row: the reading is the same
+                # answer for everyone watching it, and it is the reading that
+                # costs a request.
+                by_token: dict[tuple[str, str], list[dict]] = {}
+                for row in due:
+                    self._due[_token_key(row)] = now + _cadence_of(row)
+                    by_token.setdefault((row.get("chain", ""),
+                                         row.get("address", "")), []).append(row)
+                await asyncio.gather(*(self._check_token(chain, address, rows)
+                                       for (chain, address), rows
+                                       in by_token.items()))
             except asyncio.CancelledError:
                 return
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"[MCAP] checker: {exc}")
 
-    async def _check(self, token: dict) -> None:
-        chain = token.get("chain", "")
-        address = token.get("address") or ""
+    async def _check_token(self, chain: str, address: str,
+                           rows: list[dict]) -> None:
+        """One read of one token, then every watcher's own target against it."""
         key = {"chain": chain, "address": address}
         async with _READ_GATE:
             reading = await self._reader.read(chain, address)
@@ -236,13 +271,15 @@ class McapTracker:
             return
 
         # A row added before its ticker could be read fills itself in on the
-        # first good check rather than staying "?" forever.
-        if not token.get("symbol"):
+        # first good check rather than staying "?" forever. Read once, written
+        # to every row that is missing it.
+        if any(not r.get("symbol") for r in rows):
             symbol, name = await self._reader.name_symbol(chain, address)
             if symbol:
-                token["symbol"], token["name"] = symbol, name
-                await _col("mcap_tokens").update_one(key, {"$set": {"symbol": symbol,
-                                                                    "name": name}})
+                for row in rows:
+                    row["symbol"], row["name"] = symbol, name
+                await _col("mcap_tokens").update_many(
+                    key, {"$set": {"symbol": symbol, "name": name}})
                 log.info(f"[MCAP] {address[:10]}… is {symbol}")
 
         await _col("mcap_state").update_one(
@@ -253,41 +290,75 @@ class McapTracker:
             upsert=True,
         )
 
+        # One reading, every watcher's own target.
+        for row in rows:
+            await self._settle(row, reading, now)
+
+    async def _settle(self, token: dict, reading, now: float) -> None:
+        """Has this row's own target been reached? At most one alert, ever."""
         target = float(token.get("target") or 0)
-        if not target:
+        if not target or token.get("hit_at"):
             return
         armed = str(token.get("armed") or "up")
         hit = reading.mcap >= target if armed == "up" else reading.mcap <= target
-        if not hit or token.get("hit_at"):
+        if not hit:
             return
+        owner = token.get("user_id") or ""
+        # Kept in the app as well as sent: an alert that exists only in
+        # Telegram is lost to anyone who has not connected it.
+        from app import notifications
+        await notifications.notify(
+            owner, notifications.ALERT,
+            f"{token.get('symbol') or 'A token'} reached "
+            f"{fmt_usd(reading.mcap)}",
+            f"Your target was {fmt_usd(target)} on "
+            f"{CHAIN_LABELS.get(token.get('chain'), '')}.",
+            "/rsi")
         # Marked before the message is sent: a Telegram failure must not leave
         # it armed to fire again on the very next pass.
         await _col("mcap_tokens").update_one(
-            key, {"$set": {"hit_at": now, "hit_mcap": reading.mcap}})
+            {"user_id": owner, "chain": token.get("chain", ""),
+             "address": token.get("address", "")},
+            {"$set": {"hit_at": now, "hit_mcap": reading.mcap}})
         token["hit_at"] = now
-        log.info(f"[MCAP] {token.get('symbol') or address[:10]} ({chain.upper()}) "
-                 f"reached {fmt_usd(reading.mcap)} — target {fmt_usd(target)}")
+        log.info(f"[MCAP] {token.get('symbol') or token.get('address', '')[:10]} "
+                 f"({str(token.get('chain')).upper()}) reached "
+                 f"{fmt_usd(reading.mcap)} — target {fmt_usd(target)}"
+                 + (f" · {owner}" if owner else ""))
         await self._alert(token, reading, target, armed)
 
     async def _alert(self, token: dict, reading, target: float, armed: str) -> None:
-        if not self._on("mcap_telegram") or not config.MCAP_ALERT_CHAT_ID:
+        if not self._on("mcap_telegram"):
             return
-        import html
+        # Whose alert this is decides where it goes: an account that connected
+        # its own chat gets it there, the operator falls back to the group, and
+        # an account on a plan without Telegram gets it on the dashboard only.
+        # Never the group as a fallback for a customer — that is a leak, not a
+        # fallback.
+        from app import telegram_link
+        chat_id, why = await telegram_link.alert_target(
+            token.get("user_id") or "", config.MCAP_ALERT_CHAT_ID)
+        if not chat_id:
+            log.debug(f"[MCAP] alert not sent for {token.get('symbol')}: {why}")
+            return
+        from app import tgstyle
         chain = token.get("chain", "")
         address = token.get("address") or ""
-        head = ("🎯 <b>MARKET CAP HIT</b>" if armed == "up"
-                else "🔻 <b>MARKET CAP FELL TO TARGET</b>")
-        text = (
-            f"{head} — {fmt_usd(reading.mcap)}\n"
-            f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"🪙 <b>{html.escape(token.get('symbol') or '?')}</b>"
-            + (f" — {html.escape(token['name'])}" if token.get("name") else "") + "\n"
-            f"⛓ {CHAIN_LABELS.get(chain, chain.upper())}\n"
-            f"🎯 target {fmt_usd(target)} · now <b>{fmt_usd(reading.mcap)}</b>\n"
-            + (f"💵 ${reading.price_usd:.10g} per token\n" if reading.price_usd else "")
-            + (f"🧮 supply {reading.supply:,.0f}\n" if reading.supply else "")
-            + f"\n<code>{address}</code>"
-        )
-        buttons = [b for b in (("📊 GMGN", gmgn_url(chain, address)),) if b[1]]
-        if not await notifier.send_to(config.MCAP_ALERT_CHAT_ID, text, buttons=buttons):
-            log.warning(f"[MCAP] alert not delivered for {token.get('symbol')}")
+        icon, kind = (("🎯", "MARKET CAP HIT") if armed == "up"
+                      else ("🔻", "MARKET CAP FELL TO TARGET"))
+        text = tgstyle.card(
+            icon=icon, kind=kind, chain=chain,
+            symbol=token.get("symbol") or "?", name=token.get("name") or "",
+            lines=[f"🎯 target {fmt_usd(target)} · now <b>{fmt_usd(reading.mcap)}</b>",
+                   (f"💵 ${reading.price_usd:.10g} per token"
+                    if reading.price_usd else ""),
+                   (f"🧮 supply {reading.supply:,.0f}" if reading.supply else "")],
+            address=address)
+        # Same road as the RSI tracker and the fan-out: quiet hours applied,
+        # one rate limiter for everything this bot sends a customer.
+        from app import alert_dispatch
+        sent, why = await alert_dispatch.send_personal(
+            token.get("user_id") or "", chat_id, text,
+            tgstyle.keyboard(chain=chain, address=address, mute=False))
+        if not sent:
+            log.info(f"[MCAP] alert not delivered for {token.get('symbol')}: {why}")

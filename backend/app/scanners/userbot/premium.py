@@ -39,20 +39,20 @@ CALL_CAP = 2
 CONTENT_MAX = 600
 
 
-def _content_block(content: str) -> str:
-    """The caller's message, quoted — or "" when there is nothing to quote.
+def _quote_text(content: str) -> str:
+    """The caller's message, tidied — or "" when there is nothing to quote.
 
     A signal without the words around the address loses the reason it was
-    called. Rendered as a <blockquote> so it reads as somebody else's text
-    rather than the bot's, and collapsed to at most one blank line between
-    paragraphs: promo posts are mostly whitespace.
+    called. The card renders it as a <blockquote> so it reads as somebody
+    else's text rather than the bot's; collapsed here to at most one blank line
+    between paragraphs, because promo posts are mostly whitespace.
     """
     body = re.sub(r"\n{3,}", "\n\n", (content or "").strip())
     if not body:
         return ""
     if len(body) > CONTENT_MAX:
         body = body[:CONTENT_MAX].rstrip() + " …"
-    return f"<blockquote>{html.escape(body)}</blockquote>\n\n"
+    return body
 
 
 # What the tracker's context carries that a call row has no column for. Listed
@@ -130,31 +130,46 @@ class PremiumCaptureMixin:
         if calls > CALL_CAP or not self._on(GATE_PREMIUM):
             return
         chat_id = config.DEST_PREMIUM_BY_CHAIN.get(chain)
-        if not chat_id:
-            return
         label = chain.upper()
         group = group or "Unknown"
         # The address is the one thing that gets acted on, so it sits alone on
         # its own line in <code> — a tap copies it whole. Everything above it
         # is context. The links are inline buttons rather than text in the
         # body, where they rendered as bare URLs trailing under the message.
-        text = (
-            f"🎯 <b>{label} PREMIUM SIGNAL</b>\n"
-            f"➖➖➖➖➖➖➖➖➖➖\n"
-            + (f"🪙 <b>{html.escape(symbol)}</b>\n" if symbol else "")
-            + f"📢 {html.escape(group)}\n"
-            f"📞 Call {calls} of {CALL_CAP}\n\n"
-            + _content_block(content)
-            + f"<code>{html.escape(address)}</code>"
-        )
-        # "View on Telegram" opens the exact post the address was seen in.
+        from app import tgstyle
+        text = tgstyle.card(
+            icon="🎯", kind="PREMIUM SIGNAL", chain=chain,
+            symbol=symbol or "",
+            lines=[f"📢 {tgstyle.esc(group)}",
+                   f"📞 call {calls} of {CALL_CAP}"],
+            quote=_quote_text(content), address=address)
+        # "View the post" opens the exact message the address was seen in.
         # Dropped when that post cannot be linked to — a plain (non-super)
         # group has no message links — rather than shipping a dead button.
-        buttons = [b for b in (
-            ("📊 GMGN", gmgn_url(chain, address)),
-            ("💬 View on Telegram", post_url),
-        ) if b[1]]
-        if await notifier.send_to(chat_id, text, buttons=buttons or None):
+        extra = [[{"text": "💬 View the post", "url": post_url}]] if post_url else []
+        keyboard = tgstyle.keyboard(chain=chain, address=address, group=group,
+                                    extra=extra)
+        # The subscribers' copy. Queued before the operator's send rather than
+        # after, because `send_to` awaits Telegram and this does not — a slow
+        # send must not hold a detection back from everybody else.
+        #
+        # And queued whether or not the operator has a group for this chain.
+        # It used to return above when DEST_PREMIUM_<CHAIN> was blank, which
+        # made every paying subscriber's alerts depend on the operator having
+        # configured a mirror of their own — the four other feeds have never
+        # worked that way, and this one should not either.
+        try:
+            from app import alert_dispatch
+            from app.alert_subs import Event
+            alert_dispatch.deliver(Event(
+                feed="calls", chain=chain, text=text, keyboard=keyboard,
+                address=address, symbol=symbol or ""))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[PREMIUM] not queued for fan-out: {exc}")
+
+        if not chat_id:
+            return          # no mirror of our own; the subscribers have theirs
+        if await notifier.send_to(chat_id, text, keyboard=keyboard):
             self.count_premium += 1
             log.info(f"[PREMIUM] [{group}] {symbol or address[:10]} -> {label} group ({calls}/{CALL_CAP})")
         else:

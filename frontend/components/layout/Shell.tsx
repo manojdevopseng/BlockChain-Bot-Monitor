@@ -164,24 +164,35 @@ export function Shell({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  // Three shells, not two. `/` is the dashboard chooser and `/login` is the
-  // form — both are their own page with no chrome and no session. `/lite` is
-  // the second dashboard: it needs the session, but carries its own header
-  // instead of the sidebar.
-  const isLogin = path === "/login";
-  const isChooser = path === "/";
-  const isBare = isLogin || isChooser;
+  // Pages that exist for people who are not signed in — the ones that fix not
+  // being signed in, and the ones that explain what this is. None of them may
+  // bounce to /login, and none of them get the dashboard chrome: a visitor
+  // should not be paying for a WebSocket to read a price list.
+  const PUBLIC_PATHS = ["/login", "/register", "/verify", "/forgot", "/reset",
+                        "/home", "/pricing", "/how-to-use", "/faq", "/contact",
+                        "/legal", "/docs", "/changelog", "/status"];
+  // The root is the front page, for everybody. A signed-in visitor who types
+  // the address expects to see the site, not to be thrown into a dashboard —
+  // the way in is a button on it.
+  const isPublic = path === "/"
+    || PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+  const isLogin = isPublic;
+  // Two more shells that are signed in but carry no chrome: the chooser, which
+  // is one question and two links, and the Lite dashboard, which draws its own
+  // header instead of the sidebar.
+  const isChooser = path === "/choose";
   const isLite = path === "/lite" || path.startsWith("/lite/");
 
   useEffect(() => {
     const ok = !!getToken();
     setSignedIn(ok);
-    // The chooser is reachable signed out on purpose — it links to the login
-    // and says which page it will land on afterwards.
-    if (!ok && !isBare) {
-      router.replace(`/login?next=${encodeURIComponent(path)}`);
-    }
-  }, [isBare, path, router]);
+    if (ok || isPublic) return;
+    // Asking for a page inside the app while signed out goes to the login;
+    // the root and the rest of the site never do, so a visitor is never
+    // shown a login box for a page they did not ask for. Where they were
+    // headed rides along, so a deep link survives the detour.
+    router.replace(`/login?next=${encodeURIComponent(path)}`);
+  }, [isPublic, path, router]);
 
   // Route change always closes the mobile drawer.
   useEffect(() => setMobileOpen(false), [path]);
@@ -213,9 +224,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if (keys) revalidate(keys, FAST_EVENTS.has(e.type));
   });
 
-  // The login page and the chooser get the theme but none of the chrome — no
-  // sidebar to navigate with and no status bar to poll while signed out.
-  if (isBare) {
+  // The signed-out pages get the theme but none of the chrome — no sidebar to
+  // navigate with and no status bar to poll while signed out.
+  if (isPublic) {
     return <ThemeProvider>{children}</ThemeProvider>;
   }
 
@@ -223,6 +234,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // frame that flashes and then redirects.
   if (!signedIn) {
     return <ThemeProvider><div className="min-h-screen bg-bg" /></ThemeProvider>;
+  }
+
+  // The chooser: signed in, but it is one question and two links. Giving it a
+  // sidebar would mean navigating away from the page whose whole job is to
+  // decide where to navigate.
+  if (isChooser) {
+    return <ThemeProvider>{children}</ThemeProvider>;
   }
 
   // The second dashboard: signed in, live socket, but no sidebar and no status
@@ -252,6 +270,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <div className="animate-fade-in">
               <RoleGate>{children}</RoleGate>
             </div>
+            {/* Once, at the foot of every page inside the app, rather than
+                pasted onto the eight panels that show signals. What is on
+                those pages is a reading of a chain, never a recommendation,
+                and the person acting on it should not have to have read the
+                marketing site to know that. */}
+            <p className="mx-auto mt-8 max-w-3xl text-center text-[11px] leading-relaxed text-text-dim">
+              SightLine reports what is happening on chain and on X. It is not
+              financial advice and nothing here is a recommendation to buy or
+              sell. Most tokens go to zero —{" "}
+              <a href="/legal/terms" className="underline hover:text-text-muted">terms</a>.
+            </p>
           </main>
           <StatusBar backend={backend} />
         </div>

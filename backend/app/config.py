@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # ── Database ────────────────────────────────────────────
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db: str = "blockchain_bot"
+    # The database the operator's feed is read from, when it is not this
+    # stack's own. Blank means "there is only one database", which is what a
+    # single deployment always is — see db.SHARED_COLLECTIONS.
+    feed_db: str = ""
 
     # ── Data retention (days) ───────────────────────────────
     # Enforced by MongoDB TTL indexes: mongod expires old documents in its own
@@ -287,6 +291,12 @@ class Settings(BaseSettings):
     command_chat_id: str = ""
     # "High Gas Early Activity" alerts (ETH Gas Fees feature).
     gas_alert_chat_id: str = ""
+    # Where the operator's own paper trades are posted. Customers never see
+    # this group — see trading._notify.
+    trading_alert_chat_id: str = ""
+    # The one shared room paying accounts are invited into. Blank falls back to
+    # DEST_PREMIUM_ALL, which on most deployments is the same group.
+    member_group_chat_id: str = ""
     # Repeat of the same error is re-sent at most once per this many seconds.
     error_alert_cooldown: int = 900
     # An identical WARNING/ERROR is written to the log at most once per this
@@ -347,6 +357,57 @@ class Settings(BaseSettings):
     bnb_v3_factory: str = "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
     # How long candles and readings are kept, like every other panel.
     rsi_retention_days: int = 15
+
+    # ── Public site: accounts, email, billing ────────────────────────────────
+    # Where the dashboard is served from. Every link in an email is built from
+    # this, so a wrong value sends people to a page that does not exist.
+    public_url: str = "http://localhost:3000"
+    # SMTP. Blank host = not configured: nothing is sent and every message is
+    # written to the log with its link, so sign-up still works while the mail
+    # provider is being set up.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    # Where a new order or a support ticket is emailed. Blank = SMTP_FROM.
+    admin_email: str = ""
+
+    # ── What the receipt says about the seller ───────────────────────────────
+    # The one thing on a bill the code cannot work out for itself. Blank is
+    # handled: the receipt prints the product name and simply leaves the seller
+    # block off rather than inventing a company.
+    #
+    # There is deliberately no tax field. This sells one thing for a fixed
+    # price in stablecoin, and the document is a receipt for that payment — it
+    # does not present itself as a tax invoice, so it has no number to carry.
+    invoice_business_name: str = ""
+    invoice_address: str = ""
+    invoice_email: str = ""
+
+    # ── Taking payment (USDT / USDC) ─────────────────────────────────────────
+    # One receiving address per chain — yours, not ours, and never a key. A
+    # blank address closes that rail: it disappears from the checkout instead
+    # of taking money nobody can see.
+    pay_eth_address: str = ""
+    pay_bsc_address: str = ""
+    pay_sol_address: str = ""
+    pay_tron_address: str = ""
+    # Which coins are actually accepted, comma-separated (eth_usdt, sol_usdc,
+    # bsc_usdt …). Blank means every coin on a chain that has an address —
+    # which is not always what is wanted: one wallet can hold both USDT and
+    # USDC, and offering a coin you did not intend to take is how a payment
+    # arrives somewhere nobody is watching for it.
+    pay_assets: str = ""
+    # Tron has no RPC of ours to read, so its balance comes from TronGrid. The
+    # key is optional at this volume and only raises the rate limit.
+    tron_api_url: str = "https://api.trongrid.io"
+    tron_api_key: str = ""
+    # Where "payment received" and "unmatched payment" go. Blank = ALERT_CHAT_ID.
+    pay_alert_chat_id: str = ""
+    # Where a new support request goes. Blank = ALERT_CHAT_ID. Worth its own
+    # chat (or its own topic) once there is more than a handful a day.
+    support_chat_id: str = ""
 
     # ── Market Cap Alert ─────────────────────────────────────────────────────
     # Its own endpoints again, two per chain, so a fifteen-second market cap

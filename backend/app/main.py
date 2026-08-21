@@ -1,4 +1,4 @@
-"""BlockChain-Bot dashboard — FastAPI application entry point.
+"""SightLine — FastAPI application entry point.
 
 Run (from backend/):
     uvicorn app.main:app --reload --port 8000
@@ -19,14 +19,17 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import db, notifier, registry, seed, security, supervisor
+from . import db, migrations, notifier, registry, seed, security, supervisor
 from .config import settings
 from .routers import (
-    ai_agent as ai_router, alerts, analytics, auth, calls as calls_router,
-    chains, chat_lookup,
+    account, admin as admin_router, ai_agent as ai_router, alert_rules,
+    alerts, analytics,
+    auth, billing, calls as calls_router, chains,
+    chat_lookup, support,
     commands, dashboard, forwarder, launchpad, logs, mcap,
-    outcomes as outcomes_router, rbhx, rpc, rsi,
-    settings as settings_router, system, tokens, users as users_router,
+    notifications as notif_router,
+    outcomes as outcomes_router, public, rbhx, rpc, rsi,
+    settings as settings_router, system, tokens, trading, users as users_router,
 )
 from .ws_hub import hub
 
@@ -100,6 +103,10 @@ async def lifespan(app: FastAPI):
     await db.ensure_indexes()
     await registry.seed()
     await seed.seed_all()
+    # Rows written before accounts existed belong to nobody; adopt them before
+    # anything scoped by owner runs and finds an empty list.
+    await migrations.run()
+
     # Count the launches already on file before anything reads the tally.
     # Without it every account reads as its first launch on the day this
     # ships, which is wrong for the thousands that already have more than one.
@@ -142,7 +149,7 @@ async def lifespan(app: FastAPI):
         await db.close()
 
 
-app = FastAPI(title="BlockChain-Bot Dashboard API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SightLine API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -156,19 +163,54 @@ app.add_middleware(
 # depended on it, so /api/settings/credentials handed out the GMGN API key and
 # the Cloudflare cookie to anyone who asked, and a PATCH could stop a scanner.
 # The auth router itself stays open — the login has to be reachable.
-_PROTECTED = (dashboard, alerts, tokens, chains, forwarder, commands,
-              analytics, logs, rpc, system, settings_router, chat_lookup,
-              outcomes_router, ai_router, users_router, rbhx, launchpad,
-              rsi, mcap, calls_router)
+# Three kinds of surface, three rules.
+#
+#   product   the customer's own lists. A live account reads and writes its own
+#             rows; which rows are theirs is decided in the query, not here.
+#   shared    what the scanners produce for everybody. A live account reads;
+#             only an admin changes anything.
+#   operator  the controls. Admin only, whatever the method — these are hidden
+#             from a customer rather than greyed out, and the rule is here so
+#             the hiding is a courtesy and not the control.
+#           AI Narrative is here rather than in `shared` for one endpoint:
+#           fact-check is a POST, and under the shared rule every non-GET is
+#           admin-only — which left the main button of a paid feature answering
+#           403 to the people paying for it. Its writes are its own allowance
+#           instead, checked at the endpoint.
+_PRODUCT = (rsi, mcap, ai_router, alert_rules, trading)
+# Billing is its own rule: an account with an ended subscription must be able to
+# buy one, so this needs a login and nothing more.
+# Reporting a problem is not a product feature to be paywalled: an account
+# whose subscription ended because a payment did not land is exactly the one
+# that needs to say so.
+_ACCOUNT = (billing, support, notif_router)
+_SHARED = (dashboard, alerts, tokens, chains, commands, analytics,
+           chat_lookup, outcomes_router, rbhx, launchpad, calls_router)
+_OPERATOR = (forwarder, logs, rpc, system, settings_router, users_router,
+             admin_router)
 
 app.include_router(auth.router)
+# Sign-up, email confirmation and password reset cannot sit behind a login,
+# and the routes that do need one carry their own dependency.
+app.include_router(account.router)
+# The marketing pages: a price list and a contact form, and nothing else that
+# a stranger could ask for.
+app.include_router(public.router)
 # `require_write` is the login check AND the read-only rule in one dependency:
 # any request that is not a GET needs the admin role. Mounting it on the
 # routers rather than listing endpoints means a new POST is covered the day it
 # is written. What a `user` may not even read — the .env credentials — is
 # guarded at its own endpoint, because it is a GET.
-for r in _PROTECTED:
-    app.include_router(r.router, dependencies=[Depends(security.require_write)])
+for r in _ACCOUNT:
+    app.include_router(r.router, dependencies=[Depends(security.require_user)])
+for r in _PRODUCT:
+    app.include_router(r.router,
+                       dependencies=[Depends(security.require_customer)])
+for r in _SHARED:
+    app.include_router(r.router,
+                       dependencies=[Depends(security.require_customer_read)])
+for r in _OPERATOR:
+    app.include_router(r.router, dependencies=[Depends(security.require_admin)])
 
 # CSV endpoints live in the outcomes module but mount under their own paths.
 for extra in (outcomes_router.alerts_csv, outcomes_router.detections_csv):

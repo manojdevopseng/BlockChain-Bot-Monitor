@@ -256,12 +256,28 @@ DEFAULT_SERVICES: list[dict] = [
     # it is independent of the forwarder's userbot session.
     {"id": "bot_commands",          "category": BOT, "label": "Bot Commands",
      "chain": None, "enabled": True},
+    # Carries what the scanners found to the customers who subscribed to it,
+    # each in their own chat. Off, the operator's groups keep getting
+    # everything exactly as before and no customer is sent anything — which is
+    # the switch to reach for if the bot is ever rate-limited into the ground.
+    {"id": "alert_fanout",          "category": BOT,
+     "label": "Customer Alert Fan-out", "chain": None, "enabled": True},
     # Follows every fired alert forward and records what the price did at 15m,
     # 1h, 6h and 24h. Off, the background task is not running at all: no price
     # lookups, no writes — and Analytics, the digest and the group ranking stop
     # gaining new data.
     {"id": "outcome_tracker",       "category": BOT, "label": "Outcome Tracker",
      "chain": None, "enabled": True},
+    # Marks open paper positions to market once a minute, and fires the
+    # take-profit, stop-loss, trailing-stop and daily-loss rules. Off, the P&L
+    # column only moves when somebody presses Prices, and no rule can fire.
+    {"id": "trading_engine",        "category": BOT,
+     "label": "Trading Engine (auto-sell & limits)", "chain": None, "enabled": True},
+    # Invites paying accounts into the Premium Callers group and removes them
+    # when their access ends. Off, nobody is removed — the invites still work,
+    # so the room slowly fills with people who stopped paying.
+    {"id": "member_group",          "category": BOT,
+     "label": "Premium Group Membership", "chain": None, "enabled": True},
     # Posts each alert's 1h and 24h result as a reply to that alert. Narrower
     # than the tracker: off, measurement continues and only Telegram goes quiet.
     {"id": "outcome_replies",       "category": BOT, "label": "Outcome Replies",
@@ -294,6 +310,13 @@ DEFAULT_SERVICES: list[dict] = [
     # market-cap trade stream with it.
     {"id": "sol_onchain_discovery", "category": SOL, "group": "On-Chain Discovery",
      "label": "SOL On-Chain Discovery (WebSocket)", "chain": "sol", "enabled": True},
+
+    # ── Billing ────────────────────────────────────────────────────────────
+    # Watches the receiving addresses and starts a plan when its exact figure
+    # arrives. Off, orders can still be created and paid — they just wait for
+    # an operator to settle them by hand, which is the safe way round.
+    {"id": "payments", "category": BOT, "label": "Payment watcher",
+     "chain": None, "enabled": True},
 
     # ── Chains ──
     {"id": "chain_eth", "category": CHAIN, "label": "ETH", "chain": "eth", "enabled": True},

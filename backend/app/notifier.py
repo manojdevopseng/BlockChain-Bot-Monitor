@@ -42,6 +42,29 @@ def enabled() -> bool:
     return bool(settings.telegram_bot_token and settings.alert_chat_id)
 
 
+# The bot's own @name, asked once and kept. Needed to build the connect link a
+# customer taps — and asked rather than configured, because a name typed into
+# .env by hand is a name that will one day be wrong.
+_bot_username: str = ""
+
+
+async def bot_username() -> str:
+    """The bot's @name without the @, or "" if it cannot be asked."""
+    global _bot_username
+    if _bot_username or not settings.telegram_bot_token:
+        return _bot_username
+    try:
+        session = await _session_get()
+        async with session.get(
+                f"{TELEGRAM_API}/bot{settings.telegram_bot_token}/getMe",
+                timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            body = await resp.json(content_type=None)
+        _bot_username = str((body.get("result") or {}).get("username") or "")
+    except Exception as exc:  # noqa: BLE001
+        _safe_print(f"[notifier] getMe failed: {exc}")
+    return _bot_username
+
+
 def _safe_print(msg: str) -> None:
     """Console-safe print: Windows consoles are cp1252 and raise on emoji."""
     try:
@@ -69,7 +92,8 @@ async def close() -> None:
 
 
 async def send_to(chat_id, text: str, *, silent: bool = False,
-                  buttons: Optional[list[tuple[str, str]]] = None) -> bool:
+                  buttons: Optional[list[tuple[str, str]]] = None,
+                  keyboard: Optional[list[list[dict]]] = None) -> bool:
     """Send an HTML message to a specific chat. Never raises.
 
     `send` is the operational channel (ALERT_CHAT_ID); this is for features that
@@ -79,8 +103,24 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
     a button instead of text keeps it out of the message body, where it would
     otherwise sit as a bare URL under everything else.
     """
+    ok, _ = await send_result(chat_id, text, silent=silent, buttons=buttons,
+                              keyboard=keyboard)
+    return ok
+
+
+async def send_result(chat_id, text: str, *, silent: bool = False,
+                      buttons: Optional[list[tuple[str, str]]] = None,
+                      keyboard: Optional[list[list[dict]]] = None
+                      ) -> tuple[bool, float]:
+    """(sent, seconds to wait before trying this chat again).
+
+    The second half is what `send_to` throws away and the alert dispatcher
+    cannot: sending to many chats at once is how a bot meets 429, and Telegram
+    says in the refusal exactly how long to wait. Guessing instead — a fixed
+    sleep, or worse a retry — is how a bot earns a longer ban.
+    """
     if not chat_id or not settings.telegram_bot_token:
-        return False
+        return False, 0.0
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -88,7 +128,12 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
         "disable_web_page_preview": True,
         "disable_notification": silent,
     }
-    if buttons:
+    # `keyboard` is rows already built (tgstyle.keyboard); `buttons` is the
+    # older one-row [(label, url)] shape, kept because plenty of callers still
+    # only ever want one row of links.
+    if keyboard:
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
+    elif buttons:
         payload["reply_markup"] = {
             "inline_keyboard": [[{"text": label, "url": url} for label, url in buttons]]
         }
@@ -100,13 +145,24 @@ async def send_to(chat_id, text: str, *, silent: bool = False,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
             if resp.status == 200:
-                return True
+                return True, 0.0
             body = await resp.text()
             _safe_print(f"[notifier] Telegram error {resp.status} for {chat_id}: {body[:200]}")
-            return False
+            return False, _retry_after(body) if resp.status == 429 else 0.0
     except Exception as exc:  # noqa: BLE001
         _safe_print(f"[notifier] send to {chat_id} failed: {exc}")
-        return False
+        return False, 0.0
+
+
+def _retry_after(body: str) -> float:
+    """The wait Telegram asked for, off a 429 body. 5s when it did not say."""
+    import json as _json
+    try:
+        got = _json.loads(body or "{}")
+        wait = (got.get("parameters") or {}).get("retry_after")
+        return float(wait) if wait else 5.0
+    except Exception:  # noqa: BLE001
+        return 5.0
 
 
 async def send_panel(chat_id, text: str, keyboard: list[list[dict]]) -> Optional[int]:
@@ -196,7 +252,7 @@ async def send(text: str, *, silent: bool = False) -> bool:
 
 async def notify_startup(details: str = "") -> None:
     await send(
-        "🟢 <b>BlockChain-Bot STARTED</b>\n"
+        "🟢 <b>SightLine STARTED</b>\n"
         f"<i>{html.escape(_now())}</i>"
         + (f"\n\n{details}" if details else "")
     )
@@ -204,7 +260,7 @@ async def notify_startup(details: str = "") -> None:
 
 async def notify_shutdown(reason: str = "graceful stop") -> None:
     await send(
-        "🔴 <b>BlockChain-Bot STOPPED</b>\n"
+        "🔴 <b>SightLine STOPPED</b>\n"
         f"<i>{html.escape(_now())}</i>\n"
         f"Reason: {html.escape(reason)}"
     )
@@ -213,7 +269,7 @@ async def notify_shutdown(reason: str = "graceful stop") -> None:
 async def notify_restart(uptime_seconds: int) -> None:
     """Sent on startup when a previous run ended without a clean shutdown."""
     await send(
-        "🔁 <b>BlockChain-Bot RESTARTED</b>\n"
+        "🔁 <b>SightLine RESTARTED</b>\n"
         f"<i>{html.escape(_now())}</i>\n"
         f"Previous run lasted {uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m"
     )

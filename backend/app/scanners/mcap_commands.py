@@ -30,6 +30,19 @@ def _col(name: str):
     return db.get_collection(name)
 
 
+def _owner() -> str:
+    """Whose rows Telegram writes.
+
+    The bot answers in one chat, and that chat is the operator's — so until an
+    account can link its own Telegram (and the alert goes to that person rather
+    than to this group), everything added here belongs to the admin. Written as
+    one function so there is a single place to change when it does.
+    """
+    from app.config import settings
+    return settings.admin_username
+
+
+
 def _args(text: str) -> list[str]:
     return text.split()[1:]
 
@@ -69,8 +82,9 @@ async def _reply(cmd: str, text: str) -> str:
 async def _status() -> str:
     doc = await _settings()
     enabled = await registry.enabled_map()
-    total = await _col("mcap_tokens").count_documents({})
-    hit = await _col("mcap_tokens").count_documents({"hit_at": {"$exists": True}})
+    total = await _col("mcap_tokens").count_documents({"user_id": _owner()})
+    hit = await _col("mcap_tokens").count_documents(
+        {"user_id": _owner(), "hit_at": {"$exists": True}})
     on = [label for key, label in CHAIN_LABELS.items()
           if enabled.get(f"mcap_chain_{key}", True)
           and enabled.get(f"mcap_rpc_{key}", True)]
@@ -86,7 +100,8 @@ async def _status() -> str:
 
 
 async def _list() -> str:
-    rows = await _col("mcap_tokens").find({}).sort("added_at", -1).to_list(60)
+    rows = await _col("mcap_tokens").find({"user_id": _owner()}) \
+                                    .sort("added_at", -1).to_list(60)
     if not rows:
         return ("No tokens watched yet — /mcap_add &lt;chain&gt; "
                 "&lt;address&gt; &lt;target&gt;")
@@ -144,8 +159,9 @@ async def _add(args: list[str]) -> str:
     now = time.time()
     armed = armed_for(target, current)
     await _col("mcap_tokens").update_one(
-        {"chain": chain, "address": address},
-        {"$set": {"chain": chain, "address": address, "target": target,
+        {"user_id": _owner(), "chain": chain, "address": address},
+        {"$set": {"user_id": _owner(),
+                  "chain": chain, "address": address, "target": target,
                   "armed": armed, "symbol": symbol, "name": name,
                   "enabled": True, "added_at": now, "day": ist_date_str(now)},
          "$unset": {"hit_at": "", "hit_mcap": ""}},

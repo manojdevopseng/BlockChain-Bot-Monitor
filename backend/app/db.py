@@ -131,6 +131,17 @@ class _MemCollection:
                                   "upserted_id": new.get("_id")})()
         return type("R", (), {"matched_count": 0, "modified_count": 0})()
 
+    async def find_one_and_update(self, flt: dict, update: dict,
+                                  upsert: bool = False,
+                                  return_document=None, **_):
+        """Enough of Mongo's for the counters and daily-usage rows.
+
+        Always returns the document AFTER the update, which is what every
+        caller in this app asks for.
+        """
+        await self.update_one(flt, update, upsert=upsert)
+        return await self.find_one(flt)
+
     async def count_documents(self, flt: dict | None = None):
         return sum(1 for d in self._docs if _matches(d, flt or {}))
 
@@ -157,13 +168,49 @@ class _MemDB:
 
 _mem_db = _MemDB()
 
+# Set only when this stack reads somebody else's feed — see connect().
+_feed_db = None
+
+
+# What one operator collects and every stack reading this deployment shares.
+#
+# The split is not "big" versus "small": it is whose row it is. Everything here
+# is produced by the scanners and the userbot and belongs to nobody in
+# particular — a detection is a detection whoever is looking at it. Everything
+# not here belongs to an account (its tokens, its orders, its positions) or
+# controls one stack's own behaviour, and two stacks sharing either of those
+# would be two stacks pretending to be one.
+#
+# `services` is the one that would hurt most and is deliberately absent: it is
+# the registry of switches, and sharing it would mean turning a scanner off on
+# the test box turns it off in production.
+SHARED_COLLECTIONS = frozenset({
+    # the premium feed
+    "premium_calls", "premium_messages", "premium_media",
+    "premium_detections", "premium_archive", "premium_groups",
+    # the detection panels
+    "alerts", "gas_alerts", "tokens", "outcomes",
+    "launchpad_tokens", "launchpad_watch", "launchpad_skip",
+    "rbhx_tokens", "rbhx_watch", "rbhx_skip", "rbhx_keywords",
+    "x_links", "x_drops", "x_accounts",
+    # what the scanners read and remember about the feed
+    "ai_narratives", "ai_decisions", "ai_seen", "scanner_state",
+    "chats_seen", "mutes", "keywords", "filter_keywords", "otto_rules",
+    "forwarder_counters",
+})
+
+
+def feed_shared() -> bool:
+    """Is the feed coming from somebody else's database?"""
+    return _feed_db is not None
+
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
 async def connect() -> None:
     """Try Mongo; on any failure fall back to the in-memory store."""
-    global DB_OK, _backend, _mongo_client, _mongo_db
+    global DB_OK, _backend, _mongo_client, _mongo_db, _feed_db
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -172,6 +219,16 @@ async def connect() -> None:
         )
         await _mongo_client.admin.command("ping")
         _mongo_db = _mongo_client[settings.mongo_db]
+        # A second stack reading the feed the first one collects. Same server,
+        # so this is a handle rather than a connection — no copy, no lag, and
+        # nothing to keep in step.
+        want = (settings.feed_db or "").strip()
+        _feed_db = (_mongo_client[want]
+                    if want and want != settings.mongo_db else None)
+        if _feed_db is not None:
+            print(f"[db] feed read from '{want}' "
+                  f"({len(SHARED_COLLECTIONS)} collections); "
+                  f"everything else in '{settings.mongo_db}'")
         DB_OK = True
         _backend = "mongo"
     except Exception as exc:  # noqa: BLE001
@@ -191,6 +248,8 @@ def backend_name() -> str:
 
 def get_collection(name: str):
     if _backend == "mongo" and _mongo_db is not None:
+        if _feed_db is not None and name in SHARED_COLLECTIONS:
+            return _feed_db[name]
         return _mongo_db[name]
     return _mem_db[name]
 
@@ -231,6 +290,9 @@ _TTL_COLLECTIONS = {
     # token list does not — that is the user's own list, not data.
     "rsi_candles": "rsi_retention_days",
     "rsi_state": "rsi_retention_days",
+    "rsi_readings": "rsi_retention_days",
+    # A notice nobody read in a month is not going to be read.
+    "notifications": "alert_retention_days",
     "launchpad_watch": "launchpad_retention_days",
     # Second Dashboard: one document per call, and the pictures that came with
     # them. Two windows, not one — the images are what fill a disk, and losing
@@ -294,6 +356,15 @@ async def ensure_indexes() -> None:
         ("premium_calls",      [("day", -1)]),                       # History dropdown
         ("premium_calls",      [("chat_id", 1), ("ts", -1)]),        # one caller's feed
         ("premium_media",      "mid"),                               # image by id
+        # Paper trading: one account's own positions, read newest-first and
+        # marked to market by (chain, address).
+        ("trading_positions",  [("user", 1), ("status", 1), ("opened_at", -1)]),
+        ("trading_positions",  [("chain", 1), ("address", 1)]),
+        # The queued gas-fee buys the worker sweeps. Keyed the way sweep_pending
+        # reads it, and the way on_gas upserts it.
+        ("trading_pending",    [("next_at", 1)]),
+        ("trading_pending",    [("user", 1), ("chain", 1), ("address", 1)]),
+        ("trading_settings",   "user"),
         # The tracker reads newest-first and updates by (chat, message), so
         # both have to be index-backed: it is written on every premium message,
         # which is the highest-volume write in the app.
@@ -349,11 +420,49 @@ async def ensure_indexes() -> None:
         # evaluator, so both have to be lookups.
         ("rsi_tokens",         [("chain", 1), ("address", 1)]),
         ("rsi_state",          [("chain", 1), ("address", 1)]),
+        # One reading per token per settings — the key the evaluator writes and
+        # the panel reads back.
+        ("rsi_readings",       [("chain", 1), ("address", 1), ("interval", 1),
+                                ("period", 1)]),
         ("rsi_candles",        [("chain", 1), ("address", 1), ("interval", 1), ("ts", -1)]),
         # Market Cap Alert: one row per token in each, read every cadence. No
         # TTL on either — the list is the user's own and the state is one
         # document per token, so it is bounded by that list rather than by time.
-        ("mcap_tokens",        [("chain", 1), ("address", 1)]),
+        # Every list is read by its owner, so that is the first key.
+        ("mcap_tokens",        [("user_id", 1), ("chain", 1), ("address", 1)]),
+        ("rsi_tokens",         [("user_id", 1)]),
+        ("users",              "email"),
+        ("users",              "verify_token"),
+        ("users",              "reset_token"),
+        ("usage_daily",        [("user_id", 1), ("day", 1)]),
+        # One document per account, read whole by the fan-out every 30s and by
+        # its owner on the Alert Rules page. Small either way, but the owner
+        # lookup is the hot one.
+        ("alert_subs",         [("user_id", 1)]),
+        ("telegram_links",     "token"),
+        ("users",              "telegram_chat_id"),
+        ("orders",             [("user_id", 1), ("status", 1)]),
+        ("orders",             "id"),
+        # The receipt series. Unique so a double-assignment shows up as a
+        # write that fails rather than as two receipts with one number, and
+        # sparse so orders written before the series existed do not all
+        # collide on a missing field before the migration numbers them.
+        ("orders",             {"keys": [("invoice_no", 1)],
+                                "unique": True, "sparse": True}),
+        ("orders",             [("status", 1), ("asset_id", 1)]),
+        ("payment_rails",      "asset_id"),
+        ("contact_messages",   [("handled", 1), ("at", -1)]),
+        ("admin_audit",        [("at", -1)]),
+        ("notifications",      [("user_id", 1), ("at", -1)]),
+        ("notifications",      [("user_id", 1), ("read", 1)]),
+        ("notifications",      [("user_id", 1), ("key", 1)]),
+        ("payments_unmatched", [("settled", 1), ("at", -1)]),
+        ("tickets",            [("user_id", 1), ("status", 1)]),
+        ("tickets",            "id"),
+        # The operator's queue: urgent first, then oldest.
+        ("tickets",            [("status", 1), ("priority", 1), ("created_at", 1)]),
+        ("v4_pools",           [("chain", 1), ("currency0", 1)]),
+        ("v4_pools",           [("chain", 1), ("currency1", 1)]),
         ("mcap_state",         [("chain", 1), ("address", 1)]),
         # Counting an account's launches, and the column that shows it. There
         # was no index on handle at all before this.
@@ -366,8 +475,19 @@ async def ensure_indexes() -> None:
         ("launchpad_watch",    "handle"),
     ]
     for coll, keys in plan:
+        # The stack that owns a collection owns its indexes. A reader creating
+        # them is at best redundant and at worst destructive: _ensure_ttl below
+        # would re-point the owner's retention at this stack's setting, and
+        # mongod deletes what falls outside it without asking anybody.
+        if _feed_db is not None and coll in SHARED_COLLECTIONS:
+            continue
         try:
-            await get_collection(coll).create_index(keys)
+            # A dict entry carries options — unique, sparse — beside its keys.
+            if isinstance(keys, dict):
+                spec = dict(keys)
+                await get_collection(coll).create_index(spec.pop("keys"), **spec)
+            else:
+                await get_collection(coll).create_index(keys)
         except Exception as exc:  # noqa: BLE001
             # Named per collection: a silent failure here shows up much later
             # as an unexplained slow query.
@@ -376,6 +496,8 @@ async def ensure_indexes() -> None:
     if _backend != "mongo":
         return
     for coll, setting in _TTL_COLLECTIONS.items():
+        if _feed_db is not None and coll in SHARED_COLLECTIONS:
+            continue          # not ours to expire — see the loop above
         await _backfill_dt(coll)
         await _ensure_ttl(coll, int(getattr(settings, setting, 0)))
 
@@ -395,6 +517,7 @@ _TS_FIELD = {
     "launchpad_tokens": "open_timestamp",
     "rsi_candles": "ts",
     "rsi_state": "updated_at",
+    "rsi_readings": "checked_at",
     "launchpad_skip": "added_at",
     "launchpad_watch": "added_at",
 }

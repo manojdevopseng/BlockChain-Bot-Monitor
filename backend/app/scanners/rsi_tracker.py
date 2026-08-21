@@ -17,6 +17,21 @@ Three loops, because they answer three different questions:
 Alerts fire on a crossing, not a level — see rsi_math.crossed. RSI sits under
 30 for minutes at a time and alerting on the level would send one message per
 check for as long as it stayed there.
+
+With more than one account watching, the work splits three ways by what it
+actually depends on:
+
+  the price      depends on the token only. One read per token per tick,
+                 however many accounts asked for it (`rsi_state`).
+  the candles    depend on the token and the timeframe (`rsi_candles`).
+  the reading    depends on the token, the timeframe AND the candle count,
+                 because Wilder's smoothing makes the window part of the
+                 answer. So it is keyed on all three (`rsi_readings`), and two
+                 accounts on identical settings share one computation.
+
+What is never shared is the alert: which zone an account has already been told
+about, and when, lives on that account's own row. Otherwise the first person to
+be alerted would silence everybody else.
 """
 
 from __future__ import annotations
@@ -243,52 +258,74 @@ class RsiTracker:
                        if self._chain_on(t.get("chain", ""))
                        and not self._from_gmgn(t)
                        and now >= self._due.get(_key(t), 0.0)]
-                if due:
-                    await asyncio.gather(*(self._sample(t, now) for t in due))
+                if not due:
+                    continue
+                by_token: dict[tuple[str, str], list[dict]] = {}
+                for row in due:
+                    by_token.setdefault(
+                        (row.get("chain", ""),
+                         (row.get("address") or "").lower()), []).append(row)
+                await asyncio.gather(*(self._sample_token(chain, addr, rows, now)
+                                       for (chain, addr), rows
+                                       in by_token.items()))
             except asyncio.CancelledError:
                 return
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"[RSI] sampler: {exc}")
 
-    async def _sample(self, token: dict, now: float) -> None:
-        chain, addr = token.get("chain", ""), (token.get("address") or "").lower()
-        interval = token.get("interval") or DEFAULT_INTERVAL
-        step = INTERVALS.get(interval, INTERVALS[DEFAULT_INTERVAL])
-        self._due[_key(token)] = now + step
+    async def _sample_token(self, chain: str, addr: str, rows: list[dict],
+                            now: float) -> None:
+        """One price read, then a candle for each timeframe that wanted one.
+
+        Grouped by token rather than by row: the price is a fact about the
+        token, so ten accounts watching it cost one request. The candle is per
+        timeframe, because that is what a candle is.
+        """
         async with _READ_GATE:
             price = await self._reader.price(chain, addr)
+        for row in rows:
+            self._due[_key(row)] = now + INTERVALS.get(
+                row.get("interval") or DEFAULT_INTERVAL,
+                INTERVALS[DEFAULT_INTERVAL])
         if price is None or price <= 0:
             return
         # A row added before the ticker was read off the chain — or one whose
         # contract was unreachable at the time — fills itself in on its first
         # good sample rather than staying "?" forever.
-        if not token.get("symbol"):
+        if any(not r.get("symbol") for r in rows):
             symbol, name = await self._reader.name_symbol(chain, addr)
             if symbol:
-                token["symbol"], token["name"] = symbol, name
-                await _col("rsi_tokens").update_one(
+                for row in rows:
+                    row["symbol"], row["name"] = symbol, name
+                await _col("rsi_tokens").update_many(
                     {"chain": chain, "address": addr},
                     {"$set": {"symbol": symbol, "name": name}})
                 log.info(f"[RSI] {addr[:10]}… is {symbol}")
 
-        ts = bucket(now, interval)
-        # One document per candle: sampling twice inside the same bucket
-        # overwrites the close, which is what a close is.
-        await _col("rsi_candles").update_one(
-            {"chain": chain, "address": addr, "interval": interval, "ts": ts},
-            {"$set": {"close": price, "dt": _utc_now()}},
-            upsert=True,
-        )
-        # A token that was tracked on another chain first leaves a reading
-        # behind under that chain — the panel then shows an empty RSI while the
-        # worker happily computes one, because state is keyed on chain and
-        # address. BUY did exactly that when it moved from ETH to RBH.
-        await _col("rsi_state").delete_many({"address": addr,
-                                             "chain": {"$ne": chain}})
+        # One document per candle per timeframe. Sampling twice inside the same
+        # bucket overwrites the close, which is what a close is — and two
+        # accounts on the same timeframe write the same document, which is the
+        # point.
+        for interval in {r.get("interval") or DEFAULT_INTERVAL for r in rows}:
+            await _col("rsi_candles").update_one(
+                {"chain": chain, "address": addr, "interval": interval,
+                 "ts": bucket(now, interval)},
+                {"$set": {"close": price, "dt": _utc_now()}},
+                upsert=True,
+            )
+        # A token that was tracked on another chain first leaves a price and a
+        # reading behind under that chain — the panel then shows an empty RSI
+        # while the worker happily computes one. BUY did exactly that when it
+        # moved from ETH to RBH.
+        for name in ("rsi_state", "rsi_readings"):
+            await _col(name).delete_many({"address": addr,
+                                          "chain": {"$ne": chain}})
+        # The price, and only the price: what the number means depends on
+        # settings, and that lives in rsi_readings keyed by them.
         await _col("rsi_state").update_one(
             {"chain": chain, "address": addr},
-            {"$set": {"price": price, "interval": interval,
-                      "updated_at": now, "day": ist_date_str(now), "dt": _utc_now()}},
+            {"$set": {"price": price, "updated_at": now,
+                      "day": ist_date_str(now), "dt": _utc_now()}},
             upsert=True,
         )
 
@@ -298,21 +335,24 @@ class RsiTracker:
                 await asyncio.sleep(self.cadence)
                 if not self._on("rsi_tracker"):
                     continue
+                # Grouped by everything the number depends on, so identical
+                # settings are computed once and shared.
+                groups: dict[tuple, list[dict]] = {}
                 for token in list(self._tokens):
-                    if self._chain_on(token.get("chain", "")):
-                        await self._evaluate(token)
+                    if not self._chain_on(token.get("chain", "")):
+                        continue
+                    groups.setdefault(_reading_key(token, self._settings),
+                                      []).append(token)
+                for key, rows in groups.items():
+                    await self._evaluate_group(key, rows)
             except asyncio.CancelledError:
                 return
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"[RSI] evaluator: {exc}")
 
-    async def _evaluate(self, token: dict) -> None:
-        chain, addr = token.get("chain", ""), (token.get("address") or "").lower()
-        interval = token.get("interval") or DEFAULT_INTERVAL
-        # This token's own candle count, else the default for new ones.
-        period = int(token.get("period") or self._settings.get("period")
-                     or period_of(int(self._settings.get("default_candles")
-                                      or DEFAULT_CANDLES)))
+    async def _evaluate_group(self, key: tuple, rows: list[dict]) -> None:
+        """One reading for one set of settings, then each account's own alert."""
+        chain, addr, interval, period = key
 
         # Where the series comes from. GMGN on every chain and interval it
         # serves — one request, the whole history with real OHLC, so a token
@@ -349,13 +389,8 @@ class RsiTracker:
         # The liveness of the part that actually decides the reading.
         live, live_steps = _moves(closes, _MOVE_WINDOW)
         value = rsi_math.rsi(closes, period)
-
-        state = await _col("rsi_state").find_one({"chain": chain, "address": addr}) or {}
         here = rsi_math.zone(value, self.low, self.high)
-        announced = str(state.get("announced_zone") or "")
-        turn = rsi_math.crossed(announced, value, self.low, self.high)
         now = time.time()
-        cooling = now - float(state.get("last_alert_at") or 0) < _ALERT_COOLDOWN
 
         # `moved` is the number of steps in the series where the price
         # actually changed. It is recorded because the RSI alone cannot tell a
@@ -363,63 +398,141 @@ class RsiTracker:
         # previous close, and a run of identical closes turns into RSI 0 or
         # 100 — which looks exactly like a token in freefall.
         steps = max(1, len(closes) - 1)
-        update = {"rsi": value, "zone": here, "samples": len(closes),
-                  "period": period, "interval": interval, "checked_at": now,
-                  "source": source,
-                  # Whole series, for context…
-                  "moved": moved, "moved_pct": round(moved / steps * 100, 1),
-                  # …and the last _MOVE_WINDOW candles, which is what decides.
-                  "moved_recent": live, "moved_window": live_steps,
-                  "moved_recent_pct": round(live / max(1, live_steps) * 100, 1),
-                  "thin": _thin(live, live_steps),
-                  "day": ist_date_str(now), "dt": _utc_now()}
-        # Back to neutral is what re-arms the next alert — recorded even while
-        # a cooldown is running, because it is not an announcement.
-        if here == "neutral":
-            update["announced_zone"] = "neutral"
-        await _col("rsi_state").update_one({"chain": chain, "address": addr},
-                                           {"$set": update}, upsert=True)
+        # The reading: shared by everyone on these settings, and now carrying
+        # what the page needs to say whether the number means anything.
+        await _col("rsi_readings").update_one(
+            {"chain": chain, "address": addr, "interval": interval,
+             "period": period},
+            {"$set": {"chain": chain, "address": addr, "interval": interval,
+                      "period": period, "rsi": value, "zone": here,
+                      "samples": len(closes), "checked_at": now,
+                      # Where the candles came from, and how much of the series
+                      # actually moved.
+                      "source": source,
+                      # Whole series, for context…
+                      "moved": moved, "moved_pct": round(moved / steps * 100, 1),
+                      # …and the last _MOVE_WINDOW candles, which is what
+                      # decides: a token that traded an hour ago and has been
+                      # flat since reads healthy over 300 candles and dead over
+                      # the last 60.
+                      "moved_recent": live, "moved_window": live_steps,
+                      "moved_recent_pct": round(live / max(1, live_steps) * 100, 1),
+                      "thin": _thin(live, live_steps),
+                      "day": ist_date_str(now), "dt": _utc_now()}},
+            upsert=True)
+
+        price = ((await _col("rsi_state").find_one({"chain": chain,
+                                                    "address": addr}) or {})
+                 .get("price"))
+        # The alert: each account's own, because each has been told a different
+        # thing so far and will be told on its own chat.
+        for row in rows:
+            await self._announce(row, value, here, price, now,
+                                 live, live_steps, source)
+
+    async def _announce(self, token: dict, value: float, here: str,
+                        price, now: float,
+                        live: int = 0, live_steps: int = 0,
+                        source: str = "") -> None:
+        chain, addr = token.get("chain", ""), (token.get("address") or "").lower()
+        owned = {"user_id": token.get("user_id"), "chain": chain, "address": addr}
+        announced = str(token.get("announced_zone") or "")
+        turn = rsi_math.crossed(announced, value, self.low, self.high)
+        cooling = now - float(token.get("last_alert_at") or 0) < _ALERT_COOLDOWN
+
+        # Back to neutral re-arms the next alert — recorded even while a
+        # cooldown is running, because it is not an announcement.
+        if here == "neutral" and announced != "neutral":
+            token["announced_zone"] = "neutral"
+            await _col("rsi_tokens").update_one(
+                owned, {"$set": {"announced_zone": "neutral"}})
         if not turn or cooling:
             return          # still due: `announced_zone` is deliberately unchanged
+
         # A series that barely moved has no RSI worth sending. Padding turns
         # into 0 or 100, and those are the two values most likely to look like
         # the alert of the day. The panel still shows the number, marked thin.
-        if _thin(live, live_steps):
+        #
+        # Checked after the neutral re-arm above, deliberately: a thin reading
+        # should not send, but it should not leave the account stuck armed
+        # either.
+        if live_steps and _thin(live, live_steps):
             log.info(f"[RSI] {token.get('symbol') or addr[:10]} {turn} not sent — "
                      f"only {live} of the last {live_steps} steps moved "
                      f"({live / max(1, live_steps) * 100:.1f}%, {source})")
             return
-        await _col("rsi_state").update_one(
-            {"chain": chain, "address": addr},
-            {"$set": {"last_alert_at": now, "announced_zone": turn}})
+
+        token["announced_zone"], token["last_alert_at"] = turn, now
+        await _col("rsi_tokens").update_one(
+            owned, {"$set": {"last_alert_at": now, "announced_zone": turn}})
+        from app import notifications
+        await notifications.notify(
+            token.get("user_id") or "", notifications.ALERT,
+            f"{token.get('symbol') or 'A token'} is {turn} — RSI {value:.1f}",
+            f"On {INTERVAL_LABELS.get(token.get('interval'), '')}, "
+            f"{str(chain).upper()}.", "/rsi")
         log.info(f"[RSI] {token.get('symbol') or addr[:10]} ({chain.upper()}) "
-                 f"{turn} — RSI {value:.1f} on {INTERVAL_LABELS.get(interval, interval)}")
-        await self._alert(token, value, turn, state.get("price"))
+                 f"{turn} — RSI {value:.1f} on "
+                 f"{INTERVAL_LABELS.get(token.get('interval'), '')}"
+                 + (f" · {token.get('user_id')}" if token.get("user_id") else ""))
+        await self._alert(token, value, turn, price)
 
     async def _alert(self, token: dict, value: float, turn: str,
                      price: Optional[float]) -> None:
-        if not self._on("rsi_telegram") or not config.RSI_ALERT_CHAT_ID:
+        if not self._on("rsi_telegram"):
             return
-        import html
+        # Same rule as the Market Cap watcher: the owner's own chat, the
+        # operator's group for the operator, and nothing at all for an account
+        # whose plan has no Telegram alerts.
+        from app import telegram_link
+        chat_id, why = await telegram_link.alert_target(
+            token.get("user_id") or "", config.RSI_ALERT_CHAT_ID)
+        if not chat_id:
+            log.debug(f"[RSI] alert not sent for {token.get('symbol')}: {why}")
+            return
+        from app import tgstyle
         chain = token.get("chain", "")
         addr = (token.get("address") or "").lower()
-        head = "📉 <b>RSI OVERSOLD</b>" if turn == "oversold" else "📈 <b>RSI OVERBOUGHT</b>"
+        icon, kind = (("📉", "RSI OVERSOLD") if turn == "oversold"
+                      else ("📈", "RSI OVERBOUGHT"))
         bound = self.low if turn == "oversold" else self.high
         side = "below" if turn == "oversold" else "above"
-        text = (
-            f"{head} — {value:.1f}\n"
-            f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"🪙 <b>{html.escape(token.get('symbol') or '?')}</b>"
-            + (f" — {html.escape(token['name'])}" if token.get("name") else "") + "\n"
-            f"⛓ {chain.upper()} · {INTERVAL_LABELS.get(token.get('interval'), '')}\n"
-            f"📊 crossed {side} {bound:g}\n"
-            + (f"💵 {price:.12f} native\n" if price else "")
-            + f"\n<code>{addr}</code>"
-        )
-        buttons = [b for b in (("📊 GMGN", gmgn_url(chain, addr)),) if b[1]]
-        if not await notifier.send_to(config.RSI_ALERT_CHAT_ID, text, buttons=buttons):
-            log.warning(f"[RSI] alert not delivered for {token.get('symbol')}")
+        text = tgstyle.card(
+            icon=icon, kind=kind, chain=chain,
+            symbol=token.get("symbol") or "?", name=token.get("name") or "",
+            lines=[f"📊 RSI <b>{value:.1f}</b> · crossed {side} {bound:g}",
+                   f"⏱ {INTERVAL_LABELS.get(token.get('interval'), '')} candles",
+                   (f"💵 {price:.12f} native" if price else "")],
+            address=addr)
+        # Through the dispatcher rather than straight at Telegram: it applies
+        # the owner's quiet hours and shares one rate limiter with the fan-out.
+        # Sending beside it instead of through it is how one bot token gets
+        # rate-limited by its own two halves.
+        from app import alert_dispatch
+        sent, why = await alert_dispatch.send_personal(
+            token.get("user_id") or "", chat_id, text,
+            tgstyle.keyboard(chain=chain, address=addr, mute=False))
+        if not sent:
+            log.info(f"[RSI] alert not delivered for {token.get('symbol')}: {why}")
 
 
 def _key(token: dict) -> str:
-    return f"{token.get('chain')}:{(token.get('address') or '').lower()}"
+    """One account's row. Two accounts on the same token are two rows — they may
+    be on different timeframes — but they share the price read."""
+    return (f"{token.get('user_id', '')}:{token.get('chain')}:"
+            f"{(token.get('address') or '').lower()}:{token.get('interval')}")
+
+
+def _reading_key(token: dict, settings: dict) -> tuple:
+    """Everything an RSI number depends on: token, timeframe, candle count.
+
+    The period belongs in the key and not just in the row — Wilder's smoothing
+    makes the window part of the answer, so two accounts reading the same token
+    on the same timeframe with different candle counts are asking two different
+    questions.
+    """
+    period = int(token.get("period") or settings.get("period")
+                 or period_of(int(settings.get("default_candles")
+                                  or DEFAULT_CANDLES)))
+    return (token.get("chain", ""), (token.get("address") or "").lower(),
+            token.get("interval") or DEFAULT_INTERVAL, period)

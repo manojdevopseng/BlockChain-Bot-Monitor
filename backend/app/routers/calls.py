@@ -17,9 +17,10 @@ from __future__ import annotations
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import (APIRouter, Body, Depends, HTTPException, Query, Request,
+                     Response)
 
-from .. import calls, csvout, db
+from .. import calls, csvout, db, security
 from ..util import clean_list
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
@@ -96,6 +97,15 @@ def _cluster(docs: list[dict], limit: int) -> list[dict]:
                 "post_url": d.get("post_url") or "",
                 "ts": d.get("ts"),
             })
+        # The call-time market cap belongs to the first call on this token,
+        # not the newest — the head row is the newest, so it is carried over
+        # from whichever row actually has it.
+        if not head.get("mcap_call"):
+            for d in rows:
+                if d.get("mcap_call"):
+                    head["mcap_call"] = d["mcap_call"]
+                    head["mcap_call_at"] = d.get("mcap_call_at")
+                    break
         head["group_entries"] = entries
         head["count"] = len(entries)      # callers, as the detections panel counts
         head["calls"] = len(rows)         # posts, which is not the same number
@@ -125,6 +135,53 @@ async def list_calls(
 ):
     total, docs = await _page(chain, q, date, limit)
     return {"total": total, "items": clean_list(docs)}
+
+
+# Premium Calls says "bnb"; the market cap reader says "bsc". One place knows
+# both, and it is here rather than in the browser.
+_MCAP_CHAIN = {"bnb": "bsc"}
+@router.post("/mcap")
+async def read_mcap(payload: dict = Body(...),
+                    owner: dict = Depends(security.require_customer)):
+    """The market cap of one called token, read now and remembered on the row.
+
+    The reading itself is not done here: it is handed to the Market Cap
+    feature's own check, which owns the daily allowance, the per-chain
+    switches and the reader the watcher uses. Two ways to ask the same
+    question would eventually give two different answers, and the number a
+    caller is judged on cannot be one of those.
+
+    What this adds is the remembering. The figure is written onto every call
+    row for that token, so it is there for the next person to open the page
+    and does not cost a second lookup — a market cap checked once is checked
+    for everybody.
+    """
+    chain = str(payload.get("chain") or "").lower()
+    address = str(payload.get("address") or "").strip()
+    if not address:
+        raise HTTPException(400, "no token address")
+    # "No price" covers three different problems and only one of them is about
+    # the token. An endpoint nobody filled in is said plainly, so it can be
+    # filled in, rather than blamed on a token that may be perfectly fine.
+    from ..scanners import mcap_price
+    ready, why = mcap_price.endpoint_ready(chain)
+    if not ready:
+        raise HTTPException(409, why)
+
+    from .mcap import check as mcap_check
+    res = await mcap_check({"chain": _MCAP_CHAIN.get(chain, chain),
+                            "address": address}, owner)
+
+    mcap = res.get("mcap")
+    if mcap:
+        # Stored against the chain the call was recorded on, not the chain the
+        # reader was asked about — those differ for BNB, and the rows are keyed
+        # on ours.
+        await db.get_collection("premium_calls").update_many(
+            {"chain": chain, "address": address},
+            {"$set": {"mcap": mcap, "mcap_at": res.get("checked_at"),
+                      "mcap_price_usd": res.get("price_usd")}})
+    return res
 
 
 @router.get("/stats")

@@ -55,6 +55,22 @@ EDITABLE: dict[str, dict] = {
         "label": "GMGN API key", "kind": "text", "secret": True,
         "group": "GMGN Credentials", "applies": "live",
     },
+    "TRADING_ALERT_CHAT_ID": {
+        "label": "Trading alerts group (chat id)", "kind": "text",
+        "group": "Detection Tuning", "applies": "live",
+        "help": "Where the operator's own paper buys and sells are posted. "
+                "Customers never see this group: an account that connected its "
+                "own Telegram gets its own trades in its own chat, and one that "
+                "has not connected anything gets nothing sent at all.",
+    },
+    "MEMBER_GROUP_CHAT_ID": {
+        "label": "Premium Callers group customers join (chat id)", "kind": "text",
+        "group": "Detection Tuning", "applies": "live",
+        "help": "The one group a paying account is invited into. Each invite is "
+                "built for one person, admits one member and expires in fifteen "
+                "minutes. The bot must be an administrator there with the right "
+                "to invite users. Blank uses DEST_PREMIUM_ALL.",
+    },
     "MIN_FEE_ETH": {
         "label": "Min gas fee to alert (ETH)", "kind": "number", "group": "Detection Tuning",
         "min": 0.0, "applies": "live",
@@ -411,6 +427,40 @@ def _coerce(key: str, raw) -> object:
         if high is not None and value > high:
             raise ValueError(f"{key} must be at most {high}")
         return value
+
+    if kind == "chat":
+        # Blank switches that destination off — several features are meant to
+        # be runnable with no chat set, and clearing one is how you turn its
+        # Telegram side off without touching the scanner.
+        if not text:
+            return ""
+        if text.startswith("@") or "t.me/" in text:
+            raise ValueError(f"{key} needs the numeric id, not a username — "
+                             f"paste '{text}' into Settings → Chat ID finder "
+                             f"and copy the number it gives back")
+        try:
+            value = int(text)
+        except ValueError:
+            raise ValueError(f"{key} must be a numeric chat id, like -1001234567890")
+        # Telegram's own shape. A group or channel is negative; a person is
+        # positive, and pointing a feed at one person is legitimate (that is
+        # what a customer's own chat is), so both are allowed.
+        if value < 0 and not str(value).startswith("-100") and len(str(value)) > 11:
+            raise ValueError(f"{key}: {value} does not look like a chat id")
+        return text
+
+    if kind == "token":
+        if not text:
+            raise ValueError(f"{key} cannot be empty")
+        # 123456789:AAxxxxxxxx… — checked because a token pasted with the
+        # bot's @name or a stray quote fails much later, as "the bot went
+        # silent", with nothing pointing back at this field.
+        head, _, tail = text.partition(":")
+        if not head.isdigit() or len(tail) < 20:
+            raise ValueError(f"{key} does not look like a bot token — it is "
+                             f"digits, a colon, then a long string, exactly as "
+                             f"BotFather sends it")
+        return text
 
     if not text:
         raise ValueError(f"{key} cannot be empty")

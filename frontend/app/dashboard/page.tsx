@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/DataTable";
 import { Donut } from "@/components/features/Charts";
+import { Onboarding } from "@/components/features/Onboarding";
 import { cn, fmtEth, fmtUsd, timeAgo } from "@/lib/utils";
 import { LiveFeed } from "../_components/LiveFeed";
 
@@ -33,6 +34,8 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
+      {/* Shows itself only while there is something left to do. */}
+      <Onboarding />
       {/* stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {cards.map((c: any) => (

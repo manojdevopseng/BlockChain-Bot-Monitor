@@ -164,10 +164,31 @@ async def reconcile() -> None:
     # else has, and stopping RSI must not stop it.
     if bool(enabled.get("mcap_tracker")):
         want.add("mcap")
+    # Only when there is somewhere for money to land: a watcher with no
+    # receiving address would poll four chains to learn nothing.
+    if bool(enabled.get("payments")):
+        from . import payments as pay_cfg
+        if pay_cfg.available():
+            want.add("pay")
     if want_fwd:
         want.add("fwd")
     if want_cmd:
         want.add("cmd")
+    # The fan-out is not a scanner and watches nothing itself — it only carries
+    # what the others found to the accounts that asked for it. Its own switch,
+    # because "stop sending to customers" has to be one flip and must not mean
+    # stopping the detection that fills the panels.
+    if bool(enabled.get("alert_fanout", True)):
+        want.add("fan")
+    # Auto-sell and the daily loss limit. Its own switch because it is the one
+    # worker that closes positions: an operator who wants the rules to stop
+    # firing needs a way to stop them that is not "turn every account off".
+    if bool(enabled.get("trading_engine", True)):
+        want.add("trade")
+    # Takes accounts out of the shared group when their access ends. Its own
+    # switch because it is the one worker that removes somebody from a chat.
+    if bool(enabled.get("member_group", True)):
+        want.add("grp")
 
     # Stop workers no longer wanted.
     for name in list(_tasks):
@@ -178,7 +199,8 @@ async def reconcile() -> None:
     # missing Telethon session, unreachable RPC) must never take the app or the
     # other workers down — log it and carry on. The error reaches Telegram via
     # the ERROR log handler.
-    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "fwd", "cmd"):
+    for name in ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd",
+                 "cmd", "trade", "grp"):
         if name in want and name not in _tasks:
             try:
                 await _start_worker(name)
@@ -285,6 +307,18 @@ async def _start_worker(name: str) -> None:
         _instances["eth"] = inst
         _tasks["eth"] = asyncio.create_task(inst.run(), name="eth-scanner")
         return
+    if name == "fan":
+        from . import alert_dispatch
+        _tasks["fan"] = asyncio.create_task(alert_dispatch.run(), name="alert-fanout")
+        return
+    if name == "trade":
+        from . import trading_worker
+        _tasks["trade"] = asyncio.create_task(trading_worker.run(), name="trading-engine")
+        return
+    if name == "grp":
+        from . import group_access
+        _tasks["grp"] = asyncio.create_task(group_access.run(), name="group-access")
+        return
     if name == "rsi":
         from .scanners.rsi_tracker import RsiTracker
         inst = RsiTracker()
@@ -294,6 +328,13 @@ async def _start_worker(name: str) -> None:
         inst.use_gmgn(_client)
         _instances["rsi"] = inst
         _tasks["rsi"] = asyncio.create_task(inst.run(), name="rsi-tracker")
+        return
+
+    if name == "pay":
+        from .scanners.payment_watcher import PaymentWatcher
+        inst = PaymentWatcher()
+        _instances["pay"] = inst
+        _tasks["pay"] = asyncio.create_task(inst.run(), name="payment-watcher")
         return
 
     if name == "mcap":
@@ -440,6 +481,7 @@ def status() -> dict[str, str]:
         "rbhx_monitor": "running" if _worker_alive("rbhx") else "stopped",
         "rsi_tracker": "running" if _worker_alive("rsi") else "stopped",
         "mcap_tracker": "running" if _worker_alive("mcap") else "stopped",
+        "payments": "running" if _worker_alive("pay") else "stopped",
         "forwarder": "running" if _worker_alive("fwd") else "stopped",
         "bot_commands": "running" if _worker_alive("cmd") else "stopped",
     }
@@ -483,6 +525,8 @@ _DEPENDS_ON = {
     # stopped too however this switch reads.
     "sol_onchain_discovery":  "sol",
     # Every switch the monitor reads at start rather than per message.
+    "trading_engine":         "trade",
+    "member_group":           "grp",
     "rsi_tracker":            "rsi",
     "rsi_telegram":           "rsi",
     "rsi_chain_rbh":          "rsi",
@@ -504,6 +548,7 @@ _DEPENDS_ON = {
     "mcap_rpc_eth":           "mcap",
     "mcap_rpc_bsc":           "mcap",
     "mcap_rpc_sol":           "mcap",
+    "payments":               "pay",
     "rbhx_monitor":           "rbhx",
     # Here because it can now be the only reason the worker is running: with
     # the X Monitor off, switching this on has to start it rather than wait for
@@ -560,9 +605,16 @@ def service_states(enabled: dict[str, bool]) -> dict[str, dict]:
     return out
 
 
+# Every worker this module can start. Written once, here, because two places
+# read it — the diagnostics attached to a support request, and the public status
+# page — and both of them were quietly reporting False for the four workers that
+# were missing from the old hardcoded list.
+WORKER_NAMES = ("sol", "eth", "rbh", "rbhx", "rsi", "mcap", "pay", "fan", "fwd", "cmd")
+
+
 def diagnostics() -> dict:
     return {
         "scanner_deps_available": _available,
         "import_error": _import_error,
-        "workers": {n: _worker_alive(n) for n in ("sol", "eth", "rbh", "fwd", "cmd")},
+        "workers": {n: _worker_alive(n) for n in WORKER_NAMES},
     }

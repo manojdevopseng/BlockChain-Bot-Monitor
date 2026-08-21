@@ -4,7 +4,7 @@ import { Shell } from "@/components/layout/Shell";
 import { themeInitScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
-  title: "BlockChain-Bot Monitor",
+  title: "SightLine — see it before the chart does",
   description: "Multichain token monitor dashboard",
 };
 

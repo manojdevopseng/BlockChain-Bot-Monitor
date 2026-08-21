@@ -15,6 +15,11 @@ request came from the UI, from curl, or from a tab an admin left open.
 
 A `users` collection can replace the env accounts later without touching
 routers; everything downstream depends on these dependencies.
+
+Selling the dashboard adds a third question after "who is this" and "may they
+write": is their subscription still running. That one is `require_active`, and
+it is deliberately separate — an expired account must still be able to log in,
+see its own Profile and pay, or there is no way back in.
 """
 
 from __future__ import annotations
@@ -96,6 +101,43 @@ async def require_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict:
     return claims
 
 
+async def account(claims: dict = Depends(require_user)) -> dict:
+    """The full account row behind a token, or a stand-in for the env admin.
+
+    The env accounts exist so the box is reachable when the database is not,
+    so they cannot be looked up — they are answered from settings instead, with
+    the same shape every caller downstream expects.
+    """
+    from . import accounts
+    if claims["role"] == ADMIN and claims["username"] == settings.admin_username:
+        return {"username": claims["username"], "role": ADMIN,
+                "email_verified": True, "plan": "admin"}
+    doc = await accounts.by_username(claims["username"])
+    if doc is None:
+        # A token for an account that has since been deleted.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="This account no longer exists")
+    if not doc.get("enabled", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="This account has been disabled")
+    return doc
+
+
+async def require_active(doc: dict = Depends(account)) -> dict:
+    """For the product itself: a live trial or a paid subscription.
+
+    402 rather than 403 on purpose — "you may, but not until you pay" is a
+    different answer from "you may not", and the dashboard shows a paywall for
+    one and an error for the other.
+    """
+    from . import accounts
+    state = accounts.access(doc)
+    if not state.usable:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail=state.reason or "Your access has ended")
+    return doc
+
+
 async def require_admin(claims: dict = Depends(require_user)) -> dict:
     """For what only an admin may see — a secret, or a page they alone get."""
     if claims["role"] != ADMIN:
@@ -108,10 +150,47 @@ async def require_write(request: Request,
                         claims: dict = Depends(require_user)) -> dict:
     """Authenticated to read, admin to change anything.
 
-    Mounted on every protected router, so a new endpoint is covered the day it
-    is written rather than the day somebody remembers to add it to a list.
+    For the operator's own surfaces — the panels a customer may look at but
+    nobody except an admin may alter. A customer's OWN data is a different
+    question, and `require_customer` is the one that answers it.
     """
     if request.method not in READ_METHODS and claims["role"] != ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="This account has read-only access")
     return claims
+
+
+async def require_customer(request: Request,
+                           doc: dict = Depends(account)) -> dict:
+    """A live account, reading and writing its own rows.
+
+    This is the rule the product runs on, and it is deliberately not
+    `require_write`: that one was written when "user" meant read-only staff, so
+    it refuses every POST from anyone but an admin — which would mean a paying
+    customer could not add a token to their own list.
+
+    What keeps one customer out of another's data is not the method, it is the
+    `user_id` in every query. This dependency only answers "is this a live
+    account", and the routes answer "whose row is this".
+    """
+    from . import accounts
+    if doc.get("role") == ADMIN:
+        return doc
+    state = accounts.access(doc)
+    if not state.usable:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail=state.reason or "Your access has ended")
+    return doc
+
+
+async def require_customer_read(request: Request,
+                                doc: dict = Depends(require_customer)) -> dict:
+    """The shared panels: a live account may read them, only an admin writes.
+
+    Detections, Alerts, Tokens, Analytics — one set of data, produced by the
+    scanners for everybody. Nobody's to edit but the operator's.
+    """
+    if request.method not in READ_METHODS and doc.get("role") != ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only an admin can change this")
+    return doc

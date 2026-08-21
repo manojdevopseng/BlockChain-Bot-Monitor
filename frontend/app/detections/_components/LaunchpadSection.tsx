@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Age } from "@/components/Age";
 import { HandleList } from "@/components/HandleList";
+import { AdminOnly } from "@/components/AdminOnly";
 import { NoteButton, SectionNote, useSectionNote } from "@/components/SectionNote";
 import { cn, fmtDateTime, fmtNum, shortAddr, rowKey } from "@/lib/utils";
 
@@ -194,10 +195,12 @@ export function LaunchpadSection() {
         <Button size="sm" variant="outline" onClick={() => mutate(key)} title="Refresh now">
           <RefreshCw size={13} />
         </Button>
-        <Button size="sm" variant={lists ? "primary" : "outline"}
-                onClick={() => setLists((v) => !v)} title="Skip and watch lists">
-          <Eye size={13} /> Lists
-        </Button>
+        <AdminOnly>
+          <Button size="sm" variant={lists ? "primary" : "outline"}
+                  onClick={() => setLists((v) => !v)} title="Skip and watch lists">
+            <Eye size={13} /> Lists
+          </Button>
+        </AdminOnly>
         <NoteButton {...note} />
       </>}
     >
@@ -226,6 +229,12 @@ export function LaunchpadSection() {
             marked here and the alert says so.
           </span></>
         ) : null}
+        {offPads.length > 0 && (
+          <> {" "}<span className="text-accent-amber">
+            {offPads.map((p) => p.label).join(" and ")} switched off in Settings —
+            no new launches from {offPads.length > 1 ? "them" : "it"}.
+          </span></>
+        )}
         {stats?.with_x != null && stats?.total ? (
           <> {" "}<span className="text-text-muted">
             {fmtNum(stats.with_x)} of {fmtNum(stats.total)} carry an X account.
@@ -382,15 +391,17 @@ export function LaunchpadSection() {
                   </span>
                 </td>
                 <td className="px-3 py-3">
-                  <button
-                    title="Remove this row"
-                    onClick={async () => {
-                      await apiSend(`/api/launchpad/tokens/${r.address}`, "DELETE");
-                      mutate(key);
-                    }}
-                    className="grid h-6 w-6 place-items-center rounded text-text-dim hover:bg-bg-hover hover:text-accent-red">
-                    <Trash2 size={12} />
-                  </button>
+                  <AdminOnly>
+                    <button
+                      title="Remove this row"
+                      onClick={async () => {
+                        await apiSend(`/api/launchpad/tokens/${r.address}`, "DELETE");
+                        mutate(key);
+                      }}
+                      className="grid h-6 w-6 place-items-center rounded text-text-dim hover:bg-bg-hover hover:text-accent-red">
+                      <Trash2 size={12} />
+                    </button>
+                  </AdminOnly>
                 </td>
               </tr>
               );

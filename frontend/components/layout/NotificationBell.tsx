@@ -2,64 +2,43 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck } from "lucide-react";
+import { Bell, CheckCheck, CreditCard, LifeBuoy, Megaphone, Target } from "lucide-react";
 import { mutate } from "swr";
-import { useApi } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
+import { useApi, apiSend } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 
-const SEEN_KEY = "notif_seen_ts";
+/* The bell: what happened to THIS account.
+ *
+ * It used to show the scanner's own alert feed against a timestamp in
+ * localStorage, which meant every account saw the same rows and "unread" was a
+ * guess made in the browser. Now it shows the account's own notices — its
+ * market cap hits, its orders, replies on its support requests — and unread is
+ * counted by the server, because that is the only place that knows.
+ *
+ * Opening the panel marks everything up to that moment read. A bell that needs
+ * each line ticked off is a bell people stop opening.
+ */
 
-// Above this the badge stops counting and says "50+". Past it the exact number
-// stops being information — it is "a lot", and a four-digit badge would not
-// fit over the bell anyway.
 const BADGE_CAP = 50;
 
-// Bell backed by real alerts: unread = alerts newer than the last time the user
-// opened/cleared the panel (persisted in localStorage).
+const ICONS: Record<string, any> = {
+  alert: Target, billing: CreditCard, support: LifeBuoy, system: Megaphone,
+};
+
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [seenTs, setSeenTs] = useState<number>(0);
-  // What counted as unread when the panel was opened. Opening clears the badge
-  // straight away, but the rows keep their highlight while you are looking at
-  // them — otherwise the panel would tell you nothing about what was new.
-  const [openedAt, setOpenedAt] = useState<number>(0);
-  const [ready, setReady] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const { data } = useApi<any>("/api/alerts?limit=12");
+  const { data } = useApi<any>("/api/notifications", { refreshInterval: 30000 });
   const items: any[] = data?.items ?? [];
+  const unread: number = data?.unread ?? 0;
 
-  // Counted server-side over the whole collection. Deriving it from `items`
-  // capped the badge at the page size — 12 — however many had actually come
-  // in. Skipped until the stored timestamp is known, so the first render does
-  // not ask for "everything since 1970".
-  const { data: unreadData } = useApi<any>(
-    ready ? `/api/alerts/unread?since=${seenTs}` : null,
-  );
-  const unread: number = unreadData?.unread ?? 0;
-
-  useEffect(() => {
-    const raw = Number(localStorage.getItem(SEEN_KEY) || 0);
-    if (raw > 0) {
-      setSeenTs(raw);
-    } else {
-      // First visit on this browser. Start from now rather than 0, or every
-      // alert ever kept would arrive as unread.
-      const now = Date.now() / 1000;
-      setSeenTs(now);
-      try { localStorage.setItem(SEEN_KEY, String(now)); } catch {}
-    }
-    setReady(true);
-  }, []);
-
-  // Close on outside click / Escape
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -68,36 +47,21 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  function markAllRead() {
-    const now = Date.now() / 1000;
-    setSeenTs(now);
-    try { localStorage.setItem(SEEN_KEY, String(now)); } catch {}
-    // Seed the new key with 0 instead of waiting for the round trip: SWR keeps
-    // showing the previous key's data while the next one loads, which would
-    // leave the badge sitting there after it had been cleared.
-    mutate(`/api/alerts/unread?since=${now}`, { unread: 0, since: now }, false);
-  }
-
-  function toggle() {
-    setOpen((wasOpen) => {
-      if (!wasOpen) {
-        // Reading them is what marks them read — clicking the bell used to open
-        // the panel and leave the count sitting there.
-        setOpenedAt(seenTs);
-        markAllRead();
-      }
-      return !wasOpen;
-    });
+  async function openPanel() {
+    setOpen((v) => !v);
+    if (!open && unread > 0) {
+      // Marked up to now, not "all": a notice that lands while the panel is
+      // open should still arrive unread.
+      await apiSend("/api/notifications/read", "POST", { before: Date.now() / 1000 });
+      mutate("/api/notifications");
+    }
   }
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        onClick={toggle}
-        className="relative grid h-8 w-8 place-items-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
-        aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
-      >
-        <Bell size={18} />
+      <button onClick={openPanel} title="Notifications"
+              className="relative grid h-9 w-9 place-items-center rounded-lg text-text-dim hover:bg-bg-hover hover:text-text">
+        <Bell size={17} />
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid min-w-[16px] place-items-center rounded-full bg-accent-red px-1 text-[9px] font-semibold text-white">
             {unread > BADGE_CAP ? `${BADGE_CAP}+` : unread}
@@ -105,68 +69,53 @@ export function NotificationBell() {
         )}
       </button>
 
-      {/* On phones the panel is pinned to the viewport, not to the bell.
-          Anchoring it to the button with `right-0` capped its width but not its
-          position: the bell sits ~320px in, so a 22rem panel began off the left
-          edge and the first characters of every row were cut off. From sm: up
-          there is room, so it goes back to hanging off the button. */}
       {open && (
-        <div className="fixed inset-x-2 top-14 z-50 overflow-hidden rounded-xl border border-border bg-bg-card shadow-2xl animate-fade-in
-                        sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[22rem]">
-          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-              Notifications
-            </span>
-            <button
-              onClick={markAllRead}
-              className="flex items-center gap-1 text-[11px] text-text-muted transition-colors hover:text-text"
-            >
-              <CheckCheck size={13} /> Mark all read
-            </button>
+        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-border bg-bg-card shadow-xl">
+          <div className="flex items-center justify-between border-b border-border-soft px-3 py-2">
+            <span className="text-xs font-medium text-text">Notifications</span>
+            {items.length > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-dim">
+                <CheckCheck size={11} /> up to date
+              </span>
+            )}
           </div>
 
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-96 overflow-y-auto">
             {items.length === 0 ? (
-              <div className="px-4 py-8 text-center text-xs text-text-dim">No notifications</div>
+              <p className="px-3 py-8 text-center text-xs text-text-dim">
+                Nothing yet. Alerts you set up, payments and support replies
+                appear here.
+              </p>
             ) : (
-              items.map((a, i) => {
-                const isUnread = (a.created_at ?? 0) > openedAt;
-                return (
-                  <div
-                    // Keyed by the alert, not the array index: a new one arriving
-                    // at the top otherwise rewrites every visible row.
-                    key={`${a.created_at ?? i}-${a.token_address ?? a.message ?? i}`}
-                    className={cn(
-                      "flex gap-3 border-b border-border-soft px-4 py-2.5 last:border-0",
-                      isUnread && "bg-brand/5"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
-                        a.severity === "high" ? "bg-accent-red"
-                          : a.severity === "medium" ? "bg-accent-amber" : "bg-accent-blue"
+              items.map((n: any, i: number) => {
+                const Icon = ICONS[n.kind] ?? Bell;
+                const row = (
+                  <div className={cn(
+                    "flex gap-2.5 border-b border-border-soft px-3 py-2.5 last:border-0",
+                    !n.read && "bg-brand/5")}>
+                    <Icon size={14} className="mt-0.5 shrink-0 text-text-dim" />
+                    <div className="min-w-0">
+                      <p className="text-xs text-text">{n.title}</p>
+                      {n.body && (
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-text-muted">
+                          {n.body}
+                        </p>
                       )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs text-text">{a.message}</div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-text-dim">
-                        <Badge variant="gray">{a.chain}</Badge>
-                        <span>{a.created_at ? timeAgo(a.created_at) : ""}</span>
-                      </div>
+                      <p className="mt-0.5 text-[10px] text-text-dim">{timeAgo(n.at)}</p>
                     </div>
                   </div>
                 );
+                return n.link
+                  ? <Link key={i} href={n.link} onClick={() => setOpen(false)}
+                          className="block hover:bg-bg-hover/50">{row}</Link>
+                  : <div key={i}>{row}</div>;
               })
             )}
           </div>
 
-          <Link
-            href="/alerts"
-            onClick={() => setOpen(false)}
-            className="block border-t border-border px-4 py-2.5 text-center text-xs text-brand-soft transition-colors hover:bg-bg-hover"
-          >
-            View all alerts →
+          <Link href="/notifications" onClick={() => setOpen(false)}
+                className="block border-t border-border-soft px-3 py-2 text-center text-[11px] text-brand-soft hover:bg-bg-hover/50">
+            See all
           </Link>
         </div>
       )}

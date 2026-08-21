@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Lock } from "lucide-react";
 import { login } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ export default function LoginPage() {
   // Read off the URL after mount rather than with useSearchParams, which would
   // force this page — the one page that must render for a signed-out visitor —
   // behind a Suspense boundary and out of the static export.
-  const [next, setNext] = useState("/");
+  const [next, setNext] = useState("");
   useEffect(() => {
     const to = new URLSearchParams(window.location.search).get("next");
     if (to) setNext(to);
@@ -33,9 +34,12 @@ export default function LoginPage() {
       // already mounted around the login page, so a client-side navigation
       // would leave the socket connected as "signed out". This also drops any
       // SWR cache from before signing in.
-      // Only ever a path on this site — a full URL here would be an open
+      // Straight to whatever asked for the login, or to the chooser — there
+      // are two dashboards now and picking one is the first thing to do.
+      // Only ever a path on this site: a full URL here would be an open
       // redirect, and the value comes off the query string.
-      window.location.href = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      window.location.href =
+        next.startsWith("/") && !next.startsWith("//") ? next : "/choose";
     } catch {
       setError("Invalid username or password");
       setBusy(false);
@@ -53,7 +57,7 @@ export default function LoginPage() {
             <Lock size={17} />
           </span>
           <div>
-            <h1 className="text-sm font-semibold text-text">BlockChain-Bot</h1>
+            <h1 className="text-sm font-semibold text-text">SightLine</h1>
             <p className="text-[11px] text-text-dim">Sign in to the dashboard</p>
           </div>
         </div>
@@ -84,6 +88,15 @@ export default function LoginPage() {
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : "Sign in"}
         </Button>
+
+        <div className="mt-4 flex items-center justify-between text-[11px]">
+          <Link href="/forgot" className="text-text-dim hover:text-brand-soft">
+            Forgot password?
+          </Link>
+          <Link href="/register" className="text-brand-soft hover:underline">
+            Create an account
+          </Link>
+        </div>
       </form>
     </div>
   );

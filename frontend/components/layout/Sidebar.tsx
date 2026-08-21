@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Send, Server, Settings, Terminal, Users, X } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X, CandlestickChart } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUptime, uptimeLabel } from "@/components/layout/uptime";
@@ -10,23 +10,36 @@ import { useUptime, uptimeLabel } from "@/components/layout/uptime";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/alerts", label: "Alerts", icon: Bell },
+  // Next to the alerts themselves rather than buried in Profile: it is the one
+  // page that decides what a customer's own phone does, and the first thing
+  // they should reach for after connecting Telegram.
+  { href: "/alert-rules", label: "Alert Rules", icon: SlidersHorizontal },
   { href: "/tokens", label: "Tokens", icon: Coins },
   { href: "/detections", label: "Detections", icon: Crosshair },
   { href: "/rsi", label: "RSI", icon: Activity },
+  { href: "/trading", label: "Trading", icon: CandlestickChart },
   { href: "/ai", label: "AI Narrative", icon: Brain },
-  { href: "/forwarder", label: "Forwarder", icon: Send },
+  { hideFromUser: true, href: "/admin", label: "Admin", icon: ShieldCheck },
+  { hideFromUser: true, href: "/forwarder", label: "Forwarder", icon: Send },
   { href: "/commands", label: "Commands", icon: Terminal },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  // The account's own two pages. Every plan sees them, including an expired
+  // one — paying is how it stops being expired.
+  { href: "/profile", label: "Profile", icon: User },
+  { href: "/plan", label: "Plan", icon: BadgeCheck },
+  { href: "/orders", label: "Orders", icon: Receipt },
+  { href: "/support", label: "Support", icon: LifeBuoy },
+  { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/chains", label: "Chains", icon: Link2 },
-  { href: "/logs", label: "Logs", icon: ScrollText },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { hideFromUser: true, href: "/logs", label: "Logs", icon: ScrollText },
+  { hideFromUser: true, href: "/settings", label: "Settings", icon: Settings },
   // Hidden rather than disabled for a read-only account: the other locked
   // pages are things the dashboard does, worth knowing exist. Who can log in
   // is not — and a greyed "User Management" tells a user exactly where to go
   // looking.
   { href: "/users", label: "User Management", icon: Users, hideFromUser: true },
-  { href: "/rpc", label: "RPC Monitor", icon: Radio },
-  { href: "/system", label: "System", icon: Server },
+  { hideFromUser: true, href: "/rpc", label: "RPC Monitor", icon: Radio },
+  { hideFromUser: true, href: "/system", label: "System", icon: Server },
 ];
 
 export function Sidebar({
@@ -39,7 +52,7 @@ export function Sidebar({
 }) {
   const path = usePathname();
   const uptime = useUptime();
-  const { blocks } = useRole();
+  const { blocks, known, isAdmin } = useRole();
   // On mobile the rail is always full-width inside the drawer; only desktop collapses.
   const isCollapsed = collapsed;
 
@@ -69,7 +82,7 @@ export function Sidebar({
             <Cpu size={20} />
           </div>
           <div className={cn("min-w-0", isCollapsed && "lg:hidden")}>
-            <div className="truncate text-sm font-bold leading-tight text-accent-green">BlockChain</div>
+            <div className="truncate text-sm font-bold leading-tight text-accent-green">SightLine</div>
             <div className="truncate text-[11px] leading-tight text-text-muted">MultiChain Monitor</div>
           </div>
           {/* Close (mobile only) */}
@@ -86,6 +99,10 @@ export function Sidebar({
           {NAV.map(({ href, label, icon: Icon, hideFromUser }) => {
             const active = href === "/" ? path === "/" : path.startsWith(href);
             const locked = blocks(href);
+            // Hidden until we know, then hidden for anyone but an admin. The
+            // remembered role means an admin does not watch their own nav
+            // build itself on every load.
+            if (hideFromUser && (!known || !isAdmin)) return null;
             if (locked && hideFromUser) return null;
             // Otherwise shown either way — a nav that hides pages leaves you
             // wondering what the dashboard has. Disabled says "not for this
