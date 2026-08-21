@@ -145,25 +145,39 @@ def _parse(kind: str, text: str) -> tuple[bytes, str]:
     text = (text or "").strip()
     if not text:
         raise ValueError("No private key given")
+    if kind not in KINDS:
+        raise ValueError(f"{kind} is not a chain this holds keys for")
+
+    # Decoding is separated from validating so a library's own wording never
+    # reaches the person. "non-hexadecimal number found in fromhex() arg" is
+    # true and useless, and worse, it is the kind of message somebody pastes
+    # into a search box along with the value that produced it.
     try:
         if kind in (EVM, TRON):
             raw = bytes.fromhex(text[2:] if text.startswith("0x") else text)
-            if len(raw) != 32:
-                raise ValueError("An EVM private key is 32 bytes (64 hex characters)")
-            return raw, (_evm_address(raw) if kind == EVM else _tron_address(raw))
-        if kind == SOL:
+        else:
             from .wallets import _b58decode
             raw = (bytes.fromhex(text[2:]) if text.startswith("0x")
                    else _b58decode(text))
-            if len(raw) not in (32, 64):
-                raise ValueError("A Solana private key is 32 or 64 bytes")
-            return raw, _sol_address(raw)
+    except Exception:  # noqa: BLE001
+        shape = ("64 hex characters" if kind in (EVM, TRON)
+                 else "base58, as your wallet exported it")
+        raise ValueError(f"That does not read as a private key — expected {shape}.")
+
+    try:
+        if kind in (EVM, TRON):
+            if len(raw) != 32:
+                raise ValueError("A private key for this chain is 32 bytes "
+                                 "(64 hex characters)")
+            return raw, (_evm_address(raw) if kind == EVM else _tron_address(raw))
+        if len(raw) not in (32, 64):
+            raise ValueError("A Solana private key is 32 or 64 bytes")
+        return raw, _sol_address(raw)
     except ValueError:
         raise
     except Exception:  # noqa: BLE001
         # Whatever went wrong, the message must not carry the input with it.
         raise ValueError("That is not a valid private key for this chain")
-    raise ValueError(f"{kind} is not a chain this holds keys for")
 
 
 # ── the vault ───────────────────────────────────────────────────────────────

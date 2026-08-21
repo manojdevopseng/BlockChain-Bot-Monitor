@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WalletConnect } from "@/components/features/WalletConnect";
+import { TradingWallet } from "@/components/features/TradingWallet";
 
 /* Profile — the account's own page.
  *
@@ -322,8 +323,20 @@ function TradingCard() {
         {/* Wallets — the only credential this page deals in, and not really
             a credential at all: an address is public by construction. */}
         <div>
-          <label className="mb-2 block text-xs text-text-muted">Wallets</label>
+          <label className="mb-2 block text-xs text-text-muted">
+            Wallets — read-only
+          </label>
           <WalletConnect />
+        </div>
+
+        {/* Kept below the read-only wallets and visibly apart from them. These
+            two panels look similar and mean opposite things: one holds an
+            address, the other holds a key. */}
+        <div className="rounded-lg border border-accent-red/20 p-3">
+          <label className="mb-2 block text-xs text-text-muted">
+            Trading wallet — can spend
+          </label>
+          <TradingWallet />
         </div>
 
         <div className="rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3
