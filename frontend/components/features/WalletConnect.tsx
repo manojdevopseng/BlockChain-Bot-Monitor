@@ -52,6 +52,15 @@ export function WalletConnect() {
   // Extensions inject after the page script runs, and only on a secure
   // origin. Both are checked once mounted rather than assumed.
   const [has, setHas] = useState({ mm: false, ph: false, secure: true });
+
+  // Which of the linked wallets this browser is actually connected to right
+  // now — a different fact from being linked, and the two must not be shown
+  // as one. Linking is proved once and kept on the account; the extension's
+  // permission is per-browser and the person can withdraw it there at any
+  // time without telling us. Read with eth_accounts, which answers from the
+  // existing permission and never raises a prompt.
+  const [live, setLive] = useState<string[]>([]);
+
   useEffect(() => {
     const w = window as any;
     setHas({
@@ -59,7 +68,39 @@ export function WalletConnect() {
       ph: !!(w.solana && w.solana.isPhantom),
       secure: window.isSecureContext,
     });
+
+    let dead = false;
+    const read = async () => {
+      const found: string[] = [];
+      try {
+        const accs: string[] = await w.ethereum?.request?.({ method: "eth_accounts" }) ?? [];
+        found.push(...accs.map((a) => a.toLowerCase()));
+      } catch { /* no extension, or it refused to answer */ }
+      try {
+        if (w.solana?.isConnected && w.solana.publicKey) {
+          found.push(String(w.solana.publicKey.toString()));
+        }
+      } catch { /* same */ }
+      if (!dead) setLive(found);
+    };
+    read();
+
+    // The extension tells us when the person changes their mind — including
+    // disconnecting the site, which arrives as an empty account list.
+    const onAccounts = () => read();
+    w.ethereum?.on?.("accountsChanged", onAccounts);
+    w.solana?.on?.("disconnect", onAccounts);
+    w.solana?.on?.("connect", onAccounts);
+    return () => {
+      dead = true;
+      w.ethereum?.removeListener?.("accountsChanged", onAccounts);
+      w.solana?.off?.("disconnect", onAccounts);
+      w.solana?.off?.("connect", onAccounts);
+    };
   }, []);
+
+  const connectedHere = (a: string) =>
+    live.includes(a) || live.includes(a.toLowerCase());
 
   const items: W[] = data?.items ?? [];
 
@@ -165,6 +206,22 @@ export function WalletConnect() {
               {w.verified
                 ? <Badge variant="green">verified</Badge>
                 : <Badge variant="gray">unverified</Badge>}
+              {/* Whether this browser is talking to the wallet right now.
+                  Separate from "linked" on purpose — somebody who removes the
+                  site in MetaMask has not unlinked anything here, and a row
+                  that kept claiming "MetaMask" would be describing a
+                  connection that no longer exists. */}
+              <span title={connectedHere(w.address)
+                      ? "This browser is connected to the wallet"
+                      : "Linked to your account, but this browser is not connected to the wallet right now. Balances still work — they are read from the chain, not from the extension."}
+                    className={`inline-flex items-center gap-1 text-[10px] ${
+                      connectedHere(w.address) ? "text-accent-green" : "text-text-dim"
+                    }`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${
+                  connectedHere(w.address) ? "bg-accent-green" : "bg-text-dim/50"
+                }`} />
+                {connectedHere(w.address) ? "connected here" : "not connected here"}
+              </span>
               <button onClick={() => disconnect(w)} disabled={!!busy}
                       title="Disconnect — the address is forgotten. Nothing is revoked on the chain, because nothing was ever granted."
                       className="ml-auto grid h-6 w-6 place-items-center rounded
@@ -237,6 +294,11 @@ export function WalletConnect() {
           plain sentence. It is not a transaction: no gas, no approval, and no
           permission to spend. A seed phrase or private key is never requested,
           and there is nowhere in this app to put one.
+          <br />
+          Removing the site inside MetaMask or Phantom ends that browser&apos;s
+          connection, not the link — the address stays on your account, and
+          balances keep working, because they are read from the chain rather
+          than through the extension. To remove it here, use the bin.
         </span>
       </p>
     </div>
