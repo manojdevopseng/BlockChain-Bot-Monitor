@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Cpu, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X, CandlestickChart } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X, CandlestickChart } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { useAccount } from "@/lib/account";
 import { cn } from "@/lib/utils";
@@ -82,9 +82,10 @@ export function Sidebar({
         )}
       >
         <div className={cn("flex items-center gap-2.5 px-4 py-5", isCollapsed && "lg:justify-center lg:px-2")}>
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand/20 text-brand">
-            <Cpu size={20} />
-          </div>
+          {/* The product's own mark. It already carries its own dark
+              rounded-square, so it needs no tile behind it. */}
+          <img src="/icon.svg" alt="SightLine" width={36} height={36}
+               className="h-9 w-9 shrink-0 rounded-lg" />
           {/* The product name, and under it whoever is signed in.
               "MultiChain Monitor" was a subtitle nobody needed twice — the
               nav below says what this is. Who you are logged in as is the

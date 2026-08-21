@@ -65,6 +65,18 @@ export default function HomePage() {
   return (
     <SiteChrome>
       <section className="max-w-3xl">
+        {/* The full lockup, used here and nowhere else. A wordmark repeated on
+            every page stops being a mark and becomes furniture; on the one
+            page a stranger lands on, it is the first thing worth showing.
+            The art is dark-on-dark by construction, so it is given a panel
+            that matches rather than being dropped onto a light background. */}
+        <div className="mb-6 overflow-hidden rounded-2xl border border-border-soft
+                        bg-[#0b1020]">
+          <img src="/lockup.png"
+               alt="SightLine — crypto insights and security"
+               className="h-auto w-full max-w-lg" />
+        </div>
+
         <p className="mb-3 text-[11px] uppercase tracking-wide text-brand-soft">
           Ethereum · Robinhood Chain · BNB Chain · Solana
         </p>

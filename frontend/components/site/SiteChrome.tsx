@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Cpu } from "lucide-react";
 import { getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -34,9 +33,8 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand/20 text-brand">
-              <Cpu size={17} />
-            </span>
+            <img src="/icon.svg" alt="" width={32} height={32}
+                 className="h-8 w-8 rounded-lg" />
             <span className="text-sm font-semibold text-text">SightLine</span>
             <span className="hidden text-[11px] text-text-dim sm:inline">
               MultiChain Monitor
