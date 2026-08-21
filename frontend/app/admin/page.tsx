@@ -219,6 +219,36 @@ function Accounts() {
     } finally { setBusy(""); }
   }
 
+  // All the way back to where a new account starts — the plan, the ceiling and
+  // the comp flag together. Putting somebody "back on trial" while any of them
+  // survives is not what those words mean.
+  async function resetTrial(username: string) {
+    if (!confirm(`Put ${username} back on a 7-day trial?\n\n` +
+                 `Their plan, any granted days and "no limits" are all removed.`)) return;
+    setBusy(username);
+    try {
+      await apiSend(`/api/admin/users/${username}`, "PATCH", { reset_trial: true });
+      mutate(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    } finally { setBusy(""); }
+  }
+
+  // Typed confirmation, because this is the one button on the page nothing
+  // undoes: the account and everything it owned. Its watched tokens go with
+  // it on purpose — the trackers read every row on their lists every cadence
+  // without asking whose it is, so tokens left behind are polled for ever.
+  async function remove(username: string) {
+    const typed = prompt(
+      `Delete ${username} permanently?\n\n` +
+      `Their orders, alert rules, watched tokens and positions go too. ` +
+      `This cannot be undone.\n\nType the username to confirm:`);
+    if (typed !== username) return;
+    setBusy(username);
+    try {
+      await apiSend(`/api/users/${username}`, "DELETE");
+      mutate(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    } finally { setBusy(""); }
+  }
+
   // Somebody paid in cash: put them on the plan for its own length. Same route
   // a payment takes, so the expiry is worked out the same way and a grant
   // never shortens what is already there.
@@ -240,54 +270,79 @@ function Accounts() {
              placeholder="username or email" className="mb-3 h-8 w-64 text-xs" />
       <div className="space-y-2">
         {rows.map((u: any) => (
-          <div key={u.username} className="rounded-lg border border-border-soft px-3 py-2">
+          <div key={u.username}
+               className="rounded-lg border border-border-soft bg-bg-soft/20 px-3 py-2.5">
+            {/* Who they are, then what they are — the badges say the things a
+                row is scanned for, and the email sits at the end where it is
+                looked up rather than read. */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-text">{u.username}</span>
+              <span className="text-sm font-medium text-text">{u.username}</span>
               <Badge variant={STATUS_TONE[u.status] ?? "gray"}>{u.status}</Badge>
               <span className="text-xs text-text-muted">{u.plan_label}</span>
               {u.comped && <Badge variant="purple">granted</Badge>}
               {u.unlimited && <Badge variant="cyan">no limits</Badge>}
               {u.telegram_linked && <Badge variant="blue">telegram</Badge>}
-              <span className="ml-auto text-[11px] text-text-dim">{u.email}</span>
+              <span className="ml-auto truncate text-[11px] text-text-dim">{u.email}</span>
             </div>
+
             <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-text-dim">
               <span>{u.days_left} days left</span>
               <span>{u.usage?.rsi_tokens ?? 0} RSI · {u.usage?.mcap_tokens ?? 0} market cap</span>
-              <span className="ml-auto flex flex-wrap items-center gap-2">
-                {/* Only where it is the thing standing in the way. */}
-                {u.status === "unverified" && (
-                  <button onClick={() => verify(u.username)} disabled={busy === u.username}
-                          className="font-medium text-accent-green hover:underline">
-                    verify email
-                  </button>
-                )}
-                <span className="text-text-dim">give:</span>
-                {PLAN_IDS.map((id) => (
-                  <button key={id} onClick={() => give(u.username, id)}
-                          disabled={busy === u.username}
-                          title={`Put ${u.username} on ${PLAN_LABEL[id]} for ${PLAN_DAYS[id]} days`}
-                          className="text-brand-soft hover:underline">
-                    {PLAN_LABEL[id]}
-                  </button>
-                ))}
-                <span className="text-text-dim">·</span>
-                <button onClick={() => grant(u.username, 7)} disabled={busy === u.username}
-                        className="text-brand-soft hover:underline">+7d</button>
-                <button onClick={() => grant(u.username, 30)} disabled={busy === u.username}
-                        className="text-brand-soft hover:underline">+30d</button>
-                <button onClick={() => unlimited(u.username, !u.unlimited)}
-                        disabled={busy === u.username}
-                        title={u.unlimited
-                          ? "Put this account back on its plan's limits"
-                          : "Admin limits — every ceiling lifted. No admin controls, and the operator navs stay hidden."}
-                        className="text-accent-cyan hover:underline">
-                  {u.unlimited ? "limits back on" : "no limits"}
-                </button>
-                <button onClick={() => block(u.username, !u.blocked)}
-                        disabled={busy === u.username}
-                        className="text-accent-red hover:underline">
+            </div>
+
+            {/* Actions on their own line, as buttons rather than a run of tiny
+                links. Grouped by what they do and separated by what they cost:
+                giving on the left, taking away on the right, with real space
+                between them — "no limits" and "suspend" were a pixel apart. */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t
+                            border-border-soft pt-2.5">
+              {u.status === "unverified" && (
+                <ActionBtn tone="green" busy={busy === u.username}
+                           onClick={() => verify(u.username)}
+                           title="Confirm this address by hand — the emailed link never arrived">
+                  verify email
+                </ActionBtn>
+              )}
+
+              <span className="mr-0.5 text-[10px] uppercase tracking-wide text-text-dim">give</span>
+              {PLAN_IDS.map((id) => (
+                <ActionBtn key={id} busy={busy === u.username}
+                           onClick={() => give(u.username, id)}
+                           title={`Put ${u.username} on ${PLAN_LABEL[id]} for ${PLAN_DAYS[id]} days`}>
+                  {PLAN_LABEL[id]}
+                </ActionBtn>
+              ))}
+              <ActionBtn busy={busy === u.username} onClick={() => grant(u.username, 7)}
+                         title="Extend by 7 days">+7d</ActionBtn>
+              <ActionBtn busy={busy === u.username} onClick={() => grant(u.username, 30)}
+                         title="Extend by 30 days">+30d</ActionBtn>
+
+              <ActionBtn tone="cyan" busy={busy === u.username}
+                         onClick={() => unlimited(u.username, !u.unlimited)}
+                         title={u.unlimited
+                           ? "Put this account back on its plan's limits"
+                           : "Admin limits — every ceiling lifted. No admin controls, and the operator navs stay hidden."}>
+                {u.unlimited ? "limits back on" : "no limits"}
+              </ActionBtn>
+
+              {/* Everything that takes something away, kept apart. */}
+              <span className="ml-auto flex flex-wrap items-center gap-1.5">
+                <ActionBtn tone="amber" busy={busy === u.username}
+                           onClick={() => resetTrial(u.username)}
+                           title="Back to a 7-day trial — plan, granted days and no-limits all removed">
+                  back to trial
+                </ActionBtn>
+                <ActionBtn tone="red" busy={busy === u.username}
+                           onClick={() => block(u.username, !u.blocked)}
+                           title={u.blocked ? "Let this account sign in again"
+                                            : "Refuse the login, keep the account"}>
                   {u.blocked ? "unsuspend" : "suspend"}
-                </button>
+                </ActionBtn>
+                <ActionBtn tone="red" solid busy={busy === u.username}
+                           onClick={() => remove(u.username)}
+                           title="Delete the account and everything it owns. Cannot be undone.">
+                  delete
+                </ActionBtn>
               </span>
             </div>
           </div>
@@ -341,6 +396,42 @@ const PLAN_LABEL: Record<string, string> = {
   monthly: "monthly", half: "6 months", yearly: "yearly",
 };
 const PLAN_DAYS: Record<string, number> = { monthly: 30, half: 182, yearly: 365 };
+
+/* One shape for every action in the accounts list.
+ *
+ * They were a run of underlined text links with three-pixel gaps, where
+ * "no limits" sat beside "suspend" and both were the same size and weight.
+ * A control that gives and a control that takes away should not be one
+ * mis-click apart, and neither should look like body copy. */
+function ActionBtn(
+  { children, onClick, title, busy, tone = "brand", solid = false }: {
+    children: React.ReactNode; onClick: () => void; title?: string;
+    busy?: boolean; tone?: "brand" | "green" | "cyan" | "amber" | "red";
+    solid?: boolean;
+  },
+) {
+  const tones: Record<string, string> = {
+    brand: "border-border text-text-muted hover:border-brand/40 hover:text-brand-soft",
+    green: "border-accent-green/40 text-accent-green hover:bg-accent-green/10",
+    cyan:  "border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/10",
+    amber: "border-accent-amber/40 text-accent-amber hover:bg-accent-amber/10",
+    red:   "border-accent-red/40 text-accent-red hover:bg-accent-red/10",
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      title={title}
+      className={`rounded-md border px-2 py-1 text-[11px] font-medium transition-colors
+                  disabled:cursor-not-allowed disabled:opacity-40
+                  ${solid ? "border-accent-red/60 bg-accent-red/10 text-accent-red hover:bg-accent-red/20"
+                          : tones[tone]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 
 export default function AdminPage() {
   const { data, isLoading } = useApi<any>("/api/admin/overview",

@@ -135,6 +135,21 @@ async def edit_user(username: str, payload: dict = Body(...),
         if payload["plan"] not in accounts.PLANS:
             raise HTTPException(400, "Unknown plan")
         changed["plan"] = payload["plan"]
+    if payload.get("reset_trial"):
+        # Back to where a new account starts, and back all the way: a plan put
+        # on by hand, a ceiling handed over and a comp flag are all things
+        # somebody was given, and putting them "back on trial" while any of
+        # them survives is not what those words mean. trial_used stays set —
+        # they have had their trial, this is the operator lending them another.
+        changed.update({
+            "plan": "trial",
+            "plan_started_at": time.time(),
+            "plan_ends_at": time.time() + accounts.TRIAL_DAYS * 86400,
+            "trial_used": True,
+            "unlimited": False,
+            "comped": False,
+            "comped_reason": f"put back on trial by {claims['username']}",
+        })
     if "unlimited" in payload:
         # The ceilings, not the keys. role is untouched on purpose: it is what
         # every admin gate reads, and this must not open one of them.
