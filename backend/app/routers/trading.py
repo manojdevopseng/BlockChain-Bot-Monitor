@@ -12,7 +12,7 @@ import time
 import aiohttp
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from .. import db, security, trading, wallet
+from .. import db, security, trading, wallet, wallets
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
@@ -99,9 +99,82 @@ async def wallet_balances(owner: dict = Depends(security.require_customer)):
     putting it on a timer would mean five RPC calls a minute per open tab for
     a number that changes when the person themselves moves funds.
     """
-    conf = await trading.settings_for(owner["username"])
-    return await wallet.read(conf.get("wallet_evm", ""),
-                             conf.get("wallet_sol", ""))
+    evms, sols = await wallets.addresses(owner["username"])
+    return await wallet.read(evms, sols)
+
+
+@router.get("/wallets")
+async def wallet_list(owner: dict = Depends(security.require_customer)):
+    return {"items": await wallets.listing(owner["username"])}
+
+
+@router.post("/wallets/nonce")
+async def wallet_nonce(payload: dict = Body(default={}),
+                       owner: dict = Depends(security.require_customer)):
+    """The sentence to sign, and the one-time string inside it.
+
+    Handed out by the server rather than built in the browser: a nonce the
+    client chooses is a nonce an attacker chooses.
+    """
+    address = str(payload.get("address") or "").strip()
+    nonce = await wallets.new_nonce(owner["username"])
+    return {"nonce": nonce,
+            "message": wallets.message_for(owner["username"], address, nonce)}
+
+
+@router.post("/wallets")
+async def wallet_link(payload: dict = Body(...),
+                      owner: dict = Depends(security.require_customer)):
+    try:
+        return await wallets.link(
+            username=owner["username"],
+            kind=str(payload.get("kind") or ""),
+            address=str(payload.get("address") or ""),
+            signature=str(payload.get("signature") or ""),
+            nonce=str(payload.get("nonce") or ""),
+            source=str(payload.get("source") or "manual"),
+            label=str(payload.get("label") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/wallets/manual")
+async def wallet_manual(payload: dict = Body(...),
+                        owner: dict = Depends(security.require_customer)):
+    """Watch an address without proving it. Marked unverified, and stays so."""
+    try:
+        return await wallets.add_manual(
+            username=owner["username"],
+            kind=str(payload.get("kind") or ""),
+            address=str(payload.get("address") or ""),
+            label=str(payload.get("label") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/wallets/{address}")
+async def wallet_unlink(address: str,
+                        owner: dict = Depends(security.require_customer)):
+    """Unlink. There is nothing to revoke on the chain — we were only reading,
+    and the wallet never granted this app anything to give back."""
+    gone = await wallets.unlink(owner["username"], address)
+    if not gone:
+        raise HTTPException(404, "That wallet is not linked to this account")
+    return {"ok": True, "address": address}
+
+
+@router.delete("/gmgn-key")
+async def gmgn_disconnect(owner: dict = Depends(security.require_customer)):
+    """Forget the stored GMGN key.
+
+    Its own route rather than a blank string through the settings PATCH,
+    because that path deliberately treats blank as "leave it alone" — which is
+    right for a form that cannot show what it holds, and would otherwise make
+    removing the key impossible.
+    """
+    await db.get_collection("trading_settings").update_one(
+        {"user": owner["username"]}, {"$unset": {"gmgn_key": ""}})
+    return {"ok": True}
 
 
 @router.get("/positions")

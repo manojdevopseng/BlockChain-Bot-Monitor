@@ -96,41 +96,66 @@ async def _rpc(session: aiohttp.ClientSession, url: str, method: str,
     return (body or {}).get("result")
 
 
+async def _balance(session: aiohttp.ClientSession, spec: dict,
+                   addr: str) -> float:
+    """One address on one chain, in whole coins. Raises so the caller can say
+    why rather than reporting a zero."""
+    if spec["id"] == "sol":
+        res = await _rpc(session, spec["http"], "getBalance", [addr])
+        lamports = (res or {}).get("value") if isinstance(res, dict) else res
+        return int(lamports or 0) / _SOL_DECIMALS
+    res = await _rpc(session, spec["http"], "eth_getBalance", [addr, "latest"])
+    return int(str(res or "0x0"), 16) / _EVM_DECIMALS
+
+
 async def _one(session: aiohttp.ClientSession, spec: dict,
-               evm: str, sol: str) -> dict:
-    """One chain's answer, with its own reason when it has none."""
+               evms: list, sols: list) -> dict:
+    """One chain's answer across every linked wallet, or its own reason.
+
+    Summed rather than listed: this is the strip, and the strip answers "how
+    much do I have on Base". Which wallet holds it is the Portfolio's
+    question, not this one's.
+    """
     out = {"chain": spec["id"], "label": spec["label"], "symbol": spec["symbol"],
-           "balance": None, "usd": None, "price": None, "why": ""}
-    addr = sol if spec["id"] == "sol" else evm
-    if not addr:
-        out["why"] = "no address saved"
+           "balance": None, "usd": None, "price": None, "why": "",
+           "wallets": 0}
+    addrs = sols if spec["id"] == "sol" else evms
+    if not addrs:
+        out["why"] = ("no Solana wallet linked" if spec["id"] == "sol"
+                      else "no EVM wallet linked")
         return out
     if not spec["http"]:
         out["why"] = "no RPC endpoint configured for this chain"
         return out
-    try:
-        if spec["id"] == "sol":
-            res = await _rpc(session, spec["http"], "getBalance", [addr])
-            lamports = (res or {}).get("value") if isinstance(res, dict) else res
-            out["balance"] = int(lamports or 0) / _SOL_DECIMALS
-        else:
-            res = await _rpc(session, spec["http"], "eth_getBalance",
-                             [addr, "latest"])
-            out["balance"] = int(str(res or "0x0"), 16) / _EVM_DECIMALS
-    except Exception as exc:  # noqa: BLE001
+    total, failed = 0.0, 0
+    for addr in addrs:
+        try:
+            total += await _balance(session, spec, addr)
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            log.debug(f"[WALLET] {spec['id']} {addr[:10]} failed: {exc}")
+    if failed == len(addrs):
         # Named rather than shown as a zero. A wallet reported empty when the
         # endpoint was merely rate-limited is a lie the user cannot detect.
-        out["why"] = f"could not read: {type(exc).__name__}"
-        log.debug(f"[WALLET] {spec['id']} balance failed: {exc}")
+        out["why"] = "could not read this chain right now"
+        return out
+    if failed:
+        # Some answered and some did not, so the total is real but short. Say
+        # so — a number that is quietly missing a wallet is worse than no
+        # number, because it looks complete.
+        out["why"] = f"{failed} of {len(addrs)} wallets could not be read"
+    out["balance"] = total
+    out["wallets"] = len(addrs) - failed
     return out
 
 
-async def read(evm: str, sol: str) -> dict:
+async def read(evms: list, sols: list) -> dict:
     """Every chain at once. Never raises — each chip carries its own bad news."""
     specs = chains()
+    evms, sols = list(evms or []), list(sols or [])
     async with aiohttp.ClientSession() as session:
         rows = await asyncio.gather(
-            *(_one(session, s, evm, sol) for s in specs))
+            *(_one(session, s, evms, sols) for s in specs))
         rows = list(rows)
 
         # One DexScreener request for the wrapped natives, and only for the
@@ -147,7 +172,7 @@ async def read(evm: str, sol: str) -> dict:
 
     total = sum(r["usd"] or 0 for r in rows)
     return {"chains": rows, "total_usd": total,
-            "evm": evm, "sol": sol,
+            "evm": evms, "sol": sols, "linked": len(evms) + len(sols),
             # Said in the payload, not just in the UI copy, so anything that
             # grows around this API inherits it.
             "watch_only": True}

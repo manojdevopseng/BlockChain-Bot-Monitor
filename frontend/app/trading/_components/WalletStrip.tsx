@@ -44,7 +44,9 @@ export function WalletStrip() {
   const [busy, setBusy] = useState(false);
 
   const rows: any[] = data?.chains ?? [];
-  const anyAddress = !!(data?.evm || data?.sol);
+  // The count, not the arrays — an empty array is truthy, so testing the
+  // lists directly would show the strip as populated with nothing in it.
+  const anyAddress = (data?.linked ?? 0) > 0;
 
   async function refresh() {
     setBusy(true);
@@ -79,10 +81,10 @@ export function WalletStrip() {
 
       {!anyAddress && !isLoading ? (
         <p className="text-xs leading-relaxed text-text-dim">
-          No wallet address saved. Add one on{" "}
-          <a href="/profile" className="text-brand-soft hover:underline">Profile</a>{" "}
-          — an address only, never a key. One EVM address covers Robinhood,
-          Ethereum, BNB and Base; Solana takes its own.
+          No wallet connected. Connect MetaMask or Phantom on{" "}
+          <a href="/profile" className="text-brand-soft hover:underline">Profile</a>,
+          or paste an address to watch — an address only, never a key. One EVM
+          wallet covers Robinhood, Ethereum, BNB and Base; Solana takes its own.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">

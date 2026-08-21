@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { mutate } from "swr";
 import { BadgeCheck, CandlestickChart, KeyRound, Loader2, Mail, Send,
@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WalletConnect } from "@/components/features/WalletConnect";
 
 /* Profile — the account's own page.
  *
@@ -277,20 +278,26 @@ function CredentialsCard() {
 function TradingCard() {
   const { data: conf } = useApi<any>("/api/trading/settings");
   const [key, setKey] = useState("");
-  const [evm, setEvm] = useState("");
-  const [sol, setSol] = useState("");
 
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // Seeded from the server once it answers, then left alone — re-seeding on
-  // every revalidation would overwrite an address halfway through being typed.
-  useEffect(() => {
-    if (conf) {
-      setEvm((v) => v || conf.wallet_evm || "");
-      setSol((v) => v || conf.wallet_sol || "");
+  // Its own route rather than saving a blank string: the settings PATCH
+  // treats blank as "leave it alone", which is right for a field that cannot
+  // show what it holds and would otherwise make removal impossible.
+  async function forgetKey() {
+    setBusy("forget");
+    setMsg(null);
+    try {
+      await apiSend("/api/trading/gmgn-key", "DELETE");
+      mutate("/api/trading/settings");
+      setMsg({ ok: true, text: "GMGN key removed." });
+    } catch (e: any) {
+      setMsg({ ok: false, text: String(e?.message || e) });
+    } finally {
+      setBusy("");
     }
-  }, [conf]);
+  }
 
   async function save(patch: any, tag: string) {
     setBusy(tag);
@@ -331,42 +338,12 @@ function TradingCard() {
           />
         </label>
 
-        {/* Watch-only addresses. Kept next to the key because both are
-            "things about your own money that this page stores", and kept
-            visibly apart from it because one is a secret and these are not —
-            an address is public by construction. */}
+        {/* Wallets. Next to the key because both are "things about your own
+            money that this page holds", and deliberately unlike it: the key
+            is a secret, an address is public by construction. */}
         <div>
-          <label className="mb-1 block text-xs text-text-muted">
-            Wallet address — EVM{" "}
-            <span className="text-text-dim">(Robinhood, Ethereum, BNB, Base)</span>
-          </label>
-          <div className="flex gap-2">
-            <Input value={evm} onChange={(e) => setEvm(e.target.value)}
-                   placeholder="0x…" />
-            <Button size="sm" variant="outline" disabled={busy === "evm"}
-                    onClick={() => save({ wallet_evm: evm.trim() }, "evm")}>
-              {busy === "evm" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
-            </Button>
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs text-text-muted">
-            Wallet address — Solana
-          </label>
-          <div className="flex gap-2">
-            <Input value={sol} onChange={(e) => setSol(e.target.value)}
-                   placeholder="Base58 address" />
-            <Button size="sm" variant="outline" disabled={busy === "sol"}
-                    onClick={() => save({ wallet_sol: sol.trim() }, "sol")}>
-              {busy === "sol" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
-            </Button>
-          </div>
-          <p className="mt-1.5 text-[11px] text-text-dim">
-            Read-only. The balance is fetched from each chain; nothing here can
-            move funds, and a private key is never asked for. Leave either blank
-            to skip those chains.
-          </p>
+          <label className="mb-2 block text-xs text-text-muted">Wallets</label>
+          <WalletConnect />
         </div>
 
         <div>
@@ -384,8 +361,15 @@ function TradingCard() {
               {busy === "key" ? <Loader2 size={13} className="animate-spin" /> : "Save"}
             </Button>
           </div>
-          <p className="mt-1.5 text-[11px] text-text-dim">
-            Never shown again once saved.
+          <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-text-dim">
+            <span>Never shown again once saved.</span>
+            {conf?.gmgn_key_set && (
+              <button onClick={() => forgetKey()} disabled={busy === "forget"}
+                      title="Delete the stored key. Nothing else changes."
+                      className="text-accent-red hover:underline disabled:opacity-40">
+                {busy === "forget" ? "removing…" : "Disconnect GMGN"}
+              </button>
+            )}
           </p>
         </div>
 
