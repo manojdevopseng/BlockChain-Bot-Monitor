@@ -2,6 +2,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { useApi } from "@/lib/api";
+import { CallActions } from "./CallActions";
 import { CopyButton } from "@/components/CopyButton";
 import { ChipMap, GroupChip, chipStyleOf } from "@/components/GroupChip";
 import { STICKY_HEAD, TableScroll } from "@/components/TableScroll";
@@ -33,6 +34,10 @@ export type Call = {
   group_entries?: GroupEntry[];
   count?: number;
   calls?: number;
+  // Written onto the row the first time anybody presses MC on this token —
+  // see CallActions.
+  mcap?: number;
+  mcap_at?: number;
 };
 
 type GroupEntry = {
@@ -166,11 +171,19 @@ export function CallsTable(
                 </div>
               </td>
 
+              {/* Name, and under it the two things anybody does with a call:
+                  take a position, or find out what it is worth. Under the name
+                  rather than in columns of their own — the table is read on a
+                  laptop beside Telegram, and two more columns is what pushes
+                  When off the edge. */}
               <td className="px-3 py-3">
                 <div className="flex items-center gap-1.5">
                   <span className="text-text-muted">{c.name || "—"}</span>
                   {c.name && <CopyButton value={c.name} />}
                 </div>
+                <CallActions chain={c.chain} address={c.address}
+                             symbol={c.symbol} name={c.name}
+                             mcap={c.mcap} mcapAt={c.mcap_at} />
               </td>
 
               {/* Every caller, each chip opening its own message. Width-capped
