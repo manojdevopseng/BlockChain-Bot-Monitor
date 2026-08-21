@@ -176,6 +176,14 @@ async def cancel(order_id: str, username: str) -> bool:
         return False
     row = await get(order_id)
     if row:
+        # Both places, like an activated order already does. A notice that
+        # exists on the phone and not on the page is one the person cannot
+        # find again tomorrow.
+        from . import notifications
+        await notifications.notify(
+            username, notifications.BILLING, "Order cancelled",
+            f"{row.get('plan_label') or 'Your order'} — nothing was charged.",
+            f"/orders/{order_id}")
         # They pressed it themselves, so this confirms rather than announces —
         # and says the money is safe, which is the actual worry.
         await notify_buyer(row,
@@ -200,7 +208,14 @@ async def expire_stale() -> int:
     res = await _col().update_many(
         {"status": OPEN, "expires_at": {"$lt": time.time()}},
         {"$set": {"status": EXPIRED}})
+    from . import notifications
     for row in stale:
+        await notifications.notify(
+            row.get("user_id", ""), notifications.BILLING, "Quote expired",
+            f"{row.get('plan_label') or 'Your order'} was not paid in time. "
+            f"If you have already sent it, it is not lost — open the order.",
+            f"/orders/{row.get('id')}",
+            key=f"expired-{row.get('id')}")
         await notify_buyer(row,
                            f"\u23F1 <b>Quote expired</b>\n"
                            f"{esc(row.get('plan_label') or 'Your order')} was not "

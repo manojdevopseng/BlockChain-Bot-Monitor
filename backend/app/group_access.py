@@ -170,6 +170,20 @@ async def remove(doc: dict) -> tuple[bool, str]:
     await db.get_collection("users").update_one(
         {"username": doc.get("username")},
         {"$unset": {"premium_group_invited_at": ""}})
+    # Said rather than left to be discovered. Being removed from a room you
+    # were paying to be in is the single most alarming thing this does, and an
+    # unexplained removal reads as a ban.
+    try:
+        from . import notifications
+        state = accounts.access(doc)
+        await notifications.notify(
+            doc.get("username", ""), notifications.BILLING,
+            "Removed from the Premium Callers group",
+            f"{state.reason or 'Your access has ended'}. Renew and the invite "
+            f"is waiting on your Profile.",
+            "/plan", key=f"group-removed-{int(time.time() // 86400)}")
+    except Exception:  # noqa: BLE001
+        pass
     return True, ""
 
 

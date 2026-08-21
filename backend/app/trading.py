@@ -679,9 +679,19 @@ async def stop_auto_buy(user: str, reason: str) -> dict:
     the buying is the emergency; throwing away the stop-losses on what is
     already held would be a second one.
     """
-    return await save_settings(user, {"auto_buy": False,
-                                      "stopped_reason": reason,
-                                      "stopped_at": time.time()})
+    out = await save_settings(user, {"auto_buy": False,
+                                     "stopped_reason": reason,
+                                     "stopped_at": time.time()})
+    # Auto-buy going quiet is the kind of thing somebody notices a week later
+    # and cannot explain. The page says why once it is opened; this is what
+    # gets them to open it.
+    try:
+        from . import notifications
+        await notifications.notify(
+            user, notifications.SYSTEM, "Auto-buy stopped", reason, "/trading")
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 # ── auto-sell and the loss limit ────────────────────────────────────────────
