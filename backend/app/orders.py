@@ -22,6 +22,7 @@ import time
 from typing import Optional
 
 from . import accounts, db, mailer, payments
+from .tgstyle import esc
 from .config import settings
 from .scanners.slog import get_logger
 
@@ -171,14 +172,41 @@ async def cancel(order_id: str, username: str) -> bool:
         {"id": order_id, "user_id": username, "status": OPEN},
         {"$set": {"status": CANCELLED, "cancelled_at": time.time(),
                   "cancel_reason": "cancelled by the buyer"}})
-    return bool(res.modified_count)
+    if not res.modified_count:
+        return False
+    row = await get(order_id)
+    if row:
+        # They pressed it themselves, so this confirms rather than announces —
+        # and says the money is safe, which is the actual worry.
+        await notify_buyer(row,
+                           f"\U0001F6AB <b>Order cancelled</b>\n"
+                           f"{esc(row.get('plan_label') or 'Your order')} "
+                           f"\u2014 nothing was charged.")
+    return True
 
 
 async def expire_stale() -> int:
-    """Let go of quotes nobody paid. Their figures become reusable."""
+    """Let go of quotes nobody paid. Their figures become reusable.
+
+    The buyer is told, because the common cause is not "changed my mind" — it
+    is a transfer sent a few minutes late, and that person is now watching an
+    address wondering. The quote is dead; the money is not lost, and the
+    message says so.
+    """
+    stale = await _col().find(
+        {"status": OPEN, "expires_at": {"$lt": time.time()}}).to_list(200)
+    if not stale:
+        return 0
     res = await _col().update_many(
         {"status": OPEN, "expires_at": {"$lt": time.time()}},
         {"$set": {"status": EXPIRED}})
+    for row in stale:
+        await notify_buyer(row,
+                           f"\u23F1 <b>Quote expired</b>\n"
+                           f"{esc(row.get('plan_label') or 'Your order')} was not "
+                           f"paid in time.\n\n<i>If you have already sent it, it "
+                           f"is not lost \u2014 open the order and we will match "
+                           f"it by hand.</i>")
     return int(res.modified_count)
 
 
@@ -265,6 +293,11 @@ async def settle(order: dict, seen: float, *, method: str = VIA_CHAIN,
         receipt = (invoice.filename(pub), invoice.pdf(pub, doc))
     except Exception as exc:  # noqa: BLE001
         log.warning(f"[ORDER] {order['id']} receipt not built: {exc}")
+    await notify_buyer(order,
+                       f"\u2705 <b>{esc(order['plan_label'])} is active</b>\n"
+                       f"Payment received"
+                       + (f" \u2014 {_VIA_LABEL[method]}" if method != VIA_CHAIN else "")
+                       + f".\nYour plan runs to <b>{row['expires_on']}</b>.")
     await mailer.send_order_activated(order.get("email", ""),
                                       order["user_id"], row, receipt)
     await mailer.notify_admin(
@@ -302,6 +335,52 @@ async def note_unmatched(asset_id: str, amount: float) -> None:
         f"{amount} on {asset_id}\n"
         f"No open order was quoted that figure — most likely a round number "
         f"instead of the exact one. Match it by hand from Orders.")
+
+
+async def notify_buyer(order: dict, text: str) -> None:
+    """One line to the person who placed this order, in their own chat.
+
+    Never a group and never a channel. An order carries what somebody bought,
+    what they paid and when it runs out; a shared room would show every
+    customer everybody else's. The routing is the same `alert_target` the rest
+    of the product uses, which answers that question once: their own chat if
+    they connected one, nothing at all if they did not — because posting a
+    customer's billing into the operator's group is a leak, not a fallback.
+
+    Best-effort on purpose. The dashboard notice and the email are the record;
+    this is the tap on the shoulder, and a bot that is rate-limited must not be
+    able to hold up an order.
+    """
+    user = order.get("user_id") or ""
+    if not user:
+        return
+    try:
+        from . import alert_dispatch, telegram_link
+        chat, _why = await telegram_link.alert_target(user, None)
+        if not chat:
+            return
+        rows = []
+        link = _dash_url(f"/orders/{order.get('id')}")
+        if link:
+            rows.append([{"text": "\U0001F9FE View the order", "url": link}])
+        await alert_dispatch.send_personal(user, chat, text, rows or None)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[ORDER] buyer notice not sent: {exc}")
+
+
+def _dash_url(path: str) -> str:
+    """A link into the dashboard, or "" when there is nowhere to link to.
+
+    Telegram refuses the whole message when a button URL is unreachable, and
+    PUBLIC_URL ships defaulted to localhost — so an unset deployment gets the
+    notice without the button rather than no notice.
+    """
+    from .config import settings
+    base = (getattr(settings, "public_url", "") or "").strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        return ""
+    host = base.split("//", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
+    return "" if host in ("localhost", "127.0.0.1", "0.0.0.0") else f"{base}{path}"
 
 
 async def _notify_operator(text: str) -> None:
