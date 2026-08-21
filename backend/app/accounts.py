@@ -143,7 +143,15 @@ def public(doc: dict) -> dict:
         "email_verified": bool(doc.get("email_verified")),
         "unlimited": bool(doc.get("unlimited")),
         "plan": plan.id,
-        "plan_label": plan.label,
+        # What they are on, not what their ceilings look like. plan_of returns
+        # the admin plan to an account handed no limits, which is right for
+        # every limit that reads it and wrong for the one place a person reads
+        # it: a customer on Yearly should not open Profile and find they are on
+        # "Admin". The ceiling is said separately, by `unlimited` above.
+        "plan_label": (PLANS[doc["plan"]].label
+                       if doc.get("unlimited") and doc.get("role") != ADMIN
+                       and str(doc.get("plan")) in PLANS
+                       else plan.label),
         "status": state.status,
         "days_left": state.days_left,
         "expires_at": state.expires_at,

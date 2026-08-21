@@ -56,7 +56,7 @@ export function Sidebar({
   const { blocks, known, isAdmin } = useRole();
   // Two different reasons a page can be shut, and they deserve two different
   // sentences: "not for this account, ever" and "comes with a paid plan".
-  const { isTrial } = useAccount();
+  const { isTrial, account } = useAccount();
   // On mobile the rail is always full-width inside the drawer; only desktop collapses.
   const isCollapsed = collapsed;
 
@@ -85,9 +85,20 @@ export function Sidebar({
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand/20 text-brand">
             <Cpu size={20} />
           </div>
+          {/* The product name, and under it whoever is signed in.
+              "MultiChain Monitor" was a subtitle nobody needed twice — the
+              nav below says what this is. Who you are logged in as is the
+              thing that is genuinely worth a glance, especially on a box
+              where an operator and a customer account get different pages.
+              Falls back to the old subtitle until the account is known, so
+              the line never sits empty or jumps. */}
           <div className={cn("min-w-0", isCollapsed && "lg:hidden")}>
             <div className="truncate text-sm font-bold leading-tight text-accent-green">SightLine</div>
-            <div className="truncate text-[11px] leading-tight text-text-muted">MultiChain Monitor</div>
+            <div className="truncate text-[11px] leading-tight text-text-muted">
+              {account?.username
+                ? <>Welcome, <span className="text-text">{account.username}</span></>
+                : "MultiChain Monitor"}
+            </div>
           </div>
           {/* Close (mobile only) */}
           <button
