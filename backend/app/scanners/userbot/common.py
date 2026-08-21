@@ -21,6 +21,10 @@ DEST_OTTO               = config.DEST_OTTO
 DEST_SIGNALS            = config.DEST_SIGNALS
 DEST_DEXS               = config.DEST_DEXS
 DEST_PREMIUM_ALL        = config.DEST_PREMIUM_ALL
+# The room paying accounts are in. Its own destination beside the operator's
+# mirror, so the two can carry different things later without either being a
+# special case of the other.
+DEST_MEMBER_FEED        = config.MEMBER_GROUP_CHAT_ID
 DEST_IC                 = config.DEST_IMPORTANT_CALLER
 
 SOURCE_OTTO   = config.SOURCE_OTTO

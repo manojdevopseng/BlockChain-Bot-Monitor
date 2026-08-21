@@ -165,6 +165,11 @@ FIRST_BUY_WINDOW_SECONDS = settings.first_buy_window_seconds
 MAX_GAS_MONITORS         = settings.max_gas_monitors
 GAS_ALERT_CHAT_ID        = settings.gas_alert_chat_id
 TRADING_ALERT_CHAT_ID    = settings.trading_alert_chat_id
+# The room paying accounts are invited into — and, when it is set, mirrored
+# into as well. Blank falls back to DEST_PREMIUM_ALL for invites, but never for
+# forwarding: sending the operator's own mirror to itself twice is not a thing
+# anybody wants.
+MEMBER_GROUP_CHAT_ID     = _int_or_none(settings.member_group_chat_id)
 # Dedicated endpoint for the gas feature; falls back to the ETH one so an
 # upgrade with a blank value behaves exactly as before.
 GAS_RPC_WSS  = settings.gas_rpc_wss or settings.eth_rpc_wss
