@@ -10,9 +10,10 @@ from __future__ import annotations
 import time
 
 import aiohttp
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import (APIRouter, Body, Depends, HTTPException, Query,
+                     Request)
 
-from .. import db, mev, security, trading, wallet, wallets
+from .. import db, keys, mev, security, trading, wallet, wallets
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
@@ -194,6 +195,92 @@ async def mev_status(owner: dict = Depends(security.require_customer)):
             # Deliberately not the routes above: those carry the operator's
             # API key, and handing one to a customer hands them the quota.
             "wallet_networks": mev.wallet_networks()}
+
+
+# ── the trading wallet ──────────────────────────────────────────────────────
+#
+# Everything below concerns a key that can move money. One rule governs all of
+# it: the secret arrives once, over a connection nobody can read, and never
+# comes back out. See app/keys.py for what that costs and why it is here.
+
+def _require_secure(request: Request) -> None:
+    """Refuse a secret over a connection anyone on the path can read.
+
+    Typed into an http:// page, a key crosses the network in the clear and
+    every hop between keeps a copy if it wants one. There is no "probably fine
+    on this network" version of that, so the answer is no until the connection
+    is encrypted.
+
+    The proxy's header is what settles it: the app itself sits behind nginx on
+    plain HTTP by design, so its own view of the scheme is always "http".
+    """
+    proto = (request.headers.get("x-forwarded-proto")
+             or request.url.scheme or "").lower()
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    if proto == "https" or host in ("localhost", "127.0.0.1"):
+        return
+    raise HTTPException(
+        400,
+        "This page is not served over HTTPS, so a private key typed here "
+        "would cross the network in the clear. The trading wallet stays "
+        "locked until the connection is encrypted.")
+
+
+@router.get("/keys")
+async def keys_list(owner: dict = Depends(security.require_customer)):
+    """Which trading wallets exist, described by address alone.
+
+    There is no route anywhere that returns a key, and this is the one
+    somebody looking for such a route would try first.
+    """
+    return {"items": await keys.listing(owner["username"]),
+            "vault_ready": keys.configured(),
+            "kinds": list(keys.KINDS)}
+
+
+@router.post("/keys/create")
+async def keys_create(request: Request, payload: dict = Body(...),
+                      owner: dict = Depends(security.require_customer)):
+    """A fresh wallet, generated here and sealed immediately.
+
+    Offered ahead of importing because it bounds the loss to whatever the
+    person deliberately sends it, instead of to everything they own.
+    """
+    _require_secure(request)
+    try:
+        return await keys.create(owner["username"],
+                                 str(payload.get("kind") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/keys/import")
+async def keys_import(request: Request, payload: dict = Body(...),
+                      owner: dict = Depends(security.require_customer)):
+    """Take a key the person already holds.
+
+    The response carries the address that key controls and nothing else, and
+    the error messages deliberately never quote the input — a key pasted into
+    the wrong field must not come back out in a message or a log.
+    """
+    _require_secure(request)
+    try:
+        return await keys.import_key(owner["username"],
+                                     str(payload.get("kind") or ""),
+                                     str(payload.get("private_key") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/keys/{kind}")
+async def keys_forget(kind: str,
+                      owner: dict = Depends(security.require_customer)):
+    """Delete the key. Anything left in a wallet created here becomes
+    unreachable the moment this runs — there is no copy anywhere, which is
+    the whole point of the vault."""
+    if not await keys.forget(owner["username"], kind):
+        raise HTTPException(404, "No trading wallet of that kind")
+    return {"ok": True, "kind": kind}
 
 
 @router.get("/positions")

@@ -260,6 +260,16 @@ class Settings(BaseSettings):
     # discovery scanner, no WSS, just "is this address a contract on Base".
     # Two endpoints because one public RPC going quiet must not take the chain
     # off the board; the pool tries them in order.
+    # Seals every trading-wallet key in the vault. Deliberately here and not
+    # in Mongo: a database dump is the ordinary way this goes wrong, and
+    # without this string the stored keys are noise. Losing it loses every
+    # created wallet, which is the correct trade — a master key kept somewhere
+    # convenient enough to recover from is kept somewhere reachable.
+    #
+    # Blank means the vault refuses to store anything at all, which is how a
+    # server that was never meant to hold keys stays a server that does not.
+    wallet_master_key: str = ""
+
     # Where a protected transaction is sent instead of the ordinary path.
     #
     # These are the TRADING endpoints and nothing else. The scanners keep
