@@ -33,7 +33,9 @@ log = get_logger(__name__)
 # enough that a signature left on a screen is worthless by the time it is seen.
 NONCE_TTL = 10 * 60
 
-EVM, SOL = "evm", "sol"
+# The keyspaces a wallet can belong to. Tron looks like an EVM chain over
+# RPC but its addresses are base58 and its own, so it is its own kind.
+EVM, SOL, TRON = "evm", "sol", "tron"
 SOURCES = ("metamask", "phantom", "manual")
 
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -141,21 +143,23 @@ async def link(*, username: str, kind: str, address: str, signature: str,
     from . import wallet as wallet_read
 
     kind = (kind or "").strip().lower()
-    if kind not in (EVM, SOL):
-        raise ValueError("A wallet is either evm or sol")
-    address = (address or "").strip()
-    evm, sol = wallet_read.valid(address if kind == EVM else "",
-                                 address if kind == SOL else "")
-    address = evm or sol
+    address = wallet_read.valid_one(kind, address)
     if not address:
         raise ValueError("No address given")
+
+    # Only the two keyspaces a supported extension can actually sign for.
+    # Tron needs TronLink, which neither MetaMask nor Phantom is — refused
+    # here with the way in, rather than silently checked against the wrong
+    # curve and rejected as "signature does not match".
+    verifier = {EVM: _verify_evm, SOL: _verify_sol}.get(kind)
+    if verifier is None:
+        raise ValueError("MetaMask and Phantom cannot sign for this chain. "
+                         "Add the address as a watched wallet instead.")
 
     if not await _take_nonce(username, nonce):
         raise ValueError("That signing request has expired — press connect again.")
     message = message_for(username, address, nonce)
-    ok = (_verify_evm if kind == EVM else _verify_sol)(address, message,
-                                                       signature or "")
-    if not ok:
+    if not verifier(address, message, signature or ""):
         raise ValueError("That signature does not match the address.")
 
     now = time.time()
@@ -188,11 +192,7 @@ async def add_manual(*, username: str, kind: str, address: str,
     from . import wallet as wallet_read
 
     kind = (kind or "").strip().lower()
-    if kind not in (EVM, SOL):
-        raise ValueError("A wallet is either evm or sol")
-    evm, sol = wallet_read.valid(address if kind == EVM else "",
-                                 address if kind == SOL else "")
-    address = evm or sol
+    address = wallet_read.valid_one(kind, address)
     if not address:
         raise ValueError("No address given")
 
@@ -244,8 +244,14 @@ def _public(row: dict) -> dict:
             "added_at": row.get("added_at")}
 
 
-async def addresses(username: str) -> tuple[list[str], list[str]]:
-    """(evm, sol) — what the balance reader should ask about."""
+async def addresses(username: str) -> dict[str, list[str]]:
+    """{keyspace: [addresses]} — what the balance reader should ask about.
+
+    A mapping rather than a tuple, so adding a chain never changes this
+    function's shape or every caller's unpacking with it.
+    """
     rows = await db.get_collection("wallets").find({"user": username}).to_list(50)
-    return ([r["address"] for r in rows if r.get("kind") == EVM],
-            [r["address"] for r in rows if r.get("kind") == SOL])
+    out: dict[str, list[str]] = {EVM: [], SOL: [], TRON: []}
+    for r in rows:
+        out.setdefault(r.get("kind", ""), []).append(r["address"])
+    return out

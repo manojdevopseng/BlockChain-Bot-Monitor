@@ -29,24 +29,38 @@ from . import db
 
 # The chains a position may be opened on. Robinhood leads because that is where
 # most of the calls land.
-CHAINS = ("rbh", "eth", "bnb", "base", "sol")
+CHAINS = ("rbh", "eth", "bnb", "base", "sol", "tron")
 
-# What you actually spend on each chain. A wallet holds ETH, BNB or SOL — not
-# dollars — so a buy is sized in the coin that leaves the wallet. The dollar
-# figure is worked out from it for the P&L, which is the one place a common
-# unit is needed.
-NATIVE = {"rbh": "ETH", "eth": "ETH", "bnb": "BNB", "base": "ETH", "sol": "SOL"}
+# Chains whose addresses are base58 and therefore case-carrying. Folding one
+# of these to lower case produces an address that does not exist, which the
+# rest of the system then reports as "no price" — the same bug twice, so it
+# is one list rather than a check per chain.
+CASE_SENSITIVE = ("sol", "tron")
 
-# Wrapped native per chain, for pricing the coin itself. Solana's native has no
-# contract, so wrapped SOL stands in — it is the same asset.
+# What you actually spend on each chain. A wallet holds ETH, BNB, SOL or TRX —
+# not dollars — so a buy is sized in the coin that leaves the wallet. The
+# dollar figure is worked out from it for the P&L, which is the one place a
+# common unit is needed.
+NATIVE = {"rbh": "ETH", "eth": "ETH", "bnb": "BNB", "base": "ETH",
+          "sol": "SOL", "tron": "TRX"}
+
+# How many decimal places the native coin has. Everything EVM uses eighteen;
+# Tron uses six, and reading a TRX balance as wei makes a full wallet look
+# empty rather than throwing an error anybody would notice.
+NATIVE_DECIMALS = {"sol": 9, "tron": 6}
+
+# Wrapped native per chain, for pricing the coin itself. Solana's and Tron's
+# natives have no contract of their own, so the wrapped mint stands in — it is
+# the same asset.
 _WRAPPED = {
     "sol": "So11111111111111111111111111111111111111112",
+    "tron": "TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR",   # WTRX
 }
 
 
 # DexScreener's own chain ids, which are not ours.
 _DS_CHAIN = {"rbh": "robinhood", "eth": "ethereum", "bnb": "bsc",
-             "base": "base", "sol": "solana"}
+             "base": "base", "sol": "solana", "tron": "tron"}
 
 _TOKENS_URL = "https://api.dexscreener.com/latest/dex/tokens/"
 _BATCH = 30            # addresses per request, DexScreener's documented ceiling
@@ -70,6 +84,10 @@ CHAIN_DEFAULTS: dict[str, dict] = {
     # The field is named for what it is rather than reused, because a number
     # labelled Gwei on Solana is a number nobody can sanity-check.
     "sol":  {"buy_amount": 0.5,  "priority_fee": 100000},
+    # Tron charges bandwidth and energy rather than a gas price, and an
+    # account with enough frozen TRX pays neither. There is no gas field to
+    # set, so none is offered.
+    "tron": {"buy_amount": 150.0},
 }
 
 # The rest of a chain's settings, identical wherever they are not overridden.
@@ -173,8 +191,8 @@ def _utc() -> datetime:
 
 
 def _key(chain: str, address: str) -> str:
-    """Solana mints are base58 and case-carrying; hex addresses fold."""
-    return address if chain == "sol" else (address or "").lower()
+    """Base58 addresses are case-carrying; hex addresses fold."""
+    return address if chain in CASE_SENSITIVE else (address or "").lower()
 
 
 # ── settings ────────────────────────────────────────────────────────────────

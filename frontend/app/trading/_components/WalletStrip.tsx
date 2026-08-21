@@ -23,6 +23,7 @@ import { fmtUsd } from "@/lib/utils";
 
 const TONE: Record<string, Variant> = {
   eth: "blue", rbh: "green", bnb: "amber", sol: "purple", base: "cyan",
+  tron: "red",
 };
 
 function amount(n: number): string {
@@ -87,7 +88,7 @@ export function WalletStrip() {
           wallet covers Robinhood, Ethereum, BNB and Base; Solana takes its own.
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {rows.map((r) => (
             <div key={r.chain}
                  className="rounded-lg border border-border-soft bg-bg-soft/40 px-2.5 py-2">

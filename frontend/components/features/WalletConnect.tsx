@@ -25,8 +25,15 @@ import { Input } from "@/components/ui/input";
  * permission from it at all. */
 
 type W = {
-  address: string; kind: "evm" | "sol"; source: string;
+  address: string; kind: "evm" | "sol" | "tron"; source: string;
   verified: boolean; label?: string;
+};
+
+const KIND_LABEL: Record<string, string> = {
+  evm: "EVM", sol: "Solana", tron: "Tron",
+};
+const KIND_TONE: Record<string, any> = {
+  evm: "blue", sol: "purple", tron: "red",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -47,7 +54,7 @@ export function WalletConnect() {
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [addr, setAddr] = useState("");
-  const [kind, setKind] = useState<"evm" | "sol">("evm");
+  const [kind, setKind] = useState<"evm" | "sol" | "tron">("evm");
 
   // Extensions inject after the page script runs, and only on a secure
   // origin. Both are checked once mounted rather than assumed.
@@ -197,8 +204,8 @@ export function WalletConnect() {
                             border-border-soft bg-bg-soft/40 px-2.5 py-2">
               <Wallet size={13} className="shrink-0 text-text-dim" />
               <span className="font-mono text-xs text-text">{short(w.address)}</span>
-              <Badge variant={w.kind === "sol" ? "purple" : "blue"}>
-                {w.kind === "sol" ? "Solana" : "EVM"}
+              <Badge variant={KIND_TONE[w.kind] ?? "blue"}>
+                {KIND_LABEL[w.kind] ?? w.kind}
               </Badge>
               <span className="text-[11px] text-text-dim">
                 {SOURCE_LABEL[w.source] ?? w.source}
@@ -285,10 +292,12 @@ export function WalletConnect() {
                            text-xs text-text">
           <option value="evm">EVM</option>
           <option value="sol">Solana</option>
+          <option value="tron">Tron</option>
         </select>
         <Input value={addr} onChange={(e) => setAddr(e.target.value)}
                placeholder={kind === "evm" ? "0x… — watch without connecting"
-                                           : "Base58 address"}
+                          : kind === "tron" ? "T… — Tron address"
+                                            : "Base58 address"}
                className="min-w-[12rem] flex-1" />
         <Button size="sm" variant="outline" disabled={!addr.trim() || !!busy}
                 onClick={watch}

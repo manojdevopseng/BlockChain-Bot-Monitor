@@ -36,44 +36,63 @@ log = get_logger(__name__)
 
 
 # Per chain: the relay's name, its endpoint, and how its health is asked.
-# Endpoints are overridable from .env so a paid relay can replace a public one
-# without a code change.
+# Endpoints are overridable from .env so a different relay can replace this
+# one without a code change.
 def routes() -> dict[str, dict]:
+    """Per chain: where a protected order goes, and what that is actually worth.
+
+    Five of the six run through one provider, whose front-running protection
+    is a property of the key rather than a per-call flag — so "supported"
+    here means the endpoint exists and the key has that routing switched on.
+    That is the most this side can honestly claim without watching a trade
+    land, and the note on each chain says what the route is really buying.
+    """
+    relay = "dRPC front-running protection"
     return {
         "eth": {
-            "name": "Flashbots Protect",
-            "url": getattr(settings, "eth_mev_rpc", "") or "https://rpc.flashbots.net/fast",
-            "probe": "evm",
-            "note": "Sent straight to block builders, never to the public mempool.",
+            "name": relay, "url": settings.eth_mev_rpc, "probe": "evm",
+            "note": "Ethereum has a public mempool and the busiest sandwich "
+                    "bots there are — this is where the routing earns its "
+                    "keep. The order goes to the relay instead of being "
+                    "broadcast for anyone to read.",
         },
         "bnb": {
-            "name": "48Club Private RPC",
-            "url": getattr(settings, "bnb_mev_rpc", "") or "https://rpc.48.club",
-            "probe": "evm",
-            "note": "A private relay to BNB Chain validators.",
+            "name": relay, "url": settings.bnb_mev_rpc, "probe": "evm",
+            "note": "BNB Chain has a public mempool and active sandwich bots. "
+                    "Routed privately rather than broadcast.",
         },
         "sol": {
-            "name": "Jito Block Engine",
-            "url": getattr(settings, "sol_mev_rpc", "") or "https://mainnet.block-engine.jito.wtf/api/v1/transactions",
-            "probe": "none",
-            "note": "Bundled to a Jito leader instead of the public gossip path.",
+            "name": relay, "url": settings.sol_mev_rpc, "probe": "sol",
+            "note": "Routed through the relay rather than the ordinary "
+                    "submission path.",
         },
-        # Base orders through a single sequencer, so there is no public mempool
-        # for anybody to watch. Left configurable in case that changes, and
-        # reported as not-applicable rather than as a switch that does nothing.
+        # Base and Robinhood both order through a single sequencer, so there
+        # is no public mempool for a bot to read. The provider offers a route
+        # on both and it costs nothing to use — but the honest description is
+        # that the sandwich it defends against is not the attack these chains
+        # have, and no relay defends against the sequencer itself, because
+        # that is who receives the transaction either way.
         "base": {
-            "name": "", "url": getattr(settings, "base_mev_rpc", "") or "",
-            "probe": "evm",
-            "note": "Base orders through one sequencer — there is no public "
-                    "mempool to be front-run in.",
+            "name": relay, "url": settings.base_mev_rpc, "probe": "evm",
+            "note": "Base orders through one sequencer, so there is no public "
+                    "mempool to be front-run in. The route is available and "
+                    "harmless — but the threat it defends against is not the "
+                    "one this chain has.",
         },
-        # Robinhood Chain is new and its mempool behaviour is not something to
-        # assert without checking. No endpoint is assumed; set RBH_MEV_RPC and
-        # it appears here with everything else.
         "rbh": {
-            "name": "", "url": getattr(settings, "rbh_mev_rpc", "") or "",
-            "probe": "evm",
-            "note": "No protected endpoint is configured for this chain.",
+            "name": relay, "url": settings.rbh_mev_rpc, "probe": "evm",
+            "note": "Robinhood Chain orders first-come-first-served through a "
+                    "single sequencer, with no public mempool. Paying more gas "
+                    "cannot jump the queue, and no relay protects against the "
+                    "sequencer itself.",
+        },
+        # No protected route exists here at all. Carried in the table anyway
+        # so the panel can show the chain and explain itself, rather than
+        # leaving a gap somebody has to guess about.
+        "tron": {
+            "name": "", "url": "", "probe": "none",
+            "note": "No protected route is offered for Tron. Orders go the "
+                    "ordinary way.",
         },
     }
 
@@ -108,12 +127,16 @@ async def _probe(session: aiohttp.ClientSession, spec: dict) -> dict:
             return {"reachable": ok,
                     "why": "" if ok else "the relay did not answer eth_chainId",
                     "chain_id": (body or {}).get("result", "")}
-        # Jito's submission endpoint has no health method worth calling and
-        # rejects anything that is not a bundle. Reachability is all that can
-        # honestly be checked from here.
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-            return {"reachable": r.status < 500,
-                    "why": "" if r.status < 500 else f"relay returned {r.status}"}
+        if spec.get("probe") == "sol":
+            async with session.post(
+                    url, json={"jsonrpc": "2.0", "id": 1,
+                               "method": "getHealth", "params": []},
+                    timeout=aiohttp.ClientTimeout(total=10)) as r:
+                body = await r.json(content_type=None)
+            ok = (body or {}).get("result") == "ok"
+            return {"reachable": ok,
+                    "why": "" if ok else "the relay did not report healthy"}
+        return {"reachable": False, "why": "no protected route for this chain"}
     except Exception as exc:  # noqa: BLE001
         return {"reachable": False, "why": f"{type(exc).__name__}"}
 

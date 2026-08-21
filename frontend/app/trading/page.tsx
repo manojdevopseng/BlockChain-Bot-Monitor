@@ -36,16 +36,19 @@ const TABS = [
 
 const CHAIN_LABEL: Record<string, string> = {
   eth: "Ethereum", rbh: "Robinhood", bnb: "BNB", sol: "Solana", base: "Base",
+  tron: "Tron",
 };
 const CHAIN_TONE: Record<string, Variant> = {
   eth: "blue", rbh: "green", bnb: "amber", sol: "purple", base: "cyan",
+  tron: "red",
 };
 const SOURCE_LABEL: Record<string, string> = {
   auto: "Auto", manual: "Manual", demo: "Demo",
 };
 
 function gmgn(chain: string, address: string) {
-  const slug = { eth: "eth", rbh: "robinhood", bnb: "bsc", sol: "sol", base: "base" }[chain] || chain;
+  const slug = { eth: "eth", rbh: "robinhood", bnb: "bsc", sol: "sol",
+                 base: "base", tron: "tron" }[chain] || chain;
   return `https://gmgn.ai/${slug}/token/${address}`;
 }
 

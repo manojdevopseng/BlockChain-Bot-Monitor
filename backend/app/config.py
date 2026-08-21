@@ -260,14 +260,26 @@ class Settings(BaseSettings):
     # discovery scanner, no WSS, just "is this address a contract on Base".
     # Two endpoints because one public RPC going quiet must not take the chain
     # off the board; the pool tries them in order.
-    # Where a protected transaction is sent instead of the public mempool.
-    # Blank falls back to the public relay named in app/mev.py; set these to
-    # put a paid or private endpoint in its place without touching code.
-    eth_mev_rpc: str = ""
-    bnb_mev_rpc: str = ""
-    sol_mev_rpc: str = ""
-    base_mev_rpc: str = ""
-    rbh_mev_rpc: str = ""
+    # Where a protected transaction is sent instead of the ordinary path.
+    #
+    # These are the TRADING endpoints and nothing else. The scanners keep
+    # their own RPCs above, deliberately separate: mixing them would put the
+    # whole detection load through a paid trading key, and a rate limit on
+    # one would silently become an outage in the other.
+    #
+    # The provider's front-running protection is a routing setting on the key
+    # itself rather than a per-request flag, so pointing at the key is what
+    # switches it on. Override any of these in .env to move to another relay
+    # without touching code.
+    eth_mev_rpc: str = "https://lb.drpc.live/ethereum/Al7VPfUlqECMkYDHiDRRoXF3VZ6anYMR8aXfHuPn-b5m"
+    bnb_mev_rpc: str = "https://lb.drpc.live/bsc/Al7VPfUlqECMkYDHiDRRoXF3VZ6anYMR8aXfHuPn-b5m"
+    sol_mev_rpc: str = "https://lb.drpc.live/solana/Al7VPfUlqECMkYDHiDRRoXF3VZ6anYMR8aXfHuPn-b5m"
+    base_mev_rpc: str = "https://lb.drpc.live/base/Al7VPfUlqECMkYDHiDRRoXF3VZ6anYMR8aXfHuPn-b5m"
+    rbh_mev_rpc: str = "https://lb.drpc.live/robinhood/Al7VPfUlqECMkYDHiDRRoXF3VZ6anYMR8aXfHuPn-b5m"
+    # Tron has no protected route on this provider. This is here so trading
+    # can reach the chain at all; mev.py reports it as unprotected rather
+    # than quietly showing a switch that does nothing.
+    tron_rpc_http: str = "https://lb.drpc.live/tron/Al7VPfUlqECMkYDHiDRRoXF3VZ6anYMR8aXfHuPn-b5m"
 
     base_rpc_http: str = "https://mainnet.base.org"
     base_rpc_http_fallback: str = "https://base.llamarpc.com"

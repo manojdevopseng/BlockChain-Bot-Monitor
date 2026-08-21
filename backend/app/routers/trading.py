@@ -118,8 +118,7 @@ async def wallet_balances(owner: dict = Depends(security.require_customer)):
     putting it on a timer would mean five RPC calls a minute per open tab for
     a number that changes when the person themselves moves funds.
     """
-    evms, sols = await wallets.addresses(owner["username"])
-    return await wallet.read(evms, sols)
+    return await wallet.read(await wallets.addresses(owner["username"]))
 
 
 @router.get("/wallets")

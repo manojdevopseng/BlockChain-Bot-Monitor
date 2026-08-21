@@ -30,6 +30,7 @@ const CHAINS = [
   { id: "bnb", label: "BNB" },
   { id: "base", label: "BASE" },
   { id: "sol", label: "SOL" },
+  { id: "tron", label: "TRON" },
 ];
 
 type Conf = Record<string, any>;
@@ -114,6 +115,9 @@ export function QuickSettings(
 
   const here = cc[chain] || {};
   const isSol = chain === "sol";
+  // Tron pays in bandwidth and energy rather than a gas price, and an account
+  // with enough frozen TRX pays neither. There is nothing to set.
+  const noGas = chain === "tron";
   const native = here.native || "";
   const relay = relays[chain] || {};
 
@@ -151,7 +155,7 @@ export function QuickSettings(
         mev_protect: !!here.mev_protect,
       };
       if (isSol) block.priority_fee = Number(here.priority_fee) || 0;
-      else {
+      else if (!noGas) {
         block.buy_gas_gwei = Number(here.buy_gas_gwei) || 0;
         block.sell_gas_gwei = Number(here.sell_gas_gwei) || 0;
       }
@@ -203,7 +207,8 @@ export function QuickSettings(
           <span className="mb-1.5 block text-[11px] text-text-dim">
             Settings for
           </span>
-          <div className="grid grid-cols-5 gap-1 rounded-lg border border-border bg-bg-soft p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-border
+                          bg-bg-soft p-1 sm:grid-cols-6">
             {CHAINS.map((c) => (
               <button key={c.id} onClick={() => setChain(c.id)}
                 className={`rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${
@@ -242,6 +247,13 @@ export function QuickSettings(
               <Field label="Priority fee" suffix="µlamports" value={here.priority_fee}
                      onChange={(v) => setHere("priority_fee", v)}
                      hint="Per compute unit — Solana's version of gas" />
+            ) : noGas ? (
+              <p className="rounded-lg border border-border bg-bg-soft/40 px-3 py-2
+                            text-[10px] leading-relaxed text-text-dim">
+                Tron charges bandwidth and energy rather than a gas price, and an
+                account with enough frozen TRX pays neither. There is nothing to
+                set here.
+              </p>
             ) : (
               <Field label="Buy gas" suffix="Gwei" value={here.buy_gas_gwei}
                      onChange={(v) => setHere("buy_gas_gwei", v)}
@@ -287,7 +299,7 @@ export function QuickSettings(
             <Field label="Sell slippage" suffix="%" value={here.sell_slippage}
                    onChange={(v) => setHere("sell_slippage", v)}
                    hint="Held for live trading" />
-            {!isSol && (
+            {!isSol && !noGas && (
               <Field label="Sell gas" suffix="Gwei" value={here.sell_gas_gwei}
                      onChange={(v) => setHere("sell_gas_gwei", v)}
                      hint="Held for live trading" />
