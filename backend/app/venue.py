@@ -252,6 +252,14 @@ DEXES = ("uniswap", "pancakeswap")
 # pool against the coin at all — the rare case, not the hot path.
 MAX_CANDIDATES = 2
 
+# Chains whose Universal Router runs SWAP_EXACT_IN — the V4 action that
+# carries a whole path rather than a single pool. Measured, not assumed: the
+# same swap was simulated against each router in both forms. Robinhood's
+# router, and the one Ethereum used to point at, accept the single-pool action
+# and revert without a word on the path one. A V4 route is not offered where it
+# cannot run, so the refusal says why instead of failing at the simulation.
+V4_HOP_CHAINS = ("eth",)
+
 
 def _other(p: dict, token: str) -> str:
     """The token on the far side of this pool from the one being asked about."""
@@ -319,6 +327,8 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
                     continue
                 # V4 travels only with V4 — see the note on HOPPABLE.
                 if (m["version"] == "v4") != (leg["version"] == "v4"):
+                    continue
+                if m["version"] == "v4" and chain not in V4_HOP_CHAINS:
                     continue
                 combos.append((leg, m, mid_token))
     finally:

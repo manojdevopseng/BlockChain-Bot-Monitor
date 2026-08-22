@@ -283,7 +283,12 @@ class Settings(BaseSettings):
     base_v3_router: str = "0x2626664c2603336E57B271c5C0b26F421741e481"
     rbh_v3_router: str = "0xcaf681a66d020601342297493863e78c959e5cb2"
 
-    eth_universal_router: str = "0xd92a36b0000531ef3063ded4de20a0783308446c"
+    # Two routers on Ethereum answer to V4. The one that was here first does
+    # single-pool swaps and reverts on SWAP_EXACT_IN, the action that carries a
+    # whole path — so a V4 route across two pools was impossible through it.
+    # This one runs both, and every V2/V3 command besides. Proved by simulating
+    # the same swaps against each.
+    eth_universal_router: str = "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af"
     bnb_universal_router: str = "0x91bf3bfaef8d771a74e1a8fe460b3ee646b2e588"
     # PancakeSwap's own. The Uniswap router above cannot reach a Pancake pool
     # at all — it derives every pool address from Uniswap's factory, so a
