@@ -276,8 +276,13 @@ async def _via(chain: str, pairs: list, quotable: set, wnative: str,
     finally:
         if closing:
             await session.close()
+    # Either side. DexScreener decides which token it calls base and which
+    # quote by its own convention, so SPCXB's pool against WBNB comes back
+    # with WBNB as the *base* — and looking only at the quote missed a
+    # $10,158 pool that was sitting right there.
     mid = [p for p in mids
-           if p["version"] == "v2" and p["quote"] in quotable
+           if p["version"] == "v2"
+           and (p["quote"] in quotable or p["base"] in quotable)
            and p["dex"] in ("uniswap", "pancakeswap")]
     if not mid:
         return None
@@ -359,7 +364,10 @@ async def best(chain: str, token: str,
     wn = str(getattr(scfg, "BNB_WBNB" if chain == "bnb"
                      else f"{chain.upper()}_WETH", "") or "").lower()
     quotable = {NATIVE, wn} - {""}
-    native_pairs = [p for p in pairs if p["quote"] in quotable]
+    # Same reasoning as the middle leg below: which token DexScreener calls
+    # base is its own convention, not a fact about the pool.
+    native_pairs = [p for p in pairs
+                    if p["quote"] in quotable or p["base"] in quotable]
     if not native_pairs:
         # No pool against the coin being spent — so go through the token it
         # *is* paired with. ALIEN's whole $78,164 sits against SPCXB, and
