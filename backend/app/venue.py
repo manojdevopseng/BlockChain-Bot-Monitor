@@ -56,11 +56,22 @@ _POOL_CHAINS = {"rbh": ("robinhood", "rbhx", "rbh"), "eth": ("eth",),
 # V4 in the native coin is the zero address, not the wrapped token.
 NATIVE = "0x0000000000000000000000000000000000000000"
 
-# A pool this thin cannot fill anything without moving the price to nonsense,
-# so it is treated as no pool at all. And a routable pool worth less than this
-# share of the real one is a worse answer than admitting the token cannot be
-# reached — the fill would be technically successful and financially absurd.
-MIN_LIQUIDITY = 2_000.0
+# Whether a pool is too thin is not a property of the pool. It is the
+# relationship between the pool and the order: $50 into $977 moves the price
+# by five per cent and comes back out worse, while $2.50 into the same pool is
+# a quarter of one per cent and is fine. A flat floor answered the wrong
+# question and refused a trade that was perfectly sized for what it was.
+#
+# So size decides, when the size is known. What stays absolute is a floor
+# beneath which no order is small enough to be sensible — FEATHERS held $66 on
+# the only routable pool, and there is no amount worth putting into that.
+MIN_LIQUIDITY = 250.0
+MAX_POOL_SHARE = 0.02
+
+# When the caller does not say how big the trade is, this stands in. It is the
+# old floor, kept for that case: without a size there is nothing to reason
+# about and the cautious answer is the right one.
+MIN_LIQUIDITY_UNSIZED = 2_000.0
 MIN_SHARE = 0.10
 
 # The legal (fee, tickSpacing) pairs. A hooked pool may use anything, which is
@@ -227,8 +238,28 @@ async def _v3_fee(chain: str, pool: str) -> Optional[int]:
         return None
 
 
+def _too_thin(liquidity: float, amount_usd: Optional[float]) -> Optional[str]:
+    """Why this pool cannot take this order, or None if it can."""
+    if liquidity < MIN_LIQUIDITY:
+        return (f"holds only ${liquidity:,.0f} — nothing is small enough to "
+                f"trade in a pool that size")
+    if amount_usd:
+        share = amount_usd / liquidity
+        if share > MAX_POOL_SHARE:
+            return (f"holds ${liquidity:,.0f} and this order is "
+                    f"${amount_usd:,.2f} — {share * 100:.1f}% of the pool, "
+                    f"which would move the price against itself. Under "
+                    f"${liquidity * MAX_POOL_SHARE:,.2f} would fit")
+        return None
+    if liquidity < MIN_LIQUIDITY_UNSIZED:
+        return (f"holds only ${liquidity:,.0f}, and no order size was given "
+                f"to judge it against")
+    return None
+
+
 async def best(chain: str, token: str,
-               session: aiohttp.ClientSession | None = None) -> dict:
+               session: aiohttp.ClientSession | None = None,
+               amount_usd: Optional[float] = None) -> dict:
     """The deepest pool this token has on this chain, ready to trade against.
 
     Returns `ok: False` with a reason rather than raising — a token with no
@@ -296,7 +327,8 @@ async def best(chain: str, token: str,
                         "why": f"deepest pool is on {top['dex']}, which this "
                                f"cannot route through"})
             return out
-        if alt["liquidity"] < MIN_LIQUIDITY or alt["liquidity"] < top["liquidity"] * MIN_SHARE:
+        if (_too_thin(alt["liquidity"], amount_usd)
+                or alt["liquidity"] < top["liquidity"] * MIN_SHARE):
             out.update({"ok": False,
                         "why": (f"deepest pool is on {top['dex']} "
                                 f"(${top['liquidity']:,.0f}), which this cannot "
@@ -313,11 +345,10 @@ async def best(chain: str, token: str,
     # answer. The pair address for V3 is the pool contract itself, so it can
     # simply be asked — and a wrong tier would route into a different pool of
     # the same two tokens, which is a real pool with a real (worse) price.
-    if top["liquidity"] < MIN_LIQUIDITY:
+    thin = _too_thin(top["liquidity"], amount_usd)
+    if thin:
         return {"ok": False,
-                "why": (f"the deepest pool quoted in the coin holds only "
-                        f"${top['liquidity']:,.0f} — too thin to fill without "
-                        f"moving the price to nonsense")}
+                "why": f"the deepest pool quoted in the coin {thin}"}
 
     if out["version"] == "v3":
         fee = await _v3_fee(chain, out["pair"])

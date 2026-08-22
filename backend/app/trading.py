@@ -393,7 +393,19 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
     spot = None
     if conf.get("live_trading") and chain in ("eth", "rbh", "bnb", "base"):
         from . import venue as _venue
-        spot = await _venue.best(chain, addr)
+        # The size goes with the question. Whether a pool is too thin depends
+        # entirely on how much is being put into it, and without the number
+        # the venue has to fall back to a flat floor that refuses trades which
+        # would have been perfectly well sized.
+        want_usd = None
+        if spend_native > 0:
+            async with aiohttp.ClientSession() as _s:
+                px = await native_price(_s, chain)
+            if px:
+                want_usd = spend_native * px
+        elif usd:
+            want_usd = float(usd)
+        spot = await _venue.best(chain, addr, amount_usd=want_usd)
         if spot.get("ok") and spot.get("price_usd"):
             price = spot["price_usd"]
 
