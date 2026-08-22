@@ -238,8 +238,26 @@ async def _v3_fee(chain: str, pool: str) -> Optional[int]:
         return None
 
 
-async def _via(chain: str, pairs: list, quotable: set, wnative: str,
-               amount_usd: Optional[float],
+# Which versions a hop can be built out of. V2 and V3 both take a multi-hop
+# route the router understands, and the two can be mixed through the
+# Universal Router. A V4 leg cannot yet — see swapexec._route_calldata.
+HOPPABLE = ("v2", "v3")
+DEXES = ("uniswap", "pancakeswap")
+
+# How many of the token's own pools to investigate before giving up. Each one
+# costs a DexScreener round trip, and this only runs for a token that has no
+# pool against the coin at all — the rare case, not the hot path.
+MAX_CANDIDATES = 2
+
+
+def _other(p: dict, token: str) -> str:
+    """The token on the far side of this pool from the one being asked about."""
+    t = (token or "").lower()
+    return p["quote"] if (p["base"] or "").lower() == t else p["base"]
+
+
+async def _via(chain: str, token: str, pairs: list, quotable: set,
+               wnative: str, amount_usd: Optional[float],
                session: aiohttp.ClientSession | None) -> Optional[dict]:
     """A two-hop route through whatever the token *is* paired with.
 
@@ -248,66 +266,96 @@ async def _via(chain: str, pairs: list, quotable: set, wnative: str,
     the coin — otherwise this has only moved the thin pool one step further
     away, where it is harder to notice.
 
-    V2 only. Its router takes a path as a plain list of addresses, so a second
-    hop is one more entry. V3 packs the path with fee tiers between each pair
-    and V4 needs an action per leg; neither is done here, and a token whose
-    only route is through those is refused rather than half-routed.
+    Either leg may be V2 or V3, in any combination. A pair of V2 legs is
+    preferred when one exists, because that route goes through the V2 router
+    as a plain list of addresses — the oldest and most predictable of the
+    three paths — and anything else goes through the Universal Router.
     """
     cands = [p for p in pairs
-             if p["version"] == "v2" and p["dex"] in ("uniswap", "pancakeswap")
-             and p["quote"] and p["quote"] not in quotable]
+             if p["version"] in HOPPABLE and p["dex"] in DEXES
+             and _other(p, token) and _other(p, token) not in quotable]
     if not cands:
         return None
     cands.sort(key=lambda p: -p["liquidity"])
-    leg = cands[0]
 
-    thin = _too_thin(leg["liquidity"], amount_usd)
-    if thin:
-        return None
-
-    # Now the middle token: does it have a pool against the coin, deep enough
-    # to carry the same order?
     closing = False
     if session is None:
         session, closing = aiohttp.ClientSession(), True
+    combos: list[tuple] = []
     try:
-        mids = await _dexscreener(session, chain, leg["quote"])
-    except Exception as exc:  # noqa: BLE001
-        # An empty answer and a broken connection are not the same thing, and
-        # quietly treating the second as the first is what hid this bug.
-        log.warning(f"[VENUE] {chain} hop lookup failed: {type(exc).__name__}")
-        return None
+        for leg in cands[:MAX_CANDIDATES]:
+            if _too_thin(leg["liquidity"], amount_usd):
+                continue
+            mid_token = _other(leg, token)
+            try:
+                mids = await _dexscreener(session, chain, mid_token)
+            except Exception as exc:  # noqa: BLE001
+                # An empty answer and a broken connection are not the same
+                # thing, and quietly treating the second as the first is what
+                # once hid this whole path being dead.
+                log.warning(f"[VENUE] {chain} hop lookup failed: "
+                            f"{type(exc).__name__}")
+                continue
+            # Either side. DexScreener decides which token it calls base and
+            # which quote by its own convention, so SPCXB's pool against WBNB
+            # comes back with WBNB as the *base* — and looking only at the
+            # quote missed a $10,158 pool that was sitting right there.
+            for m in mids:
+                if m["version"] not in HOPPABLE or m["dex"] not in DEXES:
+                    continue
+                if m["quote"] not in quotable and m["base"] not in quotable:
+                    continue
+                if _too_thin(m["liquidity"], amount_usd):
+                    continue
+                combos.append((leg, m, mid_token))
     finally:
         if closing:
             await session.close()
-    # Either side. DexScreener decides which token it calls base and which
-    # quote by its own convention, so SPCXB's pool against WBNB comes back
-    # with WBNB as the *base* — and looking only at the quote missed a
-    # $10,158 pool that was sitting right there.
-    mid = [p for p in mids
-           if p["version"] == "v2"
-           and (p["quote"] in quotable or p["base"] in quotable)
-           and p["dex"] in ("uniswap", "pancakeswap")]
-    if not mid:
-        return None
-    mid.sort(key=lambda p: -p["liquidity"])
-    if _too_thin(mid[0]["liquidity"], amount_usd):
-        return None
 
-    return {"ok": True, "chain": chain, "token": leg["base"],
-            "version": "v2", "dex": leg["dex"], "pair": leg["pair"],
-            "liquidity": min(leg["liquidity"], mid[0]["liquidity"]),
+    if not combos:
+        return None
+    # Both-V2 first, then by whichever leg is the tighter of the two — a route
+    # is only as good as its narrowest pool.
+    combos.sort(key=lambda c: (c[0]["version"] == "v2" and c[1]["version"] == "v2",
+                               min(c[0]["liquidity"], c[1]["liquidity"])),
+                reverse=True)
+    leg, mid, mid_token = combos[0]
+
+    # A V3 leg needs its fee tier, and only the pool itself knows which one it
+    # was created with.
+    legs = []
+    for hop, (pool, a, b) in enumerate(((mid, wnative, mid_token),
+                                        (leg, mid_token, token))):
+        fee = None
+        if pool["version"] == "v3":
+            fee = await _v3_fee(chain, pool["pair"])
+            if not fee:
+                return None
+        legs.append({"version": pool["version"], "pair": pool["pair"],
+                     "dex": pool["dex"], "fee": fee,
+                     "token_in": a, "token_out": b,
+                     "liquidity": pool["liquidity"]})
+
+    both_v2 = all(x["version"] == "v2" for x in legs)
+    return {"ok": True, "chain": chain, "token": token,
+            # The route's own shape decides how it is quoted: two V2 legs can
+            # be asked exactly, anything else is priced from the pool.
+            "version": "v2" if both_v2 else "v3",
+            "dex": leg["dex"], "pair": leg["pair"],
+            "liquidity": min(leg["liquidity"], mid["liquidity"]),
             "price_usd": leg["price_usd"],
             "quote_symbol": leg["quote_symbol"],
             "alternatives": len(pairs),
             # The road the swap has to take. Two hops means two fees and two
             # lots of slippage, which is why the floor is worked out from the
             # end of the path rather than from either leg.
-            "path": [wnative, leg["quote"], leg["base"]],
+            "path": [wnative, mid_token, token],
+            "legs": legs,
             "hops": 2,
             "why": (f"no {leg['quote_symbol']}-free route: going through "
-                    f"{leg['quote_symbol']} "
-                    f"(${leg['liquidity']:,.0f} / ${mid[0]['liquidity']:,.0f})")}
+                    f"{leg['quote_symbol']} via "
+                    f"{legs[0]['version'].upper()}+{legs[1]['version'].upper()} "
+                    f"(${mid['liquidity']:,.0f} / ${leg['liquidity']:,.0f})")}
 
 
 def _too_thin(liquidity: float, amount_usd: Optional[float]) -> Optional[str]:
@@ -383,7 +431,7 @@ async def best(chain: str, token: str,
         # Not `session` — when this call opened it, it has already been
         # closed above, and handing a closed session on made every lookup
         # here fail silently. Passing None lets _via open its own.
-        hop = await _via(chain, pairs, quotable, wn, amount_usd,
+        hop = await _via(chain, token, pairs, quotable, wn, amount_usd,
                          None if own else session)
         if hop:
             return hop

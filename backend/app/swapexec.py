@@ -196,6 +196,26 @@ ACT_SWAP_EXACT_IN_SINGLE = 0x06
 ACT_SETTLE_ALL = 0x0c
 ACT_TAKE_ALL = 0x0f
 
+# The rest of the Universal Router's vocabulary, needed for a route whose two
+# legs are not the same version — a V2 pool and a V3 pool cannot be strung
+# together by either version's own router, but the Universal Router runs a
+# list of commands in one transaction and can hand the output of one straight
+# into the next.
+CMD_V3_SWAP_EXACT_IN = 0x00
+CMD_V2_SWAP_EXACT_IN = 0x08
+CMD_WRAP_ETH = 0x0b
+CMD_UNWRAP_WETH = 0x0c
+
+# Two addresses the router reads as instructions rather than destinations:
+# keep it here for the next command, and send it to whoever called.
+ADDRESS_THIS = "0x0000000000000000000000000000000000000002"
+MSG_SENDER = "0x0000000000000000000000000000000000000001"
+
+# "However much of that token you are holding" — how the second leg is told to
+# spend exactly what the first leg produced, without anybody having to predict
+# the number in advance.
+CONTRACT_BALANCE = 1 << 255
+
 
 def _v4_calldata(w3, key: dict, token: str, amount_in: int, min_out: int,
                  buying: bool) -> tuple[bytes, list[bytes]]:
@@ -251,6 +271,90 @@ def _v3_path(token_in: str, fee: int, token_out: str) -> bytes:
     """V3 packs a path tightly: address, three-byte fee, address."""
     return (bytes.fromhex(token_in[2:]) + int(fee).to_bytes(3, "big")
             + bytes.fromhex(token_out[2:]))
+
+
+def _route_steps(legs: list, buying: bool) -> list:
+    """The legs in the order the money actually travels.
+
+    The venue always describes a route the way a buy would walk it — coin
+    first, token last. A sell walks the same road backwards, so both the
+    order of the legs and the direction of each one are reversed.
+    """
+    seq = legs if buying else list(reversed(legs))
+    out = []
+    for leg in seq:
+        a, b = ((leg["token_in"], leg["token_out"]) if buying
+                else (leg["token_out"], leg["token_in"]))
+        out.append({**leg, "a": a, "b": b})
+    return out
+
+
+def _route_calldata(legs: list, amount_in: int, min_out: int,
+                    buying: bool) -> tuple[bytes, list[bytes]]:
+    """One transaction for a route whose legs are not all the same version.
+
+    Neither version's own router can do this. The V2 router takes a list of
+    addresses and assumes every pool on it is a V2 pool; the V3 router takes a
+    packed path and assumes the same of itself. A token whose only market is a
+    V3 pool against some other token, which in turn only has a V2 pool against
+    the coin, cannot be reached by either — and that combination is ordinary
+    enough that refusing it means refusing real tokens.
+
+    The Universal Router runs a list of commands in one transaction and lets
+    each one leave its output sitting in the router for the next, which is
+    what makes the two halves joinable. The second leg is told to spend
+    CONTRACT_BALANCE rather than a number, so nobody has to predict what the
+    first leg produced — and the slippage floor is applied once, at the end of
+    the road, where it belongs.
+    """
+    from eth_abi import encode
+    from web3 import Web3
+    ck = Web3.to_checksum_address
+
+    steps = _route_steps(legs, buying)
+    last = len(steps) - 1
+    commands = bytearray()
+    inputs: list[bytes] = []
+
+    if buying:
+        # The coin arrives with the transaction; the pools want the wrapped
+        # form, and the router wraps it into its own hands.
+        commands.append(CMD_WRAP_ETH)
+        inputs.append(encode(["address", "uint256"],
+                             [ck(ADDRESS_THIS), int(amount_in)]))
+
+    for i, st in enumerate(steps):
+        is_last = i == last
+        # A buy ends in the caller's hands. A sell ends as wrapped coin still
+        # held by the router, because it has to be unwrapped before it leaves.
+        recipient = ck(MSG_SENDER) if (is_last and buying) else ck(ADDRESS_THIS)
+        amount = int(amount_in) if i == 0 else CONTRACT_BALANCE
+        # Only the first leg of a sell pulls anything from the wallet. Every
+        # other leg spends what the router is already holding.
+        payer_is_user = (i == 0 and not buying)
+        floor = int(min_out) if (is_last and buying) else 0
+        a, b = ck(st["a"]), ck(st["b"])
+
+        if st["version"] == "v3":
+            commands.append(CMD_V3_SWAP_EXACT_IN)
+            inputs.append(encode(
+                ["address", "uint256", "uint256", "bytes", "bool"],
+                [recipient, amount, floor, _v3_path(a, int(st["fee"]), b),
+                 payer_is_user]))
+        else:
+            commands.append(CMD_V2_SWAP_EXACT_IN)
+            inputs.append(encode(
+                ["address", "uint256", "uint256", "address[]", "bool"],
+                [recipient, amount, floor, [a, b], payer_is_user]))
+
+    if not buying:
+        # The floor lands here instead of on the last swap: it is the coin the
+        # seller ends up with that has to clear it.
+        commands.append(CMD_UNWRAP_WETH)
+        inputs.append(encode(["address", "uint256"],
+                             [ck(MSG_SENDER), int(min_out)]))
+
+    return bytes(commands), inputs
 
 
 # ── what the pool will actually pay ─────────────────────────────────────────
@@ -578,6 +682,16 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
 
     r = routers(chain)
     version = v["version"]
+    # A route whose legs are not all V2 goes through the Universal Router,
+    # which changes who has to be approved further down as well as how the
+    # calldata is built — so it is settled here, before either.
+    legs = list(v.get("legs") or [])
+    routed = len(legs) > 1 and not all(x["version"] == "v2" for x in legs)
+    if routed and not r.get("v4"):
+        return {"ok": False, "stage": "router",
+                "why": (f"{chain.upper()} has no Universal Router configured, "
+                        f"and this token can only be reached by a mixed "
+                        f"V2/V3 route")}
     if not r.get(version):
         return {"ok": False, "stage": "router",
                 "why": f"no {version.upper()} router configured for {chain.upper()}"}
@@ -663,7 +777,7 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
     # two allowances, because the Universal Router spends through Permit2
     # rather than holding one of its own.
     if not buying:
-        spender = PERMIT2 if version == "v4" else r[version]
+        spender = PERMIT2 if (version == "v4" or routed) else r[version]
         if await _needs_approval(chain, token, owner, spender, amount):
             res = await _approve(chain, user, token, spender, owner,
                                  gas_price=gas_price, dry_run=dry_run)
@@ -677,7 +791,7 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
             # STF, which reads as a failure rather than as being early.
             if not dry_run and res.get("hash"):
                 await _mined(chain, res["hash"])
-        if version == "v4":
+        if version == "v4" or routed:
             p2 = w3.eth.contract(address=Web3.to_checksum_address(PERMIT2),
                                  abi=PERMIT2_ABI)
             data = p2.encode_abi("approve", args=[
@@ -698,7 +812,15 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
                 await _mined(chain, res["hash"])
 
     # ── the swap itself, through the router that version belongs to ────────
-    if version == "v2":
+    if routed:
+        commands, inputs = _route_calldata(legs, amount, min_out, buying)
+        c = w3.eth.contract(address=Web3.to_checksum_address(r["v4"]),
+                            abi=UNIVERSAL_ABI)
+        data = c.encode_abi("execute", args=[commands, inputs, deadline])
+        value = amount if buying else 0
+        to = r["v4"]
+
+    elif version == "v2":
         c = w3.eth.contract(address=Web3.to_checksum_address(r["v2"]), abi=V2_ABI)
         path = _v2_path(v, wn, tok, buying)
         if buying:
