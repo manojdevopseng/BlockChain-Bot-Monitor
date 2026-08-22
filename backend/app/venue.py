@@ -169,6 +169,25 @@ async def _v4_key(chain: str, token: str, pid: str) -> Optional[dict]:
     return None
 
 
+async def _v3_fee(chain: str, pool: str) -> Optional[int]:
+    """The fee tier of a V3 pool, read from the pool itself."""
+    import asyncio
+    try:
+        from web3 import Web3
+        from .scanners import scfg
+        url = str(getattr(scfg, f"{chain.upper()}_RPC_HTTP", "") or "")
+        if not url or not pool:
+            return None
+        w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 15}))
+        abi = [{"name": "fee", "inputs": [], "outputs": [{"type": "uint24"}],
+                "stateMutability": "view", "type": "function"}]
+        c = w3.eth.contract(address=Web3.to_checksum_address(pool), abi=abi)
+        return int(await asyncio.to_thread(c.functions.fee().call))
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[VENUE] v3 fee unreadable for {pool[:10]}: {exc}")
+        return None
+
+
 async def best(chain: str, token: str,
                session: aiohttp.ClientSession | None = None) -> dict:
     """The deepest pool this token has on this chain, ready to trade against.
@@ -221,6 +240,17 @@ async def best(chain: str, token: str,
                     "why": f"deepest pool is on {top['dex']} "
                            f"(${top['liquidity']:,.0f}); using the "
                            f"{alt['dex']} {alt['version']} pool instead"})
+
+    # V3 needs the pool's fee tier to route, and it is not in the DexScreener
+    # answer. The pair address for V3 is the pool contract itself, so it can
+    # simply be asked — and a wrong tier would route into a different pool of
+    # the same two tokens, which is a real pool with a real (worse) price.
+    if out["version"] == "v3":
+        fee = await _v3_fee(chain, out["pair"])
+        if fee is None:
+            return {**out, "ok": False,
+                    "why": "V3 pool found but it would not report its fee tier"}
+        out["fee"] = fee
 
     if out["version"] == "v4":
         key = await _v4_key(chain, token, out["pair"])

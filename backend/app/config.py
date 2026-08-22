@@ -270,7 +270,23 @@ class Settings(BaseSettings):
     eth_v2_router: str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
     bnb_v2_router: str = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
     base_v2_router: str = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
-    rbh_v2_router: str = ""
+    # Uniswap's own list for chain 4663. Its factory matches RBH_V2_FACTORY,
+    # which is how it is checked before anything is sent through it.
+    rbh_v2_router: str = "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
+
+    # V3 goes through SwapRouter02, and V4 through the Universal Router —
+    # which is the only way to reach a V4 pool at all, since a V4 pool is an
+    # entry inside one PoolManager rather than a contract of its own. All from
+    # Uniswap's published deployments, per chain id.
+    eth_v3_router: str = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
+    bnb_v3_router: str = "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"
+    base_v3_router: str = "0x2626664c2603336E57B271c5C0b26F421741e481"
+    rbh_v3_router: str = "0xcaf681a66d020601342297493863e78c959e5cb2"
+
+    eth_universal_router: str = "0xd92a36b0000531ef3063ded4de20a0783308446c"
+    bnb_universal_router: str = "0x91bf3bfaef8d771a74e1a8fe460b3ee646b2e588"
+    base_universal_router: str = "0xf3a4f4094bd2c6c06ca2f61789d8727b8d1e7259"
+    rbh_universal_router: str = "0x8876789976decbfcbbbe364623c63652db8c0904"
 
     # Seals every trading-wallet key in the vault. Deliberately here and not
     # in Mongo: a database dump is the ordinary way this goes wrong, and
