@@ -41,6 +41,8 @@ API agree to the last digit (1.3556577608171037 ETH).
 
 from __future__ import annotations
 
+import asyncio
+
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -186,6 +188,31 @@ def _from_sqrt(sqrt_price: int, token_is_0: bool, decimals: int) -> Optional[flo
     return base * (10 ** (decimals - 18))
 
 
+_SAVE_TASKS: set = set()
+
+
+def _spawn_save(ref: "PoolRef") -> None:
+    """Store a resolved pool without making the caller wait for Mongo."""
+    async def go() -> None:
+        try:
+            from app import db
+            await db.get_collection("pool_refs").update_one(
+                {"chain": ref.chain, "token": ref.token},
+                {"$set": {"chain": ref.chain, "token": ref.token,
+                          "kind": ref.kind, "address": ref.address,
+                          "pool_id": ref.pool_id, "fee": int(ref.fee or 0),
+                          "decimals": int(ref.decimals or 18),
+                          "token_is_0": bool(ref.token_is_0),
+                          "found_at": time.time()}},
+                upsert=True)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[POOLREF] could not store {ref.token[:10]}: {exc}")
+
+    task = asyncio.ensure_future(go())
+    _SAVE_TASKS.add(task)
+    task.add_done_callback(_SAVE_TASKS.discard)
+
+
 def _pool_id(currency0: str, currency1: str, fee: int, tick_spacing: int,
              hooks: str) -> str:
     """V4's pool id: keccak of the PoolKey, five words, in order.
@@ -298,6 +325,14 @@ class PriceReader:
             await self._resolve_v4(spec, token, ref)
 
         self._pools[key] = ref
+        # Written down as well as remembered. This resolution costs a handful
+        # of chain reads and produces exactly what a trade needs — which pool,
+        # which version, which fee — and until now it lived in one object in
+        # one process, so the trading side went and asked DexScreener for the
+        # same answer at a cost of two seconds on a token nobody had indexed
+        # yet. Persisted, that question stops being asked.
+        if ref.kind:
+            _spawn_save(ref)
         if ref.kind:
             log.info(f"[{self._tag}] {spec.label} {token[:10]}… priced from {ref.kind}"
                      + (f" {ref.fee}" if ref.fee else "") + f" pool {ref.address[:10]}…")

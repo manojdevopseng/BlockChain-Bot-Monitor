@@ -169,6 +169,45 @@ async def _v4_key(chain: str, token: str, pid: str) -> Optional[dict]:
     return None
 
 
+# How stale a stored resolution may be. A pool does not move, but liquidity
+# does — and a token whose pool was resolved a week ago may have been
+# abandoned since. Long enough to cover a caller's token for its whole life,
+# short enough that a dead pool is re-checked.
+REF_TTL = 6 * 3600
+
+
+async def _from_record(chain: str, token: str) -> Optional[dict]:
+    """The pool the detector already resolved, shaped like a venue answer."""
+    import time
+    row = await db.get_collection("pool_refs").find_one(
+        {"chain": chain, "token": token.lower()})
+    if not row or not row.get("kind"):
+        return None
+    if time.time() - float(row.get("found_at") or 0) > REF_TTL:
+        return None
+
+    out = {"ok": True, "chain": chain, "token": token.lower(),
+           "version": row["kind"], "dex": "uniswap",
+           "pair": row.get("address") or row.get("pool_id") or "",
+           # Liquidity is not on the record and is not needed here: the pool
+           # was chosen as the deepest one when it was resolved, and the
+           # slippage floor is what actually protects the fill.
+           "liquidity": None, "price_usd": None,
+           "quote_symbol": "", "alternatives": 1,
+           "decimals": int(row.get("decimals") or 18),
+           "source": "detector", "why": ""}
+    if row["kind"] == "v3":
+        out["fee"] = int(row.get("fee") or 3000)
+    elif row["kind"] == "v4":
+        key = await _v4_key(chain, token, row.get("pool_id", ""))
+        if not key:
+            # Without the key there is nothing to route through, and the
+            # network path may still find a different pool that works.
+            return None
+        out["v4"] = key
+    return out
+
+
 async def _v3_fee(chain: str, pool: str) -> Optional[int]:
     """The fee tier of a V3 pool, read from the pool itself."""
     import asyncio
@@ -196,6 +235,16 @@ async def best(chain: str, token: str,
     pool is an ordinary answer, not a fault, and the caller wants to say so
     on the row rather than see a stack trace.
     """
+    # What the detector already worked out, if it has seen this token. It
+    # resolves the pool from the chain itself in a few tens of milliseconds
+    # and knows the version, the fee and the pool — everything a trade needs.
+    # Asking DexScreener for the same answer costs two seconds on a token
+    # nobody has indexed yet, which is precisely the token a caller just
+    # named. So the record is tried first and the network second.
+    known = await _from_record(chain, token)
+    if known:
+        return known
+
     own = session is None
     session = session or aiohttp.ClientSession()
     try:

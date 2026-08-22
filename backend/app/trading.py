@@ -310,6 +310,15 @@ def _wrapped_evm(chain: str) -> str:
 
 # ── positions ───────────────────────────────────────────────────────────────
 
+def _priced(spot: Optional[dict], price) -> Optional[dict]:
+    """The venue answer with a price on it, or None when there is no venue."""
+    if not (spot or {}).get("ok"):
+        return None
+    if price and not spot.get("price_usd"):
+        spot = {**spot, "price_usd": float(price)}
+    return spot
+
+
 async def open_position(*, user: str, chain: str, address: str, symbol: str = "",
                         amount_native: Optional[float] = None,
                         name: str = "", usd: float = 0.0, source: str = "manual",
@@ -419,8 +428,11 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
             slippage=float(cc.get("buy_slippage") or 0),
             gwei=float(cc.get("buy_gas_gwei") or 0),
             protected=bool(cc.get("mev_protect")),
-            # Resolved above. Passing it saves the third round trip.
-            v=spot if (spot or {}).get("ok") else None,
+            # Resolved above. Passing it saves the third round trip — and
+            # the price goes with it, because a venue that came from the
+            # detector's record carries the pool but not a dollar figure,
+            # and the slippage floor is worked out from one.
+            v=_priced(spot, price),
             native_usd=native_usd or None)
         if not res.get("ok"):
             await record_failure(user=user, chain=chain, address=addr,
