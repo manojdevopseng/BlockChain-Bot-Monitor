@@ -402,6 +402,25 @@ async def _send(chain: str, user: str, tx: dict, *, protected: bool,
         raw = None
 
 
+async def _mined(chain: str, tx_hash: str, timeout: float = 60.0) -> bool:
+    """Wait until a transaction is in a block. False if it never arrives.
+
+    Cheap where it matters: Robinhood produces a block every 0.1s, so an
+    approval is usually visible within a few hundred milliseconds. Ethereum
+    is slower, and there the wait is the honest cost of selling a token for
+    the first time.
+    """
+    try:
+        w3 = _w3(chain)
+        await asyncio.to_thread(w3.eth.wait_for_transaction_receipt,
+                                tx_hash, timeout)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[SWAP] approval {tx_hash[:14]} not mined in "
+                    f"{timeout:.0f}s: {type(exc).__name__}")
+        return False
+
+
 async def _gas_price(chain: str, gwei: float) -> int:
     """The account's setting when it has one, the chain's own suggestion when
     it does not. A hardcoded number would be wrong on all four chains."""
@@ -507,7 +526,7 @@ async def _decimals(chain: str, token: str) -> int:
 async def trade(*, user: str, chain: str, token: str, amount: int,
                 buying: bool, slippage: float, gwei: float = 0,
                 protected: bool = True, dry_run: bool = False,
-                v: dict | None = None) -> dict:
+                v: dict | None = None, native_usd: float | None = None) -> dict:
     """One swap, from a token address to a transaction hash.
 
     Resolve, quote, build, simulate, sign, send — stopping at the first step
@@ -551,7 +570,12 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
     if v["version"] != "v2":
         v = dict(v)
         v.setdefault("decimals", await _decimals(chain, token))
-        if not v.get("native_usd"):
+        # Handed down by the caller when it already had it — which is the
+        # ordinary case now, since open_position looks it up once for the
+        # whole trade rather than letting each layer ask again.
+        if native_usd:
+            v["native_usd"] = native_usd
+        elif not v.get("native_usd"):
             import aiohttp as _a
             from . import trading as _t
             async with _a.ClientSession() as _s:
@@ -616,6 +640,12 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
                 return {"ok": False, "stage": "approve",
                         "why": res.get("why", "approval failed")}
             steps.append({"approve": res.get("hash", "simulated")})
+            # Waited for, not merely sent. Without this the swap is simulated
+            # against a chain that has not seen the approval yet — measured at
+            # 39 milliseconds after the send — and the router reverts with
+            # STF, which reads as a failure rather than as being early.
+            if not dry_run and res.get("hash"):
+                await _mined(chain, res["hash"])
         if version == "v4":
             p2 = w3.eth.contract(address=Web3.to_checksum_address(PERMIT2),
                                  abi=PERMIT2_ABI)
@@ -633,6 +663,8 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
                 return {"ok": False, "stage": "permit2",
                         "why": res.get("why", "Permit2 approval failed")}
             steps.append({"permit2": res.get("hash", "simulated")})
+            if not dry_run and res.get("hash"):
+                await _mined(chain, res["hash"])
 
     # ── the swap itself, through the router that version belongs to ────────
     if version == "v2":

@@ -272,6 +272,15 @@ async def prices(session: aiohttp.ClientSession,
     return found
 
 
+# The coin's dollar price, held briefly. Every trade on a chain asks the same
+# question and gets the same answer — and on Robinhood that answer costs
+# 261-643ms from DexScreener, which was being paid once per buy. Thirty
+# seconds is short enough that a moving market is still reflected in the
+# slippage floor, and long enough that a burst of calls asks once.
+_NATIVE_CACHE: dict[str, tuple[float, float]] = {}
+NATIVE_TTL = 30.0
+
+
 async def native_price(session: aiohttp.ClientSession, chain: str) -> float:
     """One ETH / BNB / SOL in dollars, for the chain asked about.
 
@@ -280,11 +289,17 @@ async def native_price(session: aiohttp.ClientSession, chain: str) -> float:
     has a contract to quote.
     """
     chain = (chain or "").lower()
+    hit = _NATIVE_CACHE.get(chain)
+    if hit and time.time() - hit[1] < NATIVE_TTL:
+        return hit[0]
     addr = _WRAPPED.get(chain) or _wrapped_evm(chain)
     if not addr:
         return 0.0
     got = await prices(session, [(chain, addr)])
-    return float(got.get((chain, _key(chain, addr))) or 0)
+    px = float(got.get((chain, _key(chain, addr))) or 0)
+    if px > 0:
+        _NATIVE_CACHE[chain] = (px, time.time())
+    return px
 
 
 def _wrapped_evm(chain: str) -> str:
@@ -330,6 +345,7 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         spend_native = float(cc.get("buy_amount") or 0)
 
     # Before buying a gas-fee token, ask whether anyone has managed to sell it.
+    price = None
     # Refused rather than warned about: the whole value of the check is that it
     # happens before the money moves, and a warning nobody reads is not a check.
     if conf.get("sell_check") and await is_gas_token(chain, addr):
@@ -346,11 +362,27 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         if not ok:
             raise ValueError(why)
 
+    # One trip to DexScreener, not three. A live buy used to ask it for the
+    # token's price here, the coin's price on the next line, and then which
+    # pool to trade in from inside swapexec — three round trips at 261-643ms
+    # each on Robinhood, which was the whole of the two-second gap between a
+    # call landing and a buy going out.
+    #
+    # The venue answer already carries the token's price, because it read the
+    # pool to find it. So it is resolved once, up here, and handed down to the
+    # trade rather than re-derived there.
+    spot = None
+    if conf.get("live_trading") and chain in ("eth", "rbh", "bnb", "base"):
+        from . import venue as _venue
+        spot = await _venue.best(chain, addr)
+        if spot.get("ok") and spot.get("price_usd"):
+            price = spot["price_usd"]
+
     own = session is None
     session = session or aiohttp.ClientSession()
-    price = None
     try:
-        price = (await prices(session, [(chain, addr)])).get((chain, addr))
+        if price is None:
+            price = (await prices(session, [(chain, addr)])).get((chain, addr))
         if spend_native > 0:
             native_usd = await native_price(session, chain)
     finally:
@@ -386,7 +418,10 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
             amount=int(spend_native * 1e18), buying=True,
             slippage=float(cc.get("buy_slippage") or 0),
             gwei=float(cc.get("buy_gas_gwei") or 0),
-            protected=bool(cc.get("mev_protect")))
+            protected=bool(cc.get("mev_protect")),
+            # Resolved above. Passing it saves the third round trip.
+            v=spot if (spot or {}).get("ok") else None,
+            native_usd=native_usd or None)
         if not res.get("ok"):
             await record_failure(user=user, chain=chain, address=addr,
                                  symbol=symbol, side="buy", res=res,
