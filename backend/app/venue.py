@@ -238,6 +238,69 @@ async def _v3_fee(chain: str, pool: str) -> Optional[int]:
         return None
 
 
+async def _via(chain: str, pairs: list, quotable: set, wnative: str,
+               amount_usd: Optional[float],
+               session: aiohttp.ClientSession | None,
+               own_session: bool) -> Optional[dict]:
+    """A two-hop route through whatever the token *is* paired with.
+
+    Both legs have to stand on their own. The token's own pool has to be able
+    to take the order, and the middle token has to have a real pool against
+    the coin — otherwise this has only moved the thin pool one step further
+    away, where it is harder to notice.
+
+    V2 only. Its router takes a path as a plain list of addresses, so a second
+    hop is one more entry. V3 packs the path with fee tiers between each pair
+    and V4 needs an action per leg; neither is done here, and a token whose
+    only route is through those is refused rather than half-routed.
+    """
+    cands = [p for p in pairs
+             if p["version"] == "v2" and p["dex"] in ("uniswap", "pancakeswap")
+             and p["quote"] and p["quote"] not in quotable]
+    if not cands:
+        return None
+    cands.sort(key=lambda p: -p["liquidity"])
+    leg = cands[0]
+
+    thin = _too_thin(leg["liquidity"], amount_usd)
+    if thin:
+        return None
+
+    # Now the middle token: does it have a pool against the coin, deep enough
+    # to carry the same order?
+    closing = False
+    if session is None:
+        session, closing = aiohttp.ClientSession(), True
+    try:
+        mids = await _dexscreener(session, chain, leg["quote"])
+    finally:
+        if closing:
+            await session.close()
+    mid = [p for p in mids
+           if p["version"] == "v2" and p["quote"] in quotable
+           and p["dex"] in ("uniswap", "pancakeswap")]
+    if not mid:
+        return None
+    mid.sort(key=lambda p: -p["liquidity"])
+    if _too_thin(mid[0]["liquidity"], amount_usd):
+        return None
+
+    return {"ok": True, "chain": chain, "token": leg["base"],
+            "version": "v2", "dex": leg["dex"], "pair": leg["pair"],
+            "liquidity": min(leg["liquidity"], mid[0]["liquidity"]),
+            "price_usd": leg["price_usd"],
+            "quote_symbol": leg["quote_symbol"],
+            "alternatives": len(pairs),
+            # The road the swap has to take. Two hops means two fees and two
+            # lots of slippage, which is why the floor is worked out from the
+            # end of the path rather than from either leg.
+            "path": [wnative, leg["quote"], leg["base"]],
+            "hops": 2,
+            "why": (f"no {leg['quote_symbol']}-free route: going through "
+                    f"{leg['quote_symbol']} "
+                    f"(${leg['liquidity']:,.0f} / ${mid[0]['liquidity']:,.0f})")}
+
+
 def _too_thin(liquidity: float, amount_usd: Optional[float]) -> Optional[str]:
     """Why this pool cannot take this order, or None if it can."""
     if liquidity < MIN_LIQUIDITY:
@@ -298,12 +361,22 @@ async def best(chain: str, token: str,
     quotable = {NATIVE, wn} - {""}
     native_pairs = [p for p in pairs if p["quote"] in quotable]
     if not native_pairs:
+        # No pool against the coin being spent — so go through the token it
+        # *is* paired with. ALIEN's whole $78,164 sits against SPCXB, and
+        # refusing it meant refusing a token that trades perfectly well; the
+        # money simply has to travel BNB -> SPCXB -> ALIEN.
+        #
+        # Only worth doing when the middle leg is itself deep. Otherwise the
+        # thin pool has just moved one step away and is harder to see.
+        hop = await _via(chain, pairs, quotable, wn, amount_usd, session, own)
+        if hop:
+            return hop
         deep = max(pairs, key=lambda p: p["liquidity"])
         return {"ok": False,
                 "why": (f"every pool for this token is quoted in "
-                        f"{deep['quote_symbol'] or 'another token'}, not "
-                        f"{'BNB' if chain == 'bnb' else 'ETH'} — reaching it "
-                        f"would need a second hop this does not route")}
+                        f"{deep['quote_symbol'] or 'another token'}, and that "
+                        f"token has no usable pool against "
+                        f"{'BNB' if chain == 'bnb' else 'ETH'} either")}
 
     native_pairs.sort(key=lambda p: -p["liquidity"])
     pairs = native_pairs

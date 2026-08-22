@@ -232,6 +232,21 @@ def _v4_calldata(w3, key: dict, token: str, amount_in: int, min_out: int,
     return bytes([CMD_V4_SWAP]), [inner]
 
 
+def _v2_path(v: dict, wnative: str, token: str, buying: bool) -> list:
+    """The road a V2 swap takes, in the direction it is going.
+
+    Usually two addresses. When the venue found no pool against the coin it
+    supplies a longer one — ALIEN's whole market is against SPCXB, so buying
+    it with BNB means BNB -> SPCXB -> ALIEN — and selling walks the same road
+    backwards.
+    """
+    from web3 import Web3
+    hops = [Web3.to_checksum_address(a) for a in ((v or {}).get("path") or [])]
+    if len(hops) < 2:
+        hops = [wnative, token]
+    return hops if buying else list(reversed(hops))
+
+
 def _v3_path(token_in: str, fee: int, token_out: str) -> bytes:
     """V3 packs a path tightly: address, three-byte fee, address."""
     return (bytes.fromhex(token_in[2:]) + int(fee).to_bytes(3, "big")
@@ -259,7 +274,10 @@ async def quote(chain: str, token: str, amount_in: int, *, buying: bool,
 
     def _v2() -> Optional[int]:
         c = w3.eth.contract(address=Web3.to_checksum_address(r["v2"]), abi=V2_ABI)
-        path = [wn, tok] if buying else [tok, wn]
+        path = _v2_path(v, wn, tok, buying)
+        # getAmountsOut walks every hop and returns what falls out of the end,
+        # so a two-leg route is quoted with both its fees and both its price
+        # impacts already in the number.
         return c.functions.getAmountsOut(int(amount_in), path).call()[-1]
 
     if v["version"] == "v2" and r["v2"]:
@@ -682,15 +700,16 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
     # ── the swap itself, through the router that version belongs to ────────
     if version == "v2":
         c = w3.eth.contract(address=Web3.to_checksum_address(r["v2"]), abi=V2_ABI)
+        path = _v2_path(v, wn, tok, buying)
         if buying:
             data = c.encode_abi(
                 "swapExactETHForTokensSupportingFeeOnTransferTokens",
-                args=[min_out, [wn, tok], me, deadline])
+                args=[min_out, path, me, deadline])
             value = amount
         else:
             data = c.encode_abi(
                 "swapExactTokensForETHSupportingFeeOnTransferTokens",
-                args=[amount, min_out, [tok, wn], me, deadline])
+                args=[amount, min_out, path, me, deadline])
             value = 0
         to = r["v2"]
 
@@ -727,8 +746,11 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
         value = amount if buying else 0
         to = r["v4"]
 
+    # Each extra hop is another pool to touch. Under-estimating reverts after
+    # paying for the attempt, and unused gas comes back.
+    hops = max(1, len((v or {}).get("path") or []) - 1)
     tx = {"from": me, "to": Web3.to_checksum_address(to), "data": data,
-          "value": int(value), "gas": GAS[version],
+          "value": int(value), "gas": GAS[version] + (hops - 1) * 150_000,
           "gasPrice": gas_price}
 
     # Read the holding before sending, so the fill can be measured against it.
