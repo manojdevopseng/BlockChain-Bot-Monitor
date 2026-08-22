@@ -310,39 +310,6 @@ async def sell(pid: str, payload: dict = Body(default=None),
     return {"ok": True, "position": trading.view(row)}
 
 
-@router.post("/demo")
-async def demo(owner: dict = Depends(security.require_customer)):
-    """Open one position on a token that is definitely priceable.
-
-    For seeing the page work before a real call arrives. Marked `demo` so it
-    can be told apart from — and cleared without touching — anything real.
-    """
-    tokens = [
-        ("rbh", "0xe6e766a51495d8e14f8cd1b3469954b0d5cc238f", "MOONCOIN", "MoonCoin"),
-        ("eth", "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", "Wrapped Ether"),
-    ]
-    made, failed = [], []
-    async with aiohttp.ClientSession() as s:
-        for chain, addr, sym, name in tokens:
-            try:
-                row = await trading.open_position(
-                    user=owner["username"], chain=chain, address=addr,
-                    symbol=sym, name=name, usd=50.0, source="demo", session=s)
-                made.append(trading.view(row))
-            except ValueError as exc:
-                failed.append(f"{sym}: {exc}")
-    if not made:
-        raise HTTPException(502, "; ".join(failed) or "no demo token could be priced")
-    return {"ok": True, "opened": made, "skipped": failed}
-
-
-@router.delete("/demo")
-async def clear_demo(owner: dict = Depends(security.require_customer)):
-    res = await db.get_collection("trading_positions").delete_many(
-        {"user": owner["username"], "source": "demo"})
-    return {"removed": getattr(res, "deleted_count", 0)}
-
-
 @router.post("/stop")
 async def stop(payload: dict = Body(default=None),
                owner: dict = Depends(security.require_customer)):
@@ -426,4 +393,13 @@ async def portfolio(owner: dict = Depends(security.require_customer)):
             "live_trades": len([i for i in items if i.get("live")]),
         },
         "day": await trading.day_pnl(user),
+        # The trades that did not happen. Shown beside the ones that did,
+        # because "nothing appeared" is the case somebody most needs explained.
+        "failures": [
+            {k: v for k, v in f.items() if k != "_id"}
+            for f in sorted(
+                await db.get_collection("trading_failures").find(
+                    {"user": user}).to_list(200),
+                key=lambda r: r.get("at") or 0, reverse=True)
+        ],
     }

@@ -299,8 +299,7 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
                         amount_native: Optional[float] = None,
                         name: str = "", usd: float = 0.0, source: str = "manual",
                         caller: str = "", caller_id: Optional[int] = None,
-                        session: aiohttp.ClientSession | None = None,
-                        demo_price: float | None = None) -> dict:
+                        session: aiohttp.ClientSession | None = None) -> dict:
     """Record a buy at the price it would have paid right now.
 
     Refuses rather than guesses when there is no price: a paper trade opened at
@@ -333,7 +332,7 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
     # Before buying a gas-fee token, ask whether anyone has managed to sell it.
     # Refused rather than warned about: the whole value of the check is that it
     # happens before the money moves, and a warning nobody reads is not a check.
-    if source != "demo" and conf.get("sell_check") and await is_gas_token(chain, addr):
+    if conf.get("sell_check") and await is_gas_token(chain, addr):
         own = session is None
         session = session or aiohttp.ClientSession()
         try:
@@ -347,12 +346,11 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         if not ok:
             raise ValueError(why)
 
-    price = demo_price
     own = session is None
     session = session or aiohttp.ClientSession()
+    price = None
     try:
-        if price is None:
-            price = (await prices(session, [(chain, addr)])).get((chain, addr))
+        price = (await prices(session, [(chain, addr)])).get((chain, addr))
         if spend_native > 0:
             native_usd = await native_price(session, chain)
     finally:
@@ -381,8 +379,7 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
     tx_hash = ""
     token_decimals = 18
     filled_qty = None
-    if (conf.get("live_trading") and source != "demo"
-            and chain in ("eth", "rbh", "bnb", "base")):
+    if conf.get("live_trading") and chain in ("eth", "rbh", "bnb", "base"):
         from . import swapexec
         res = await swapexec.trade(
             user=user, chain=chain, token=addr,
@@ -391,6 +388,9 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
             gwei=float(cc.get("buy_gas_gwei") or 0),
             protected=bool(cc.get("mev_protect")))
         if not res.get("ok"):
+            await record_failure(user=user, chain=chain, address=addr,
+                                 symbol=symbol, side="buy", res=res,
+                                 amount_native=spend_native)
             raise ValueError(f"{res.get('stage', 'trade')}: {res.get('why')}")
         tx_hash = res.get("hash", "")
         from . import swapexec as _sx
@@ -513,6 +513,9 @@ async def close_position(user: str, pid: str, *, part: float = 100.0,
             gwei=float(cc.get("sell_gas_gwei") or 0),
             protected=bool(cc.get("mev_protect")))
         if not res.get("ok"):
+            await record_failure(user=user, chain=chain, address=addr,
+                                 symbol=row.get("symbol", ""), side="sell",
+                                 res=res, position=str(row["_id"]))
             raise ValueError(f"{res.get('stage', 'trade')}: {res.get('why')}")
         sell_tx = res.get("hash", "")
         log.info(f"[TRADING] {user} sold {part:.0f}% of "
@@ -561,6 +564,37 @@ async def refresh(user: str, session: aiohttp.ClientSession | None = None) -> in
                              {"$set": {"last_price": usd, "last_at": now}})
         n += 1
     return n
+
+
+async def record_failure(*, user: str, chain: str, address: str, symbol: str,
+                         side: str, res: dict, amount_native: float = 0.0,
+                         position: str = "") -> None:
+    """Keep the trades that did not happen.
+
+    A failure used to raise and vanish: the caller saw a toast, and an hour
+    later there was no record of a buy having been attempted at all. Which is
+    the worst shape for this — the times a trade did not go through are
+    exactly the times somebody wants to know why, and "it silently did not
+    work" is indistinguishable from "it never fired".
+
+    Stored rather than logged, because a log line is not something the page
+    can show and not something anybody scrolls back through.
+    """
+    try:
+        await db.get_collection("trading_failures").insert_one({
+            "user": user, "chain": chain, "address": address,
+            "symbol": symbol or "", "side": side,
+            "stage": res.get("stage", "trade"),
+            "why": str(res.get("why", ""))[:400],
+            "amount_native": amount_native or None,
+            "position": position or None,
+            "at": time.time(), "dt": _utc(),
+        })
+        log.warning(f"[TRADING] {user} {side} {symbol or address[:10]} on "
+                    f"{chain.upper()} failed at {res.get('stage')}: "
+                    f"{str(res.get('why'))[:120]}")
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[TRADING] could not record the failure: {exc}")
 
 
 def view(row: dict) -> dict:
@@ -815,7 +849,7 @@ async def day_pnl(user: str) -> dict:
     """
     start = _day_start()
     rows = await db.get_collection("trading_positions").find(
-        {"user": user, "source": {"$ne": "demo"},
+        {"user": user,
          "$or": [{"opened_at": {"$gte": start}},
                  {"closed_at": {"$gte": start}}]}).to_list(2000)
     cost = pnl = 0.0
@@ -840,7 +874,7 @@ async def caller_stats(user: str) -> list[dict]:
     yet has not proved anything.
     """
     rows = await db.get_collection("trading_positions").find(
-        {"user": user, "source": {"$ne": "demo"}}).to_list(5000)
+        {"user": user}).to_list(5000)
     # Current names for the ids, so a group renamed on Telegram shows one row
     # under its new name rather than two under both.
     names = {c["id"]: c["name"] for c in await starred_callers()}
@@ -972,7 +1006,7 @@ async def run_rules(user: str, session: aiohttp.ClientSession,
                 "last_price": usd, "last_at": now, "peak_price": peak}})
             marked += 1
 
-            if not conf.get("auto_sell") or r.get("source") == "demo" or entry <= 0:
+            if not conf.get("auto_sell") or entry <= 0:
                 continue
             pct = (usd - entry) / entry * 100
             why = ""
@@ -1091,10 +1125,21 @@ def _dash_url(path: str) -> str:
     return f"{base}{path}"
 
 
+def _tail(row: dict) -> str:
+    """What goes under a trade alert.
+
+    A real trade carries its transaction hash, because the first question
+    anybody asks about money that moved is where to see it. A paper one says
+    so outright — the two messages must never be mistakable.
+    """
+    if row.get("live"):
+        h = row.get("sell_tx") or row.get("tx") or ""
+        return f"\n\n<code>{h}</code>" if h else "\n\n<i>On chain.</i>"
+    return "\n\n<i>Paper trade — nothing was sent to a chain.</i>"
+
+
 def notify_open(row: dict) -> None:
-    """A position was opened. Demo trades stay off Telegram."""
-    if row.get("source") == "demo":
-        return
+    """A position was opened."""
     sym = row.get("symbol") or (row.get("address") or "")[:10]
     line = (f"{_TONE['buy']} <b>BUY</b> {sym} · {str(row.get('chain','')).upper()}\n"
             f"${_fmt(float(row.get('usd') or 0))} at {float(row.get('entry') or 0):.8g}")
@@ -1104,13 +1149,10 @@ def notify_open(row: dict) -> None:
     elif row.get("source") == "gas":
         line += "\nSource: ETH Gas Fees"
     _notify_bg(row.get("user") or "",
-               line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>",
-               _buttons(row))
+               line + _tail(row), _buttons(row))
 
 
 def notify_close(row: dict, *, part: float, reason: str) -> None:
-    if row.get("source") == "demo":
-        return
     sym = row.get("symbol") or (row.get("address") or "")[:10]
     v = view(row)
     pnl = v["pnl_usd"] if v["status"] == "closed" else float(v["realised_usd"] or 0)
@@ -1121,8 +1163,7 @@ def notify_close(row: dict, *, part: float, reason: str) -> None:
     line = (f"{head}\n{sign}${_fmt(abs(pnl))} "
             f"({sign}{abs(v['pnl_pct']):.1f}%)\nClosed by: {reason}")
     _notify_bg(row.get("user") or "",
-               line + "\n\n<i>Paper trade — nothing was sent to a chain.</i>",
-               _buttons(row))
+               line + _tail(row), _buttons(row))
 
 
 # ── gas-fee tokens, queued rather than bought on sight ──────────────────────

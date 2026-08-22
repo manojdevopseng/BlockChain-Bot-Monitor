@@ -53,7 +53,7 @@ const EXPLORER: Record<string, string> = {
 };
 
 const SOURCE_LABEL: Record<string, string> = {
-  auto: "Auto", manual: "Manual", demo: "Demo",
+  auto: "Auto", manual: "Manual",
 };
 
 function gmgn(chain: string, address: string) {
@@ -250,11 +250,6 @@ export default function TradingPage() {
             {busy === "refresh" ? <Loader2 size={13} className="animate-spin" />
                                 : <RefreshCw size={13} />} Prices
           </Button>
-          <Button size="sm" variant="outline"
-                  onClick={() => act("demo", () => apiSend("/api/trading/demo", "POST"))}>
-            {busy === "demo" ? <Loader2 size={13} className="animate-spin" />
-                             : <Sparkles size={13} />} Demo token
-          </Button>
           <Button size="sm" variant="primary" onClick={() => setOpen(true)}>
             <Settings2 size={13} /> Quick Buy / Sell Settings
           </Button>
@@ -280,7 +275,7 @@ export default function TradingPage() {
               {items.length === 0 ? (
                 <tr><td colSpan={8} className="px-3 py-10 text-center text-text-dim">
                   Nothing here yet. Turn auto-buy on for your starred callers, buy
-                  from a detection row, or open a demo token to see the page work.
+                  from a detection row.
                 </td></tr>
               ) : items.map((p) => (
                 <tr key={p.id} className="border-b border-border-soft align-top hover:bg-bg-hover/40">
@@ -334,9 +329,17 @@ export default function TradingPage() {
                           {p.live && p.tx && (
                             <a href={(EXPLORER[p.chain] || "") + p.tx}
                                target="_blank" rel="noopener noreferrer"
-                               title={`On chain — ${p.tx}`}
-                               className="text-accent-green hover:underline">
-                              <ExternalLink size={10} />
+                               title={`Buy — ${p.tx}`}
+                               className="text-[10px] text-accent-green hover:underline">
+                              buy
+                            </a>
+                          )}
+                          {p.live && p.sell_tx && (
+                            <a href={(EXPLORER[p.chain] || "") + p.sell_tx}
+                               target="_blank" rel="noopener noreferrer"
+                               title={`Sell — ${p.sell_tx}`}
+                               className="text-[10px] text-accent-red hover:underline">
+                              sell
                             </a>
                           )}
                         </span>
@@ -388,16 +391,7 @@ export default function TradingPage() {
           </table>
         </TableScroll>
 
-        {items.some((p) => p.source === "demo") && (
-          <div className="border-t border-border px-3 py-2">
-            <button
-              onClick={() => act("cleardemo", () => apiSend("/api/trading/demo", "DELETE"))}
-              className="flex items-center gap-1.5 text-[11px] text-text-dim hover:text-accent-red">
-              <Trash2 size={11} /> Remove the demo positions
-            </button>
-          </div>
-        )}
-      </div>
+              </div>
 
       <CallerPnl />
 

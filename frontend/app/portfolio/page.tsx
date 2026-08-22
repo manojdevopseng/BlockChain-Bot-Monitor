@@ -47,6 +47,7 @@ const KIND_SHORT: Record<string, string> = {
 const TABS = [
   { id: "holdings", label: "Holdings" },
   { id: "history", label: "History" },
+  { id: "failed", label: "Failed" },
 ] as const;
 
 function amount(n: number): string {
@@ -91,13 +92,15 @@ function Stat({ label, children, hint }: {
 export default function PortfolioPage() {
   const { data, isLoading } = useApi<any>("/api/trading/portfolio",
     { refreshInterval: 0 });
-  const [tab, setTab] = useState<"holdings" | "history">("holdings");
+  const [tab, setTab] = useState<"holdings" | "history" | "failed">("holdings");
   const [busy, setBusy] = useState(false);
 
   const s = data?.summary ?? {};
   const wallets: any[] = data?.wallets ?? [];
   const chains: any[] = data?.balances?.chains ?? [];
-  const rows: any[] = (tab === "holdings" ? data?.holdings : data?.history) ?? [];
+  const rows: any[] = (tab === "holdings" ? data?.holdings
+                       : tab === "history" ? data?.history : []) ?? [];
+  const failures: any[] = data?.failures ?? [];
 
   async function reload() {
     setBusy(true);
@@ -222,10 +225,68 @@ export default function PortfolioPage() {
           <p className="text-[11px] text-text-dim">
             {tab === "holdings"
               ? "Open positions this account opened. What the wallet holds is above."
-              : "Every trade made through SightLine. Swaps made elsewhere are not here — this cannot see them."}
+              : tab === "history"
+              ? "Every trade made through SightLine. Swaps made elsewhere are not here — this cannot see them."
+              : "Trades that were attempted and did not go through, and what stopped each one."}
           </p>
         </div>
 
+        {tab === "failed" ? (
+          <TableScroll>
+            <table className="w-full text-left text-xs">
+              <thead className={STICKY_HEAD}>
+                <tr className="text-text-dim">
+                  <th className="px-3 py-2 font-medium">Token</th>
+                  <th className="px-3 py-2 font-medium">Chain</th>
+                  <th className="px-3 py-2 font-medium">Side</th>
+                  <th className="px-3 py-2 font-medium">Stopped at</th>
+                  <th className="px-3 py-2 font-medium">Reason</th>
+                  <th className="px-3 py-2 font-medium">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-soft">
+                {failures.map((f, i) => (
+                  <tr key={i} className="hover:bg-bg-soft/40">
+                    <td className="px-3 py-2.5 font-medium text-text">
+                      {f.symbol || f.address?.slice(0, 10)}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <Badge variant={CHAIN_TONE[f.chain] ?? "gray"}>
+                        {CHAIN_LABEL[f.chain] ?? f.chain}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={f.side === "buy"
+                        ? "text-accent-green" : "text-accent-red"}>{f.side}</span>
+                      {f.amount_native ? (
+                        <span className="block text-[10px] text-text-dim">
+                          {f.amount_native}
+                        </span>
+                      ) : null}
+                    </td>
+                    {/* Which step refused, not just that something did. The
+                        stage is the difference between "the pool was too thin"
+                        and "the wallet had no gas". */}
+                    <td className="px-3 py-2.5">
+                      <Badge variant="amber">{f.stage}</Badge>
+                    </td>
+                    <td className="px-3 py-2.5 text-text-muted">{f.why}</td>
+                    <td className="px-3 py-2.5 text-[11px] text-text-dim">
+                      {f.at ? new Date(f.at * 1000).toLocaleString("en-GB") : "—"}
+                    </td>
+                  </tr>
+                ))}
+                {failures.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-8 text-center text-xs text-text-dim">
+                      Nothing has failed. That is the good outcome.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </TableScroll>
+        ) : (
         <TableScroll>
           <table className="w-full text-left text-xs">
             <thead className={STICKY_HEAD}>
@@ -261,13 +322,28 @@ export default function PortfolioPage() {
                         )}
                         {/* On chain, and openable. A paper row has nothing to
                             link to, and that absence is the distinction. */}
-                        {p.live && p.tx ? (
-                          <a href={(EXPLORER[p.chain] || "") + p.tx}
-                             target="_blank" rel="noopener noreferrer"
-                             title={p.tx}
-                             className="text-accent-green hover:underline">
-                            <ExternalLink size={10} />
-                          </a>
+                        {p.live ? (
+                          <>
+                            {/* Both legs, labelled. One link was ambiguous the
+                                moment a position had been sold: it looked like
+                                the trade, and it was only half of it. */}
+                            {p.tx && (
+                              <a href={(EXPLORER[p.chain] || "") + p.tx}
+                                 target="_blank" rel="noopener noreferrer"
+                                 title={`Buy — ${p.tx}`}
+                                 className="text-[10px] text-accent-green hover:underline">
+                                buy
+                              </a>
+                            )}
+                            {p.sell_tx && (
+                              <a href={(EXPLORER[p.chain] || "") + p.sell_tx}
+                                 target="_blank" rel="noopener noreferrer"
+                                 title={`Sell — ${p.sell_tx}`}
+                                 className="text-[10px] text-accent-red hover:underline">
+                                sell
+                              </a>
+                            )}
+                          </>
                         ) : (
                           <Badge variant="gray">paper</Badge>
                         )}
@@ -325,6 +401,7 @@ export default function PortfolioPage() {
             </tbody>
           </table>
         </TableScroll>
+        )}
       </div>
     </div>
   );
