@@ -43,6 +43,15 @@ const CHAIN_TONE: Record<string, Variant> = {
   eth: "blue", rbh: "green", bnb: "amber", sol: "purple", base: "cyan",
   tron: "red",
 };
+// Where a transaction can be looked at, per chain. A hash nobody can open is
+// a hash nobody can check.
+const EXPLORER: Record<string, string> = {
+  eth: "https://etherscan.io/tx/",
+  rbh: "https://robinhoodchain.blockscout.com/tx/",
+  bnb: "https://bscscan.com/tx/",
+  base: "https://basescan.org/tx/",
+};
+
 const SOURCE_LABEL: Record<string, string> = {
   auto: "Auto", manual: "Manual", demo: "Demo",
 };
@@ -317,6 +326,18 @@ export default function TradingPage() {
                           {p.mev_protect && (
                             <Shield size={10} className="text-accent-green"
                                     aria-label="Routed away from the public mempool" />
+                          )}
+                          {/* A real position links to the transaction that
+                              made it. A paper one has nothing to link to, and
+                              the absence is the point — the two rows must not
+                              be mistakable for each other. */}
+                          {p.live && p.tx && (
+                            <a href={(EXPLORER[p.chain] || "") + p.tx}
+                               target="_blank" rel="noopener noreferrer"
+                               title={`On chain — ${p.tx}`}
+                               className="text-accent-green hover:underline">
+                              <ExternalLink size={10} />
+                            </a>
                           )}
                         </span>
                         <span className="block text-[10px] text-text-dim">

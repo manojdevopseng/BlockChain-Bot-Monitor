@@ -561,6 +561,12 @@ def view(row: dict) -> dict:
         "spent_native": row.get("spent_native"),
         "native": row.get("native") or "",
         "mev_protect": bool(row.get("mev_protect")),
+        # The difference between a position somebody owns and one the engine
+        # is keeping score of. Without this on the row the two look identical,
+        # which is the single most misleading thing this table could do.
+        "live": bool(row.get("live")),
+        "tx": row.get("tx") or "",
+        "sell_tx": row.get("sell_tx") or "",
         "entry": row.get("entry"), "last": last, "exit": row.get("exit"),
         "pnl_usd": pnl, "pnl_pct": pct,
         "realised_usd": row.get("realised_usd") or 0,
