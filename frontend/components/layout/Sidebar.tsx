@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X, CandlestickChart } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, Bell, Brain, Coins, Crosshair, LayoutDashboard, LifeBuoy, Link2, Lock, PanelLeftClose, PanelLeftOpen, PieChart, Radio, Receipt, ScrollText, Send, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, User, Users, X, CandlestickChart } from "lucide-react";
 import { useRole } from "@/lib/hooks";
 import { useAccount } from "@/lib/account";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ const NAV = [
   { href: "/detections", label: "Detections", icon: Crosshair },
   { href: "/rsi", label: "RSI", icon: Activity },
   { href: "/trading", label: "Trading", icon: CandlestickChart },
+  { href: "/portfolio", label: "Portfolio", icon: PieChart },
   { paidOnly: true, href: "/ai", label: "AI Narrative", icon: Brain },
   { hideFromUser: true, href: "/admin", label: "Admin", icon: ShieldCheck },
   { hideFromUser: true, href: "/forwarder", label: "Forwarder", icon: Send },

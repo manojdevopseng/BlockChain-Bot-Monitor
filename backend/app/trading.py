@@ -1032,8 +1032,13 @@ async def _notify(user: str, text: str, keyboard: list | None = None) -> None:
         conf = await settings_for(user)
         if not conf.get("tg_alerts", True):
             return
+        # The operator's own trades fall back to the alerts group when no
+        # dedicated one is set. Without this the fallback was blank, so an
+        # admin with no personal chat got silence — and silence from a system
+        # that just spent money is the wrong default by a long way.
         chat, _why = await telegram_link.alert_target(
-            user, getattr(scfg, "TRADING_ALERT_CHAT_ID", "") or None)
+            user, (getattr(scfg, "TRADING_ALERT_CHAT_ID", "")
+                   or getattr(scfg, "ALERT_CHAT_ID", "") or None))
         if not chat:
             return
         await alert_dispatch.send_personal(user, chat, text, keyboard)

@@ -379,3 +379,51 @@ async def rules(owner: dict = Depends(security.require_customer)):
     """
     async with aiohttp.ClientSession() as s:
         return await trading.run_rules(owner["username"], s)
+
+
+@router.get("/portfolio")
+async def portfolio(owner: dict = Depends(security.require_customer)):
+    """Everything the account owns and everything it has done.
+
+    Two different kinds of truth on one screen, which is exactly why they are
+    labelled rather than blended. Holdings are read from the chain and are
+    what the wallet actually has, whoever put it there. History is this
+    account's own trades and nothing else — it cannot know about a swap made
+    somewhere else, and pretending otherwise would be inventing a record.
+    """
+    user = owner["username"]
+    conf = await trading.settings_for(user)
+    rows = await db.get_collection("trading_positions").find(
+        {"user": user}).to_list(1000)
+    rows.sort(key=lambda r: r.get("opened_at") or 0, reverse=True)
+    items = [trading.view(r) for r in rows]
+
+    open_rows = [i for i in items if i["status"] == "open"]
+    closed = [i for i in items if i["status"] == "closed"]
+    wins = [c for c in closed if c["pnl_usd"] > 0]
+
+    # Realised is banked money; unrealised is what is still riding. Kept apart
+    # because one of them can still go to zero.
+    realised = sum(c["pnl_usd"] for c in closed) + sum(
+        i.get("realised_usd") or 0 for i in open_rows)
+    unrealised = sum(i["pnl_usd"] for i in open_rows)
+
+    return {
+        "wallets": await keys.listing(user),
+        "balances": await wallet.read(await keys.addresses(user)),
+        "holdings": open_rows,
+        "history": closed,
+        "live_trading": bool(conf.get("live_trading")),
+        "summary": {
+            "open": len(open_rows),
+            "closed": len(closed),
+            "wins": len(wins),
+            "win_rate": (len(wins) / len(closed) * 100) if closed else 0.0,
+            "realised_usd": realised,
+            "unrealised_usd": unrealised,
+            "total_pnl_usd": realised + unrealised,
+            "volume_usd": sum(i["usd"] for i in items),
+            "live_trades": len([i for i in items if i.get("live")]),
+        },
+        "day": await trading.day_pnl(user),
+    }

@@ -128,6 +128,21 @@ async def audit() -> list[dict]:
             say("error", "Payments", "PAY_* addresses",
                 "Orders can be created and nothing can ever be seen arriving.")
 
+    # Spending money silently. Live trading is the one feature where "it
+    # worked and said nothing" is indistinguishable from "it never ran", and
+    # the person finds out by checking their wallet.
+    try:
+        from . import db as _db
+        armed = await _db.get_collection("trading_settings").count_documents(
+            {"live_trading": True})
+    except Exception:  # noqa: BLE001
+        armed = 0
+    if armed and _blank(settings.trading_alert_chat_id) and _blank(
+            getattr(settings, "alert_chat_id", "")):
+        say("warn", "Live trading alerts", "TRADING_ALERT_CHAT_ID",
+            f"{armed} account(s) can spend real money and no Telegram "
+            f"destination is set, so every buy and sell happens silently.")
+
     # A relay that has stopped answering is the quietest failure here: every
     # switch stays green, the panel keeps saying "protected", and the orders
     # go out the ordinary way. Nothing raises, because nothing is broken —
