@@ -364,6 +364,12 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
             fee = int(key["fee"])
             extra = {"tick_spacing": int(key["tick_spacing"]),
                      "hooks": key["hooks"]}
+            # Take the input side from the pool rather than assuming it. A V4
+            # pool against the coin usually holds it as the coin itself, but
+            # some are quoted in the wrapped form, and building the key from
+            # the wrong one describes a pool that does not exist.
+            c0, c1 = key["currency0"].lower(), key["currency1"].lower()
+            a = c0 if c1 == (b or "").lower() else c1
         legs.append({"version": pool["version"], "pair": pool["pair"],
                      "dex": pool["dex"], "fee": fee,
                      "token_in": a, "token_out": b,
@@ -371,10 +377,6 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
 
     both_v2 = all(x["version"] == "v2" for x in legs)
     all_v4 = all(x["version"] == "v4" for x in legs)
-    if all_v4:
-        # V4 holds the coin itself rather than a wrapped stand-in, so the
-        # money enters the route as the native currency and not as WETH.
-        legs[0]["token_in"] = NATIVE
     return {"ok": True, "chain": chain, "token": token,
             # The route's own shape decides how it is quoted: two V2 legs can
             # be asked exactly, anything else is priced from the pool.

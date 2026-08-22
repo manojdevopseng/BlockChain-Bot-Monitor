@@ -206,6 +206,12 @@ ACT_SWAP_EXACT_IN_SINGLE = 0x06
 ACT_SWAP_EXACT_IN = 0x07
 ACT_SETTLE_ALL = 0x0c
 ACT_TAKE_ALL = 0x0f
+# The forms that name a payer and a recipient, rather than assuming both are
+# the caller. Needed when the router itself is holding the money.
+ACT_SETTLE = 0x0b
+ACT_TAKE = 0x0e
+
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 # The rest of the Universal Router's vocabulary, needed for a route whose two
 # legs are not the same version — a V2 pool and a V3 pool cannot be strung
@@ -226,6 +232,64 @@ MSG_SENDER = "0x0000000000000000000000000000000000000001"
 # spend exactly what the first leg produced, without anybody having to predict
 # the number in advance.
 CONTRACT_BALANCE = 1 << 255
+
+
+def _v4_envelope(action: int, swap_params: bytes, currency_in: str,
+                 currency_out: str, amount_in: int, min_out: int,
+                 buying: bool) -> tuple[bytes, list[bytes]]:
+    """Wrap one V4 swap in whatever has to happen around it.
+
+    V4 holds the coin as a currency in its own right, so most pools take it
+    directly and there is nothing to arrange. Some are quoted in the wrapped
+    coin instead, and those need the coin turned into WETH before the swap and
+    turned back after it — otherwise a buy sends the coin to a pool that wants
+    WETH, and the router goes looking for a Permit2 allowance nobody granted.
+    That is exactly what a buy into such a pool used to do.
+
+    The wrapping is paid for out of the router's own hands, which is what
+    SETTLE with `payerIsUser` false means, and the proceeds of a sell are taken
+    into the router so they can be unwrapped before they leave.
+    """
+    from eth_abi import encode
+    from web3 import Web3
+    ck = Web3.to_checksum_address
+    zero = ck(ZERO_ADDRESS)
+
+    commands = bytearray()
+    inputs: list[bytes] = []
+    actions = [action]
+    params = [swap_params]
+
+    if buying and currency_in != zero:
+        commands.append(CMD_WRAP_ETH)
+        inputs.append(encode(["address", "uint256"],
+                             [ck(ADDRESS_THIS), int(amount_in)]))
+        actions.append(ACT_SETTLE)
+        params.append(encode(["address", "uint256", "bool"],
+                             [currency_in, int(amount_in), False]))
+    else:
+        actions.append(ACT_SETTLE_ALL)
+        params.append(encode(["address", "uint256"],
+                             [currency_in, int(amount_in)]))
+
+    unwrap = (not buying) and currency_out != zero
+    if unwrap:
+        actions.append(ACT_TAKE)
+        params.append(encode(["address", "address", "uint256"],
+                             [currency_out, ck(ADDRESS_THIS), int(min_out)]))
+    else:
+        actions.append(ACT_TAKE_ALL)
+        params.append(encode(["address", "uint256"],
+                             [currency_out, int(min_out)]))
+
+    commands.append(CMD_V4_SWAP)
+    inputs.append(encode(["bytes", "bytes[]"], [bytes(actions), params]))
+
+    if unwrap:
+        commands.append(CMD_UNWRAP_WETH)
+        inputs.append(encode(["address", "uint256"],
+                             [ck(MSG_SENDER), int(min_out)]))
+    return bytes(commands), inputs
 
 
 def _v4_calldata(w3, key: dict, token: str, amount_in: int, min_out: int,
@@ -255,12 +319,9 @@ def _v4_calldata(w3, key: dict, token: str, amount_in: int, min_out: int,
 
     currency_in = c0 if zero_for_one else c1
     currency_out = c1 if zero_for_one else c0
-    settle = encode(["address", "uint256"], [currency_in, int(amount_in)])
-    take = encode(["address", "uint256"], [currency_out, int(min_out)])
 
-    actions = bytes([ACT_SWAP_EXACT_IN_SINGLE, ACT_SETTLE_ALL, ACT_TAKE_ALL])
-    inner = encode(["bytes", "bytes[]"], [actions, [swap_params, settle, take]])
-    return bytes([CMD_V4_SWAP]), [inner]
+    return _v4_envelope(ACT_SWAP_EXACT_IN_SINGLE, swap_params,
+                        currency_in, currency_out, amount_in, min_out, buying)
 
 
 def _v2_path(v: dict, wnative: str, token: str, buying: bool) -> list:
@@ -327,12 +388,8 @@ def _v4_route_calldata(legs: list, amount_in: int, min_out: int,
     swap = encode(
         ["(address,(address,uint24,int24,address,bytes)[],uint128,uint128)"],
         [(currency_in, path, int(amount_in), int(min_out))])
-    settle = encode(["address", "uint256"], [currency_in, int(amount_in)])
-    take = encode(["address", "uint256"], [currency_out, int(min_out)])
-
-    actions = bytes([ACT_SWAP_EXACT_IN, ACT_SETTLE_ALL, ACT_TAKE_ALL])
-    inner = encode(["bytes", "bytes[]"], [actions, [swap, settle, take]])
-    return bytes([CMD_V4_SWAP]), [inner]
+    return _v4_envelope(ACT_SWAP_EXACT_IN, swap, currency_in, currency_out,
+                        amount_in, min_out, buying)
 
 
 def _route_calldata(legs: list, amount_in: int, min_out: int,
