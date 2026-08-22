@@ -116,6 +116,23 @@ async def _find_slot(chain: str, token: str, holder: str) -> Optional[tuple[int,
     return None
 
 
+def destination(chain: str, v: dict) -> str:
+    """Where a sell would actually send the token.
+
+    V2 and V3 pools are contracts and receive the token directly. A V4 pool is
+    not a contract at all — it is an entry inside one PoolManager, which holds
+    every currency for every pool — so that is where the token goes. Sending
+    the test transfer to a 32-byte pool id instead produces a nonsense address
+    and a revert that says nothing about the token, which is exactly what the
+    first version of this did.
+    """
+    from .scanners import scfg
+    if (v or {}).get("version") == "v4":
+        return str(getattr(scfg, f"{chain.upper()}_V4_POOLMANAGER", "") or "")
+    pool = str((v or {}).get("pair") or "")
+    return pool if pool.startswith("0x") and len(pool) == 42 else ""
+
+
 async def can_sell(chain: str, token: str, holder: str,
                    pool: str) -> tuple[bool, str]:
     """(can this wallet move the token to the pool, why not).
@@ -130,6 +147,12 @@ async def can_sell(chain: str, token: str, holder: str,
     hit = _VERDICTS.get(key)
     if hit and time.time() - hit[2] < TTL:
         return hit[0], hit[1]
+
+    if not (pool or "").startswith("0x") or len(pool) != 42:
+        # Without somewhere real to send it, the test proves nothing. Said as
+        # "no verdict" rather than folded into a pass, so the caller can tell
+        # the two apart.
+        return True, "no pool address to test a transfer against — no verdict"
 
     try:
         found = await _find_slot(chain, token, holder)
