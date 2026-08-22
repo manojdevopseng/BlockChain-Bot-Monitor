@@ -837,6 +837,55 @@ async def is_gas_token(chain: str, address: str) -> bool:
     return bool(row)
 
 
+async def _pool_is_empty(chain: str, pool: str, labels: list) -> bool:
+    """Does this pool still hold anything? Only a confident yes counts.
+
+    Returns True only when the chain plainly says zero. Anything unreadable —
+    a missing StateView, an RPC that will not answer, a version this does not
+    know how to ask — returns False, because refusing every token because one
+    contract call failed would be a worse check than the one being fixed.
+    """
+    version = next((str(x).lower() for x in (labels or [])
+                    if str(x).lower() in ("v2", "v3", "v4")), "v2")
+    try:
+        from web3 import Web3
+        from .scanners import scfg
+        url = str(getattr(scfg, f"{chain.upper()}_RPC_HTTP", "") or "")
+        if not url or not pool:
+            return False
+        w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 12}))
+
+        if version == "v4":
+            sv = str(getattr(scfg, f"{chain.upper()}_V4_STATEVIEW", "") or "")
+            if not sv:
+                return False
+            abi = [{"name": "getLiquidity",
+                    "inputs": [{"name": "poolId", "type": "bytes32"}],
+                    "outputs": [{"type": "uint128"}],
+                    "stateMutability": "view", "type": "function"}]
+            c = w3.eth.contract(address=Web3.to_checksum_address(sv), abi=abi)
+            fn = c.functions.getLiquidity(bytes.fromhex(pool[2:]))
+        elif version == "v3":
+            abi = [{"name": "liquidity", "inputs": [],
+                    "outputs": [{"type": "uint128"}],
+                    "stateMutability": "view", "type": "function"}]
+            c = w3.eth.contract(address=Web3.to_checksum_address(pool), abi=abi)
+            fn = c.functions.liquidity()
+        else:
+            abi = [{"name": "getReserves", "inputs": [],
+                    "outputs": [{"type": "uint112"}, {"type": "uint112"},
+                                {"type": "uint32"}],
+                    "stateMutability": "view", "type": "function"}]
+            c = w3.eth.contract(address=Web3.to_checksum_address(pool), abi=abi)
+            got = await asyncio.to_thread(c.functions.getReserves().call)
+            return not (int(got[0]) and int(got[1]))
+
+        return int(await asyncio.to_thread(fn.call)) == 0
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[SELLABLE] could not read {pool[:12]} liquidity: {exc}")
+        return False
+
+
 async def sellable(session: aiohttp.ClientSession, chain: str, address: str, *,
                    min_sells: int = 3) -> tuple[bool, str]:
     """Has anybody actually got out of this token?
@@ -879,6 +928,21 @@ async def sellable(session: aiohttp.ClientSession, chain: str, address: str, *,
             best, best_liq = p, liq
     if not best:
         return False, "no pool for it yet — nothing to sell into"
+
+    # The chain, before the counts. DexScreener reports whatever it last saw,
+    # and it only refreshes when somebody trades — so a pool the developer
+    # emptied an hour ago still shows the money that used to be in it.
+    #
+    # D0MINO passed this check on 29 buys and 5 sells against $7,951 of
+    # liquidity that no longer existed: the pool's own on-chain figure was
+    # zero. Counting how many people got out of a pool that is empty answers
+    # a question nobody asked. So the pool is asked whether it still holds
+    # anything at all, and no amount of history overrides a no.
+    empty = await _pool_is_empty(chain, best.get("pairAddress") or "",
+                                 (best.get("labels") or []))
+    if empty:
+        return False, ("the pool is empty on chain — whatever the history "
+                       "shows, there is nothing to sell into now")
 
     txns = best.get("txns") or {}
     buys = sells = 0
