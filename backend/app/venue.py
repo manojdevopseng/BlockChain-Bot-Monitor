@@ -477,11 +477,21 @@ async def best(chain: str, token: str,
         if hop:
             return hop
         deep = max(pairs, key=lambda p: p["liquidity"])
+        coin = "BNB" if chain == "bnb" else "ETH"
+        if not any(p["dex"] in DEXES for p in pairs):
+            # Not the middle token's fault. Some launchpads run their own AMM
+            # and deploy pairs from their own factory; a router works out where
+            # a pair lives by hashing its factory's address, so a pair that
+            # factory never made is one it cannot address at all. Blaming the
+            # middle token here sent somebody looking at a pool that was fine.
+            return {"ok": False,
+                    "why": (f"this token's only market is on {deep['dex']}, "
+                            f"which deploys its own pairs — no router here can "
+                            f"reach them, whatever they are quoted in")}
         return {"ok": False,
                 "why": (f"every pool for this token is quoted in "
                         f"{deep['quote_symbol'] or 'another token'}, and that "
-                        f"token has no usable pool against "
-                        f"{'BNB' if chain == 'bnb' else 'ETH'} either")}
+                        f"token has no usable pool against {coin} either")}
 
     native_pairs.sort(key=lambda p: -p["liquidity"])
     pairs = native_pairs

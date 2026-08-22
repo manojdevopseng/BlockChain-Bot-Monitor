@@ -576,6 +576,50 @@ async def _allowance(chain: str, token: str, owner: str, spender: str) -> int:
     return int(await asyncio.to_thread(fn.call))
 
 
+async def _approval_visible(chain: str, token: str, owner: str, spender: str,
+                            need: int, *, permit2: bool = False,
+                            timeout: float = 15.0) -> bool:
+    """Wait until the node answering our calls can actually see the allowance.
+
+    A mined receipt is not the same thing. Public endpoints are load balancers
+    over many nodes, and the one that hands back a receipt is not always the
+    one that answers the next `eth_call` — so the approval is on chain, the
+    simulation asks a node half a block behind, and the swap is refused for a
+    permission that was granted seconds earlier. That is exactly what happened
+    to a SaturnCoin sell: approval mined, sell refused 538ms later, the same
+    sell fine on the next attempt.
+
+    So this asks the question the swap actually depends on, against the same
+    endpoint the swap will use, until the answer is yes.
+    """
+    deadline = time.time() + timeout
+    delay = 0.25
+    while True:
+        try:
+            if permit2:
+                from web3 import Web3
+                w3 = _w3(chain)
+                c = w3.eth.contract(address=Web3.to_checksum_address(PERMIT2),
+                                    abi=PERMIT2_ABI)
+                fn = c.functions.allowance(Web3.to_checksum_address(owner),
+                                           Web3.to_checksum_address(token),
+                                           Web3.to_checksum_address(spender))
+                got, expiry, _ = await asyncio.to_thread(fn.call)
+                ok = int(got) >= need and int(expiry) > time.time()
+            else:
+                ok = await _allowance(chain, token, owner, spender) >= need
+        except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            return True
+        if time.time() >= deadline:
+            log.warning(f"[SWAP] {token[:10]} allowance still not visible "
+                        f"after {timeout:.0f}s — trying the swap anyway")
+            return False
+        await asyncio.sleep(delay)
+        delay = min(delay * 1.5, 2.0)
+
+
 async def _needs_approval(chain: str, token: str, owner: str, spender: str,
                           amount: int) -> bool:
     try:
@@ -897,6 +941,9 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
             # STF, which reads as a failure rather than as being early.
             if not dry_run and res.get("hash"):
                 await _mined(chain, res["hash"])
+                # And then the allowance itself, because a receipt only proves
+                # some node saw it. See _approval_visible.
+                await _approval_visible(chain, token, owner, spender, amount)
         if version == "v4" or routed:
             p2 = w3.eth.contract(address=Web3.to_checksum_address(PERMIT2),
                                  abi=PERMIT2_ABI)
@@ -916,6 +963,8 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
             steps.append({"permit2": res.get("hash", "simulated")})
             if not dry_run and res.get("hash"):
                 await _mined(chain, res["hash"])
+                await _approval_visible(chain, token, owner, r["v4"], amount,
+                                        permit2=True)
 
     # ── the swap itself, through the router that version belongs to ────────
     if routed:
