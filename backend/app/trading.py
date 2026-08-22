@@ -372,7 +372,8 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         try:
             ok, why = await sellable(
                 session, chain, addr,
-                min_sells=int(conf.get("sell_check_min_sells") or 3))
+                min_sells=int(conf.get("sell_check_min_sells") or 3),
+                user=user)
         finally:
             if own:
                 await session.close()
@@ -887,7 +888,7 @@ async def _pool_is_empty(chain: str, pool: str, labels: list) -> bool:
 
 
 async def sellable(session: aiohttp.ClientSession, chain: str, address: str, *,
-                   min_sells: int = 3) -> tuple[bool, str]:
+                   min_sells: int = 3, user: str = "") -> tuple[bool, str]:
     """Has anybody actually got out of this token?
 
     This is not a swap simulation and does not pretend to be one. It reads the
@@ -943,6 +944,28 @@ async def sellable(session: aiohttp.ClientSession, chain: str, address: str, *,
     if empty:
         return False, ("the pool is empty on chain — whatever the history "
                        "shows, there is nothing to sell into now")
+
+    # And then the question the counts cannot answer. A whitelist honeypot has
+    # a healthy pool and real sells — the developer's own — and refuses
+    # everybody else, so from outside it looks like a token doing well. The
+    # only way to tell is to try the transfer and see, which costs one
+    # eth_call against a state override and sends nothing.
+    try:
+        from . import honeypot, keys
+        owner = await keys.address_for(user, "evm") if user else ""
+        if owner:
+            version = next((str(x).lower() for x in (best.get("labels") or [])
+                            if str(x).lower() in ("v2", "v3", "v4")), "v2")
+            dest = honeypot.destination(
+                chain, {"version": version,
+                        "pair": best.get("pairAddress") or ""})
+            ok, why = await honeypot.can_sell(chain, address, owner, dest)
+            if not ok:
+                return False, why
+    except Exception as exc:  # noqa: BLE001
+        # A check that fails to run is not a verdict. Everything above still
+        # stands on its own.
+        log.debug(f"[SELLABLE] honeypot probe skipped: {exc}")
 
     txns = best.get("txns") or {}
     buys = sells = 0
