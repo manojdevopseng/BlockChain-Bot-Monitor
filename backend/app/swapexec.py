@@ -415,7 +415,7 @@ async def _gas_price(chain: str, gwei: float) -> int:
 
 
 async def _approve(chain: str, user: str, token: str, spender: str, owner: str,
-                   *, gwei: float, dry_run: bool) -> dict:
+                   *, gas_price: int, dry_run: bool) -> dict:
     """Let a router move this token.
 
     A real transaction with real gas, once per token per spender. Whoever
@@ -431,7 +431,7 @@ async def _approve(chain: str, user: str, token: str, spender: str, owner: str,
     tx = {"from": Web3.to_checksum_address(owner),
           "to": Web3.to_checksum_address(token),
           "data": data, "value": 0, "gas": GAS["approve"],
-          "gasPrice": await _gas_price(chain, gwei)}
+          "gasPrice": gas_price}
     return await _send(chain, user, tx, protected=False, dry_run=dry_run)
 
 
@@ -476,6 +476,18 @@ async def _received(chain: str, token: str, owner: str, before: Optional[int],
     if after is None:
         return None
     return max(0, after - before)
+
+
+async def native_balance(chain: str, owner: str) -> Optional[int]:
+    """The coin this chain spends, in wei. None when it cannot be read."""
+    from web3 import Web3
+    try:
+        w3 = _w3(chain)
+        return int(await asyncio.to_thread(
+            w3.eth.get_balance, Web3.to_checksum_address(owner)))
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[SWAP] native balance failed on {chain}: {exc}")
+        return None
 
 
 async def _decimals(chain: str, token: str) -> int:
@@ -524,6 +536,14 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
     if not owner:
         return {"ok": False, "stage": "key", "why": "no EVM trading wallet"}
 
+    # Two reads that depend on nothing above them, started now so they
+    # overlap everything that follows. Measured: the balance costs 10-23ms on
+    # every chain (75ms on Tron) while resolving the venue costs 643ms on
+    # Robinhood — so run concurrently, this check is free.
+    gas_task = asyncio.ensure_future(_gas_price(chain, gwei))
+    bal_task = (asyncio.ensure_future(native_balance(chain, owner))
+                if buying else None)
+
     # The V3 and V4 quote is derived from the pool's price, so it needs the
     # coin's dollar value and the token's own decimals. Both are looked up
     # once here rather than inside quote(), which should not be opening its
@@ -538,6 +558,21 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
                 v["native_usd"] = await _t.native_price(_s, chain)
 
     q = await quote(chain, token, amount, buying=buying, v=v)
+    gas_price = await gas_task
+
+    # Refused here rather than at the send. The simulation cannot catch this:
+    # it deliberately overrides the sender's balance so a route can be proved
+    # without funding a wallet, which makes it blind to the one thing being
+    # asked about. So the wallet is asked directly — and the whole build,
+    # including the eth_call, is skipped when the answer is no.
+    if bal_task is not None:
+        have = await bal_task
+        need = amount + GAS[v["version"]] * gas_price
+        if have is not None and have < need:
+            return {"ok": False, "stage": "balance",
+                    "why": (f"this wallet holds {have / 1e18:.6f} and the trade "
+                            f"needs about {need / 1e18:.6f} including gas")}
+
     if not q["ok"]:
         return {"ok": False, "stage": "quote", "why": q["why"]}
     min_out = int(q["out"] * (1 - min(max(slippage, 0.0), 99.0) / 100))
@@ -576,7 +611,7 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
         spender = PERMIT2 if version == "v4" else r[version]
         if await _needs_approval(chain, token, owner, spender, amount):
             res = await _approve(chain, user, token, spender, owner,
-                                 gwei=gwei, dry_run=dry_run)
+                                 gas_price=gas_price, dry_run=dry_run)
             if not res.get("ok"):
                 return {"ok": False, "stage": "approve",
                         "why": res.get("why", "approval failed")}
@@ -592,7 +627,7 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
                                "to": Web3.to_checksum_address(PERMIT2),
                                "data": data, "value": 0,
                                "gas": GAS["permit2"],
-                               "gasPrice": await _gas_price(chain, gwei)},
+                               "gasPrice": gas_price},
                               protected=False, dry_run=dry_run)
             if not res.get("ok"):
                 return {"ok": False, "stage": "permit2",
@@ -649,7 +684,7 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
 
     tx = {"from": me, "to": Web3.to_checksum_address(to), "data": data,
           "value": int(value), "gas": GAS[version],
-          "gasPrice": await _gas_price(chain, gwei)}
+          "gasPrice": gas_price}
 
     # Read the holding before sending, so the fill can be measured against it.
     before = None if (dry_run or not buying) else await balance_of(chain, token, owner)
