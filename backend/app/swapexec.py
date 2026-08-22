@@ -309,6 +309,17 @@ async def simulate(chain: str, tx: dict) -> dict:
         return {"ok": False, "why": f"simulation could not run: {type(exc).__name__}"}
     if isinstance(res, dict) and res.get("error"):
         msg = str((res["error"] or {}).get("message") or "reverted")
+        # The two that will come up most often, in words rather than in the
+        # router's own vocabulary. Everything else is passed through as-is —
+        # inventing a friendly summary for an unknown revert would hide it.
+        if "TRANSFER_FROM_FAILED" in msg:
+            return {"ok": False,
+                    "why": "the wallet does not hold enough of this token, or "
+                           "has not approved it"}
+        if "INSUFFICIENT_OUTPUT_AMOUNT" in msg or "Too little received" in msg:
+            return {"ok": False,
+                    "why": "the pool would pay less than the slippage floor — "
+                           "the price moved, or the pool is too thin for this size"}
         return {"ok": False, "why": f"the swap would revert: {msg[:160]}"}
     return {"ok": True, "result": (res or {}).get("result", "")}
 
@@ -500,6 +511,22 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
     me = Web3.to_checksum_address(owner)
     w3 = _w3(chain)
     steps: list[dict] = []
+
+    # Asked before anything is built. Selling more than the wallet holds
+    # reverts with TransferHelper: TRANSFER_FROM_FAILED, which is true and
+    # unreadable — and by then an approval may already have been paid for.
+    if not buying:
+        try:
+            erc = w3.eth.contract(address=tok, abi=ERC20_ABI)
+            held = int(await asyncio.to_thread(erc.functions.balanceOf(me).call))
+        except Exception:  # noqa: BLE001
+            held = None
+        if held is not None and held < amount:
+            dec = v.get("decimals") or await _decimals(chain, token)
+            return {"ok": False, "stage": "balance",
+                    "why": (f"this wallet holds {held / 10 ** dec:,.6f} of the "
+                            f"token and the sell is for "
+                            f"{amount / 10 ** dec:,.6f}")}
 
     # Selling first needs the router allowed to move the token. On V4 that is
     # two allowances, because the Universal Router spends through Permit2
