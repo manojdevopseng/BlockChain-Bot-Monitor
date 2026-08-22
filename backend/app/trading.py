@@ -26,6 +26,9 @@ from typing import Any, Iterable, Optional
 import aiohttp
 
 from . import db
+from .scanners.slog import get_logger
+
+log = get_logger(__name__)
 
 # The chains a position may be opened on. Robinhood leads because that is where
 # most of the calls land.
@@ -168,6 +171,15 @@ DEFAULTS: dict[str, Any] = {
     # live per chain, because what counts as a stop differs by what you are
     # trading on.
     "auto_sell": False,
+
+    # Off, and only ever turned on deliberately. With it off every buy and
+    # sell is recorded and nothing is signed — which is what this engine did
+    # for its whole life until now. With it on, the same buttons spend real
+    # money through the trading wallet, at the amount and slippage this
+    # chain's own panel says. A switch is the honest way to cross that line:
+    # the alternative is software whose behaviour changed under somebody
+    # without them choosing it.
+    "live_trading": False,
 
     # ── the daily loss limit ──
     "loss_limit_on": False,
@@ -363,9 +375,38 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
     if spend <= 0:
         raise ValueError("nothing to spend — set an amount per buy for this chain")
 
+    # Live trading: the swap happens first and the row is written only if it
+    # landed. Recording a position that never executed would put a number in
+    # the P&L that no wallet backs — the one lie this engine must never tell.
+    tx_hash = ""
+    token_decimals = 18
+    if (conf.get("live_trading") and source != "demo"
+            and chain in ("eth", "rbh", "bnb", "base")):
+        from . import swapexec
+        res = await swapexec.trade(
+            user=user, chain=chain, token=addr,
+            amount=int(spend_native * 1e18), buying=True,
+            slippage=float(cc.get("buy_slippage") or 0),
+            gwei=float(cc.get("buy_gas_gwei") or 0),
+            protected=bool(cc.get("mev_protect")))
+        if not res.get("ok"):
+            raise ValueError(f"{res.get('stage', 'trade')}: {res.get('why')}")
+        tx_hash = res.get("hash", "")
+        from . import swapexec as _sx
+        token_decimals = await _sx._decimals(chain, addr)
+        log.info(f"[TRADING] {user} bought {symbol or addr[:10]} on "
+                 f"{chain.upper()} via {res.get('version')} — {tx_hash}")
+
     now = time.time()
     doc = {
         "user": user, "chain": chain, "address": addr,
+        # Empty on a paper row. Its presence is what separates a position
+        # somebody owns from one the engine is only keeping score of.
+        "tx": tx_hash, "live": bool(tx_hash),
+        # Stored at the buy, because a sell has to convert a quantity back
+        # into the token's own units and reading it again later is one more
+        # call that can fail at the worst moment.
+        "token_decimals": token_decimals,
         "symbol": symbol or "", "name": name or "",
         "usd": spend, "entry": float(price), "qty": spend / float(price),
         # What left the wallet, and what that coin was worth at the time. The
@@ -432,10 +473,33 @@ async def close_position(user: str, pid: str, *, part: float = 100.0,
     out = qty * float(price)
     cost = float(row["usd"]) * part / 100.0
 
+    # A position opened for real is closed for real. The flag is read off the
+    # row rather than off the current setting, so turning live trading off
+    # does not strand a real holding as a row that can only be closed on
+    # paper — the tokens would still be in the wallet either way.
+    sell_tx = ""
+    if row.get("live") and chain in ("eth", "rbh", "bnb", "base"):
+        conf = await settings_for(user)
+        cc = chain_conf(conf, chain)
+        dec = int(row.get("token_decimals") or 18)
+        from . import swapexec
+        res = await swapexec.trade(
+            user=user, chain=chain, token=addr,
+            amount=int(qty * (10 ** dec)), buying=False,
+            slippage=float(cc.get("sell_slippage") or 0),
+            gwei=float(cc.get("sell_gas_gwei") or 0),
+            protected=bool(cc.get("mev_protect")))
+        if not res.get("ok"):
+            raise ValueError(f"{res.get('stage', 'trade')}: {res.get('why')}")
+        sell_tx = res.get("hash", "")
+        log.info(f"[TRADING] {user} sold {part:.0f}% of "
+                 f"{row.get('symbol') or addr[:10]} on {chain.upper()} "
+                 f"via {res.get('version')} — {sell_tx}")
+
     if part >= 100.0:
         await col.update_one({"_id": row["_id"]}, {"$set": {
             "status": "closed", "exit": float(price), "closed_at": now,
-            "closed_reason": reason,
+            "closed_reason": reason, "sell_tx": sell_tx,
             "last_price": float(price), "last_at": now,
             "pnl_usd": out - cost,
             "pnl_pct": (out - cost) / cost * 100 if cost else 0.0}})

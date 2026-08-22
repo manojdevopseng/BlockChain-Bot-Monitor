@@ -29,10 +29,16 @@ async def get_settings(owner: dict = Depends(security.require_customer)):
         c: trading.chain_conf(conf, c) for c in trading.CHAINS}
     # Said here rather than only in the UI copy, so any client that grows
     # around this API inherits the warning.
-    conf["paper"] = True
+    live = bool(conf.get("live_trading"))
+    conf["paper"] = not live
     conf["day"] = await trading.day_pnl(owner["username"])
-    conf["paper_note"] = ("Positions are recorded, not executed. Nothing here "
-                          "signs a transaction or moves funds.")
+    conf["trading_wallet"] = await keys.address_for(owner["username"], "evm")
+    conf["paper_note"] = (
+        "Live. Buy and Sell spend from your trading wallet at the amount, "
+        "slippage and gas each chain's own panel is set to."
+        if live else
+        "Positions are recorded, not executed. Nothing here signs a "
+        "transaction or moves funds.")
     return conf
 
 
@@ -50,6 +56,17 @@ async def patch_settings(payload: dict = Body(...),
             except (TypeError, ValueError):
                 continue
         patch["callers"] = ids
+    # Crossing from recording to spending is a deliberate act, so it is
+    # allowed through the ordinary settings save like any other switch — but
+    # only when the account actually has a wallet to spend from. Turning it on
+    # with no key would produce a buy that fails at the last step, after the
+    # person believed it was armed.
+    if patch.get("live_trading"):
+        if not await keys.address_for(owner["username"], "evm"):
+            raise HTTPException(
+                400, "Create or import an EVM trading wallet before turning "
+                     "live trading on — there is nothing to spend from yet.")
+
     for field, lo, hi in (("max_open", 1, 200),
                           ("daily_buys", 1, 500),
                           ("loss_limit_pct", 0, 100),
