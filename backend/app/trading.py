@@ -25,7 +25,7 @@ from typing import Any, Iterable, Optional
 
 import aiohttp
 
-from . import db
+from . import db, keys
 from .scanners.slog import get_logger
 
 log = get_logger(__name__)
@@ -380,6 +380,7 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
     # the P&L that no wallet backs — the one lie this engine must never tell.
     tx_hash = ""
     token_decimals = 18
+    filled_qty = None
     if (conf.get("live_trading") and source != "demo"
             and chain in ("eth", "rbh", "bnb", "base")):
         from . import swapexec
@@ -394,6 +395,12 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         tx_hash = res.get("hash", "")
         from . import swapexec as _sx
         token_decimals = await _sx._decimals(chain, addr)
+        # What the wallet actually gained, when it could be measured. The
+        # arithmetic answer below is always a little high — the pool fills at
+        # its own price and most of these tokens take a cut on transfer — and
+        # a position claiming more than exists is refused when it is sold.
+        if res.get("received"):
+            filled_qty = res["received"] / (10 ** token_decimals)
         log.info(f"[TRADING] {user} bought {symbol or addr[:10]} on "
                  f"{chain.upper()} via {res.get('version')} — {tx_hash}")
 
@@ -408,7 +415,9 @@ async def open_position(*, user: str, chain: str, address: str, symbol: str = ""
         # call that can fail at the worst moment.
         "token_decimals": token_decimals,
         "symbol": symbol or "", "name": name or "",
-        "usd": spend, "entry": float(price), "qty": spend / float(price),
+        "usd": spend, "entry": float(price),
+        # Measured when the trade was real, computed when it was not.
+        "qty": filled_qty if filled_qty else spend / float(price),
         # What left the wallet, and what that coin was worth at the time. The
         # dollar figure alone cannot be turned back into it later, because the
         # coin will have moved too.
@@ -483,9 +492,23 @@ async def close_position(user: str, pid: str, *, part: float = 100.0,
         cc = chain_conf(conf, chain)
         dec = int(row.get("token_decimals") or 18)
         from . import swapexec
+        units = int(qty * (10 ** dec))
+        # Selling everything means everything the wallet holds, not everything
+        # the row claims. The two drift apart on any token that takes a cut on
+        # transfer, and the row is the one that is wrong — asking the chain
+        # costs one call and removes a whole class of refused sells.
+        if part >= 100.0:
+            held = await swapexec.balance_of(chain, addr,
+                                             await keys.address_for(user, "evm"))
+            if held is not None and held > 0:
+                if abs(held - units) / max(units, 1) > 0.001:
+                    log.info(f"[TRADING] {row.get('symbol') or addr[:10]}: row "
+                             f"says {units}, wallet has {held} — selling the "
+                             f"wallet's amount")
+                units = held
         res = await swapexec.trade(
             user=user, chain=chain, token=addr,
-            amount=int(qty * (10 ** dec)), buying=False,
+            amount=units, buying=False,
             slippage=float(cc.get("sell_slippage") or 0),
             gwei=float(cc.get("sell_gas_gwei") or 0),
             protected=bool(cc.get("mev_protect")))

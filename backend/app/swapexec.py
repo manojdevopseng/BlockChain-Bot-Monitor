@@ -437,6 +437,47 @@ async def _approve(chain: str, user: str, token: str, spender: str, owner: str,
 
 # ── the one thing this module exists to do ──────────────────────────────────
 
+async def balance_of(chain: str, token: str, owner: str) -> Optional[int]:
+    """How much of a token an address holds, in the token's own units."""
+    from web3 import Web3
+    try:
+        w3 = _w3(chain)
+        c = w3.eth.contract(address=Web3.to_checksum_address(token),
+                            abi=ERC20_ABI)
+        fn = c.functions.balanceOf(Web3.to_checksum_address(owner))
+        return int(await asyncio.to_thread(fn.call))
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"[SWAP] balanceOf failed for {token[:10]}: {exc}")
+        return None
+
+
+async def _received(chain: str, token: str, owner: str, before: Optional[int],
+                    tx_hash: str, timeout: float = 90.0) -> Optional[int]:
+    """What the wallet actually gained, measured rather than computed.
+
+    The quantity a buy is worth is not `spend / price`. The pool fills at its
+    own price, and most tokens worth buying from a caller take a cut on
+    transfer — so the arithmetic answer is always a little high. Recording it
+    makes the position claim more tokens than exist, and the error only
+    surfaces later, when a sell for everything is refused for being too big.
+
+    So the balance is read before and after, and the difference is the truth.
+    """
+    if before is None:
+        return None
+    try:
+        w3 = _w3(chain)
+        await asyncio.to_thread(w3.eth.wait_for_transaction_receipt,
+                                tx_hash, timeout)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[SWAP] no receipt for {tx_hash[:14]}: {type(exc).__name__}")
+        return None
+    after = await balance_of(chain, token, owner)
+    if after is None:
+        return None
+    return max(0, after - before)
+
+
 async def _decimals(chain: str, token: str) -> int:
     """A token's decimals, read from it. Eighteen is the common case and the
     wrong answer often enough to matter — a six-decimal token sized as if it
@@ -610,7 +651,18 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
           "value": int(value), "gas": GAS[version],
           "gasPrice": await _gas_price(chain, gwei)}
 
+    # Read the holding before sending, so the fill can be measured against it.
+    before = None if (dry_run or not buying) else await balance_of(chain, token, owner)
+
     res = await _send(chain, user, tx, protected=protected, dry_run=dry_run)
+
+    if res.get("ok") and buying and not dry_run:
+        got = await _received(chain, token, owner, before, res["hash"])
+        if got:
+            res["received"] = got
+            log.info(f"[SWAP] filled {got} units of {token[:10]} "
+                     f"(expected {q['out']}, floor {min_out})")
+
     return {**res, "version": version, "dex": v.get("dex"),
             "liquidity": v.get("liquidity"), "expected_out": q["out"],
             "min_out": min_out, "quote_source": q["source"], "steps": steps}
