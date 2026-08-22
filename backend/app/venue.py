@@ -238,10 +238,13 @@ async def _v3_fee(chain: str, pool: str) -> Optional[int]:
         return None
 
 
-# Which versions a hop can be built out of. V2 and V3 both take a multi-hop
-# route the router understands, and the two can be mixed through the
-# Universal Router. A V4 leg cannot yet — see swapexec._route_calldata.
-HOPPABLE = ("v2", "v3")
+# Which versions a hop can be built out of. V2 and V3 can be mixed freely,
+# because the Universal Router runs both as separate commands and hands the
+# output of one to the next. V4 is all-or-nothing: its swap is a single action
+# holding the whole path, and joining it to a V2 or V3 command would mean
+# settling and taking between them — so a V4 leg may only travel with another
+# V4 leg. See swapexec._route_calldata.
+HOPPABLE = ("v2", "v3", "v4")
 DEXES = ("uniswap", "pancakeswap")
 
 # How many of the token's own pools to investigate before giving up. Each one
@@ -314,6 +317,9 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
                 # cheaper route, it is a pool that does not exist.
                 if m["dex"] != leg["dex"]:
                     continue
+                # V4 travels only with V4 — see the note on HOPPABLE.
+                if (m["version"] == "v4") != (leg["version"] == "v4"):
+                    continue
                 combos.append((leg, m, mid_token))
     finally:
         if closing:
@@ -334,20 +340,35 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
     for hop, (pool, a, b) in enumerate(((mid, wnative, mid_token),
                                         (leg, mid_token, token))):
         fee = None
+        extra: dict = {}
         if pool["version"] == "v3":
             fee = await _v3_fee(chain, pool["pair"])
             if not fee:
                 return None
+        elif pool["version"] == "v4":
+            # `b` is the far side of this pool, which is the token the key has
+            # to be recovered against.
+            key = await _v4_key(chain, b, pool["pair"])
+            if not key:
+                return None
+            fee = int(key["fee"])
+            extra = {"tick_spacing": int(key["tick_spacing"]),
+                     "hooks": key["hooks"]}
         legs.append({"version": pool["version"], "pair": pool["pair"],
                      "dex": pool["dex"], "fee": fee,
                      "token_in": a, "token_out": b,
-                     "liquidity": pool["liquidity"]})
+                     "liquidity": pool["liquidity"], **extra})
 
     both_v2 = all(x["version"] == "v2" for x in legs)
+    all_v4 = all(x["version"] == "v4" for x in legs)
+    if all_v4:
+        # V4 holds the coin itself rather than a wrapped stand-in, so the
+        # money enters the route as the native currency and not as WETH.
+        legs[0]["token_in"] = NATIVE
     return {"ok": True, "chain": chain, "token": token,
             # The route's own shape decides how it is quoted: two V2 legs can
             # be asked exactly, anything else is priced from the pool.
-            "version": "v2" if both_v2 else "v3",
+            "version": "v2" if both_v2 else ("v4" if all_v4 else "v3"),
             "dex": leg["dex"], "pair": leg["pair"],
             "liquidity": min(leg["liquidity"], mid["liquidity"]),
             "price_usd": leg["price_usd"],

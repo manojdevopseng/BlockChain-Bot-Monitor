@@ -201,6 +201,9 @@ PERMIT2_ABI = [
 
 CMD_V4_SWAP = 0x10
 ACT_SWAP_EXACT_IN_SINGLE = 0x06
+# The multi-pool form. Where SWAP_EXACT_IN_SINGLE carries one PoolKey, this
+# carries the whole road as a list of PathKeys and walks it in one action.
+ACT_SWAP_EXACT_IN = 0x07
 ACT_SETTLE_ALL = 0x0c
 ACT_TAKE_ALL = 0x0f
 
@@ -297,6 +300,41 @@ def _route_steps(legs: list, buying: bool) -> list:
     return out
 
 
+def _v4_route_calldata(legs: list, amount_in: int, min_out: int,
+                       buying: bool) -> tuple[bytes, list[bytes]]:
+    """A V4 route of more than one pool, as a single action.
+
+    V4 has no separate pool contracts to chain together — every pool lives
+    inside one PoolManager, so a multi-pool swap is not several commands but
+    one action carrying the road as a list of PathKeys. Each key names the
+    currency that leg arrives at, and the shape of the pool it arrives
+    through; the currency it starts from is stated once, at the front.
+
+    Because the coin is held by V4 as a currency in its own right, a buy pays
+    in the coin itself rather than in its wrapped form — there is nothing to
+    wrap and nothing to unwrap at the end.
+    """
+    from eth_abi import encode
+    from web3 import Web3
+    ck = Web3.to_checksum_address
+
+    steps = _route_steps(legs, buying)
+    currency_in = ck(steps[0]["a"])
+    currency_out = ck(steps[-1]["b"])
+    path = [(ck(st["b"]), int(st["fee"]), int(st["tick_spacing"]),
+             ck(st["hooks"]), b"") for st in steps]
+
+    swap = encode(
+        ["(address,(address,uint24,int24,address,bytes)[],uint128,uint128)"],
+        [(currency_in, path, int(amount_in), int(min_out))])
+    settle = encode(["address", "uint256"], [currency_in, int(amount_in)])
+    take = encode(["address", "uint256"], [currency_out, int(min_out)])
+
+    actions = bytes([ACT_SWAP_EXACT_IN, ACT_SETTLE_ALL, ACT_TAKE_ALL])
+    inner = encode(["bytes", "bytes[]"], [actions, [swap, settle, take]])
+    return bytes([CMD_V4_SWAP]), [inner]
+
+
 def _route_calldata(legs: list, amount_in: int, min_out: int,
                     buying: bool) -> tuple[bytes, list[bytes]]:
     """One transaction for a route whose legs are not all the same version.
@@ -315,6 +353,9 @@ def _route_calldata(legs: list, amount_in: int, min_out: int,
     first leg produced — and the slippage floor is applied once, at the end of
     the road, where it belongs.
     """
+    if all(leg["version"] == "v4" for leg in legs):
+        return _v4_route_calldata(legs, amount_in, min_out, buying)
+
     from eth_abi import encode
     from web3 import Web3
     ck = Web3.to_checksum_address
