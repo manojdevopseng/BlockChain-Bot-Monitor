@@ -120,8 +120,8 @@ export function TradingWallet() {
           <b>This wallet can spend without asking you.</b> That is the point —
           auto-buy fires while you are asleep, and nothing can sign then unless a
           key lives on the server. Keep only what you are willing to trade
-          automatically in it. Your MetaMask and Phantom wallets are untouched by
-          this and stay read-only.
+          automatically in it — this wallet is funded by you, and only what is in
+          it can ever be spent.
         </span>
       </p>
 
