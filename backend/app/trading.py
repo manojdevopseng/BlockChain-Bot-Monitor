@@ -593,6 +593,12 @@ async def record_failure(*, user: str, chain: str, address: str, symbol: str,
         log.warning(f"[TRADING] {user} {side} {symbol or address[:10]} on "
                     f"{chain.upper()} failed at {res.get('stage')}: "
                     f"{str(res.get('why'))[:120]}")
+        # A trade that did not happen is the one somebody most needs telling
+        # about — especially an automatic one, where nobody was watching and
+        # the only other evidence is a row that never appeared.
+        _bell(user, f"{side.title()} failed — {symbol or address[:10]} on "
+                    f"{chain.upper()}",
+              f"{res.get('stage', 'trade')}: {str(res.get('why'))[:180]}")
     except Exception as exc:  # noqa: BLE001
         log.debug(f"[TRADING] could not record the failure: {exc}")
 
@@ -733,9 +739,14 @@ async def on_call(*, chain: str, address: str, symbol: str = "", name: str = "",
                     caller=group or str(chat_id or ""), caller_id=chat_id,
                     session=session)
                 made.append(view(row))
-            except ValueError:
-                # No price yet — a token minutes old often has none. Skipped
-                # rather than opened at a guess.
+            except ValueError as exc:
+                # A token minutes old often has no price yet, and that was the
+                # only reason this could fail when it was paper. Now it can
+                # also be a thin pool, a missing router or an empty wallet —
+                # so the reason is written down rather than assumed. The row
+                # itself is already recorded by record_failure.
+                log.info(f"[TRADING] auto-buy skipped {symbol or address[:10]} "
+                         f"on {chain.upper()} for {user}: {exc}")
                 continue
     return made
 
@@ -1125,6 +1136,31 @@ def _dash_url(path: str) -> str:
     return f"{base}{path}"
 
 
+_BELL_TASKS: set = set()
+
+
+def _bell(user: str, title: str, body: str, link: str = "/portfolio") -> None:
+    """The same event on the bell, not only in Telegram.
+
+    Telegram is where somebody is told; the bell is where they look it up
+    afterwards. An event in one and not the other cannot be found again — and
+    an account with no Telegram connected saw nothing at all, which is most
+    accounts.
+    """
+    async def go() -> None:
+        try:
+            from . import notifications
+            await notifications.notify(user, notifications.ALERT, title, body, link)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"[TRADING] bell notice failed: {exc}")
+
+    task = asyncio.ensure_future(go())
+    # Held: asyncio keeps only a weak reference, and a bare task can be
+    # collected mid-flight.
+    _BELL_TASKS.add(task)
+    task.add_done_callback(_BELL_TASKS.discard)
+
+
 def _tail(row: dict) -> str:
     """What goes under a trade alert.
 
@@ -1150,6 +1186,13 @@ def notify_open(row: dict) -> None:
         line += "\nSource: ETH Gas Fees"
     _notify_bg(row.get("user") or "",
                line + _tail(row), _buttons(row))
+    spent = (f"{row.get('spent_native')} {row.get('native')}"
+             if row.get("spent_native") else f"${_fmt(float(row.get('usd') or 0))}")
+    _bell(row.get("user") or "",
+          f"Bought {sym} on {str(row.get('chain', '')).upper()}",
+          f"{spent} at {float(row.get('entry') or 0):.8g}"
+          + (f" · {row.get('caller')}" if row.get("caller") else "")
+          + (" · on chain" if row.get("live") else " · paper"))
 
 
 def notify_close(row: dict, *, part: float, reason: str) -> None:
@@ -1164,6 +1207,11 @@ def notify_close(row: dict, *, part: float, reason: str) -> None:
             f"({sign}{abs(v['pnl_pct']):.1f}%)\nClosed by: {reason}")
     _notify_bg(row.get("user") or "",
                line + _tail(row), _buttons(row))
+    _bell(row.get("user") or "",
+          f"Sold {sym} on {str(row.get('chain', '')).upper()}"
+          + (f" ({part:.0f}%)" if part < 100 else ""),
+          f"{sign}${_fmt(abs(pnl))} ({sign}{abs(v['pnl_pct']):.1f}%) · {reason}"
+          + (" · on chain" if row.get("live") else " · paper"))
 
 
 # ── gas-fee tokens, queued rather than bought on sight ──────────────────────
