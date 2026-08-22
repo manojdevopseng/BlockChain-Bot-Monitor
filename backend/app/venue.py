@@ -240,8 +240,7 @@ async def _v3_fee(chain: str, pool: str) -> Optional[int]:
 
 async def _via(chain: str, pairs: list, quotable: set, wnative: str,
                amount_usd: Optional[float],
-               session: aiohttp.ClientSession | None,
-               own_session: bool) -> Optional[dict]:
+               session: aiohttp.ClientSession | None) -> Optional[dict]:
     """A two-hop route through whatever the token *is* paired with.
 
     Both legs have to stand on their own. The token's own pool has to be able
@@ -273,6 +272,11 @@ async def _via(chain: str, pairs: list, quotable: set, wnative: str,
         session, closing = aiohttp.ClientSession(), True
     try:
         mids = await _dexscreener(session, chain, leg["quote"])
+    except Exception as exc:  # noqa: BLE001
+        # An empty answer and a broken connection are not the same thing, and
+        # quietly treating the second as the first is what hid this bug.
+        log.warning(f"[VENUE] {chain} hop lookup failed: {type(exc).__name__}")
+        return None
     finally:
         if closing:
             await session.close()
@@ -376,7 +380,11 @@ async def best(chain: str, token: str,
         #
         # Only worth doing when the middle leg is itself deep. Otherwise the
         # thin pool has just moved one step away and is harder to see.
-        hop = await _via(chain, pairs, quotable, wn, amount_usd, session, own)
+        # Not `session` — when this call opened it, it has already been
+        # closed above, and handing a closed session on made every lookup
+        # here fail silently. Passing None lets _via open its own.
+        hop = await _via(chain, pairs, quotable, wn, amount_usd,
+                         None if own else session)
         if hop:
             return hop
         deep = max(pairs, key=lambda p: p["liquidity"])
