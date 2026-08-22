@@ -147,13 +147,33 @@ async def record(
         # And, for any account that asked for it, a paper position. Guarded
         # because a trading feature must never be the reason a call goes
         # unrecorded — the row above is the product, this is a reading of it.
-        try:
-            from . import trading
-            await trading.on_call(chain=chain, address=addr, symbol=symbol,
-                                  name=name, chat_id=chat_id, group=group)
-        except Exception as exc:  # noqa: BLE001
-            from .scanners.slog import get_logger
-            get_logger(__name__).warning(f"[TRADING] auto-buy skipped: {exc}")
+        # Spawned, not awaited. A buy takes about half a second — resolving
+        # the pool, quoting it, simulating, signing — and everything after
+        # this line in the caller was waiting for it: the outcome tracker, the
+        # websocket push, the Telegram announcement. None of those are the
+        # trade's business, and the trade is not theirs.
+        #
+        # It also gets the buy moving sooner, which is the point: the same
+        # work now overlaps the detection being written rather than following
+        # it.
+        from . import trading
+        _spawn(_auto_buy(chain, addr, symbol, name, chat_id, group))
+
+
+async def _auto_buy(chain: str, addr: str, symbol: str, name: str,
+                    chat_id, group: str) -> None:
+    """The auto-buy, off the detection's critical path.
+
+    Guarded because a trading feature must never be the reason a call goes
+    unrecorded — the row is the product, this is a reading of it.
+    """
+    try:
+        from . import trading
+        await trading.on_call(chain=chain, address=addr, symbol=symbol,
+                              name=name, chat_id=chat_id, group=group)
+    except Exception as exc:  # noqa: BLE001
+        from .scanners.slog import get_logger
+        get_logger(__name__).warning(f"[TRADING] auto-buy skipped: {exc}")
 
 
 async def known_chains(address: str) -> list[dict]:

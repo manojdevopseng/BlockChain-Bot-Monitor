@@ -226,6 +226,14 @@ class PremiumCaptureMixin:
         }
 
         async def check_chain(label: str, chain: str, pool: EndpointPool, bases: set) -> None:
+            # Timed per stage. The gap between a call landing and a buy going
+            # out was two and a half seconds and nobody could say which step
+            # owned it — the buy itself measures 443ms, so it was not the
+            # trade. Guessing at that twice is more expensive than logging it
+            # once.
+            t0 = time.perf_counter()
+            def _ms() -> float:
+                return (time.perf_counter() - t0) * 1000
             try:
                 if not pool.urls():
                     return
@@ -234,7 +242,9 @@ class PremiumCaptureMixin:
                     return  # every endpoint failed — already logged/alerted, nothing to conclude
                 if code is REVERTED or code == "0x":
                     return  # confirmed: no contract at this address on this chain
+                t_code = _ms()
                 token_addr, pair_addr = await self._resolve_token(pool, f"PREMIUM-{label}", addr, bases)
+                t_resolve = _ms()
                 if token_addr is None:
                     return  # resolve calls failed on every endpoint
                 token_l = token_addr.lower()
@@ -276,6 +286,7 @@ class PremiumCaptureMixin:
                     self._eth_call(pool, f"PREMIUM-{label}", token_addr, "0x06fdde03"),
                     self._eth_call(pool, f"PREMIUM-{label}", token_addr, "0x95d89b41"),
                 )
+                t_meta = _ms()
                 name_hex = "" if name_hex in (None, REVERTED) else name_hex
                 sym_hex = "" if sym_hex in (None, REVERTED) else sym_hex
                 record = {
@@ -307,7 +318,9 @@ class PremiumCaptureMixin:
                 from ...ws_hub import hub
                 await hub.broadcast("premium_detection", {k: v for k, v in record.items() if k != "_id"})
                 log.info(f"[PREMIUM-{label}] Captured {record['symbol'] or token_addr[:10]} from {group} | "
-                         + (f"{keyword} Matched" if keyword else "Not Matched"))
+                         + (f"{keyword} Matched" if keyword else "Not Matched")
+                         + f" | getCode {t_code:.0f}ms, resolve {t_resolve - t_code:.0f}ms,"
+                           f" name+symbol {t_meta - t_resolve:.0f}ms, write {_ms() - t_meta:.0f}ms")
                 await self._announce_detection(chain, token_addr, record["symbol"], group, 1, post_url, text)
             except Exception as exc:
                 # Was log.debug — invisible even on the Logs page (below its
