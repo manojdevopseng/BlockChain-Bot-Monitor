@@ -307,6 +307,13 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
                     continue
                 if _too_thin(m["liquidity"], amount_usd):
                     continue
+                # Both legs from the same dex. A route is executed by one
+                # router, and a router only knows its own pools — it derives
+                # each pool's address from its own factory rather than being
+                # told where to look — so a leg on the other dex is not a
+                # cheaper route, it is a pool that does not exist.
+                if m["dex"] != leg["dex"]:
+                    continue
                 combos.append((leg, m, mid_token))
     finally:
         if closing:
@@ -351,6 +358,7 @@ async def _via(chain: str, token: str, pairs: list, quotable: set,
             # end of the path rather than from either leg.
             "path": [wnative, mid_token, token],
             "legs": legs,
+            "route_dex": leg["dex"],
             "hops": 2,
             "why": (f"no {leg['quote_symbol']}-free route: going through "
                     f"{leg['quote_symbol']} via "

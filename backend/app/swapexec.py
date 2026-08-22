@@ -68,12 +68,20 @@ def _addr(chain: str, name: str) -> str:
     return str(getattr(settings, f"{chain}_{name}", "") or "").strip()
 
 
-def routers(chain: str) -> dict:
-    """Every contract this chain's swaps might touch."""
+def routers(chain: str, dex: str = "") -> dict:
+    """Every contract this chain's swaps might touch.
+
+    `dex` matters for the Universal Router and nothing else. Each one knows
+    only its own pools — it works out where a pool lives from its factory and
+    init code hash rather than being told — so PancakeSwap's router cannot
+    reach a Uniswap pool or the other way round. When a route names its dex,
+    that dex's router is used; otherwise the chain's default.
+    """
+    ur = (_addr(chain, f"{dex.lower()}_universal_router") if dex else "")
     return {
         "v2": _addr(chain, "v2_router"),
         "v3": _addr(chain, "v3_router"),
-        "v4": _addr(chain, "universal_router"),
+        "v4": ur or _addr(chain, "universal_router"),
         "permit2": PERMIT2,
         "wnative": (scfg.BNB_WBNB if chain == "bnb"
                     else str(getattr(scfg, f"{chain.upper()}_WETH", "") or "")),
@@ -680,7 +688,7 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
     if not v.get("ok"):
         return {"ok": False, "stage": "venue", "why": v.get("why", "no pool")}
 
-    r = routers(chain)
+    r = routers(chain, str(v.get("route_dex") or ""))
     version = v["version"]
     # A route whose legs are not all V2 goes through the Universal Router,
     # which changes who has to be approved further down as well as how the

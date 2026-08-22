@@ -285,6 +285,12 @@ class Settings(BaseSettings):
 
     eth_universal_router: str = "0xd92a36b0000531ef3063ded4de20a0783308446c"
     bnb_universal_router: str = "0x91bf3bfaef8d771a74e1a8fe460b3ee646b2e588"
+    # PancakeSwap's own. The Uniswap router above cannot reach a Pancake pool
+    # at all — it derives every pool address from Uniswap's factory, so a
+    # Pancake pool on the 2500 fee tier, a tier Uniswap does not even have,
+    # simply is not there as far as it is concerned. Proved by simulating the
+    # same swap against both.
+    bnb_pancakeswap_universal_router: str = "0x1A0A18AC4BECDDbd6389559687d1A73d8927E416"
     base_universal_router: str = "0xf3a4f4094bd2c6c06ca2f61789d8727b8d1e7259"
     rbh_universal_router: str = "0x8876789976decbfcbbbe364623c63652db8c0904"
 
