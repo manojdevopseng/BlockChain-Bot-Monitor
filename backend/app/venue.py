@@ -56,13 +56,28 @@ _POOL_CHAINS = {"rbh": ("robinhood", "rbhx", "rbh"), "eth": ("eth",),
 # V4 in the native coin is the zero address, not the wrapped token.
 NATIVE = "0x0000000000000000000000000000000000000000"
 
+# A pool this thin cannot fill anything without moving the price to nonsense,
+# so it is treated as no pool at all. And a routable pool worth less than this
+# share of the real one is a worse answer than admitting the token cannot be
+# reached — the fill would be technically successful and financially absurd.
+MIN_LIQUIDITY = 2_000.0
+MIN_SHARE = 0.10
+
 # The legal (fee, tickSpacing) pairs. A hooked pool may use anything, which is
 # why the hooked shapes are listed separately rather than assumed.
 _TIERS = ((100, 1), (500, 10), (3000, 60), (10000, 200))
 _HOOK_TIERS = ((0, 200), (0, 60), (0, 1), (100, 1), (500, 10), (3000, 60),
                (10000, 200))
-# Every spacing that appears above, for recovering the one missing field.
-_SPACINGS = (1, 10, 60, 200)
+# V4 lets a pool choose any spacing up to this, and launchpads use values no
+# standard tier lists — the deepest MOOONER pool runs fee 2500, whose spacing
+# is in none of the four documented pairs. Since a candidate is checked by
+# rehashing it against the pool id, searching the whole legal range is a
+# verification rather than a guess, and thirty thousand keccaks costs
+# milliseconds. Ordered so the common values are found first.
+_MAX_SPACING = 32767
+_SPACINGS = tuple(dict.fromkeys(
+    (1, 10, 60, 200, 2, 4, 5, 20, 25, 50, 100, 500, 1000, 2000)
+    + tuple(range(1, _MAX_SPACING + 1))))
 
 
 def pool_id(currency0: str, currency1: str, fee: int, tick_spacing: int,
@@ -181,23 +196,31 @@ async def best(chain: str, token: str,
            "quote_symbol": top["quote_symbol"],
            "alternatives": len(pairs), "why": ""}
 
-    # A pool on somebody else's DEX cannot be traded through Uniswap's router,
-    # and saying so is better than routing into a pool that is not there.
+    # A pool on somebody else's DEX cannot be traded through Uniswap's router.
+    # Falling back to a routable one is only right when the fallback is real:
+    # FEATHERS has $19,353 on `up` and $66 on Uniswap V4, and a buy into the
+    # $66 pool would move the price so far that the fill would be worthless.
+    # A trade that cannot be done well is refused rather than done badly.
     if top["dex"] not in ("uniswap", "pancakeswap"):
-        deepest_uni = next((p for p in pairs
-                            if p["dex"] in ("uniswap", "pancakeswap")), None)
-        if deepest_uni is None:
+        alt = next((p for p in pairs
+                    if p["dex"] in ("uniswap", "pancakeswap")), None)
+        if alt is None:
             out.update({"ok": False,
                         "why": f"deepest pool is on {top['dex']}, which this "
                                f"cannot route through"})
             return out
-        out.update({"version": deepest_uni["version"], "dex": deepest_uni["dex"],
-                    "pair": deepest_uni["pair"],
-                    "liquidity": deepest_uni["liquidity"],
+        if alt["liquidity"] < MIN_LIQUIDITY or alt["liquidity"] < top["liquidity"] * MIN_SHARE:
+            out.update({"ok": False,
+                        "why": (f"deepest pool is on {top['dex']} "
+                                f"(${top['liquidity']:,.0f}), which this cannot "
+                                f"route through — and the best routable pool "
+                                f"holds only ${alt['liquidity']:,.0f}")})
+            return out
+        out.update({"version": alt["version"], "dex": alt["dex"],
+                    "pair": alt["pair"], "liquidity": alt["liquidity"],
                     "why": f"deepest pool is on {top['dex']} "
                            f"(${top['liquidity']:,.0f}); using the "
-                           f"{deepest_uni['dex']} {deepest_uni['version']} pool "
-                           f"instead"})
+                           f"{alt['dex']} {alt['version']} pool instead"})
 
     if out["version"] == "v4":
         key = await _v4_key(chain, token, out["pair"])
