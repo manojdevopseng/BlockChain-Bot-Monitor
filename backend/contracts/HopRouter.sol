@@ -48,7 +48,13 @@ interface IRouter {
 }
 
 contract HopRouter {
-    address public immutable WNATIVE;
+    // Set once, in the constructor, and never given a setter. Kept in storage
+    // rather than as an immutable so the contract can be proved before it is
+    // paid for: an immutable lives inside the runtime code and is only filled
+    // in at deploy time, which leaves nothing to simulate against. In storage
+    // it can be planted for the length of a single eth_call, and the whole
+    // trade run against the real chain without deploying anything.
+    address public WNATIVE;
 
     constructor(address wnative) {
         WNATIVE = wnative;
