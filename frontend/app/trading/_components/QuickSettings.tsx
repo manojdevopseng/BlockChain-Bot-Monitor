@@ -163,7 +163,14 @@ export function QuickSettings(
         block.sell_gas_gwei = Number(here.sell_gas_gwei) || 0;
       }
 
-      const body: Conf = {
+      // Only what this panel actually changed. Sending the whole settings
+      // object meant every save rewrote every field from a snapshot taken
+      // when the modal opened — so saving the Robinhood panel could quietly
+      // switch auto-buy back off, because that was its value at mount. A
+      // setting that turns itself off is the worst kind of bug in software
+      // that spends money.
+      const body: Conf = { chains_conf: { [chain]: block } };
+      const globals: Record<string, any> = {
         auto_buy: !!draft.auto_buy,
         max_open: Number(draft.max_open) || 1,
         daily_buys: Number(draft.daily_buys) || 1,
@@ -175,8 +182,10 @@ export function QuickSettings(
         auto_sell: !!draft.auto_sell,
         loss_limit_on: !!draft.loss_limit_on,
         loss_limit_pct: Number(draft.loss_limit_pct) || 0,
-        chains_conf: { [chain]: block },
       };
+      for (const [k, v] of Object.entries(globals)) {
+        if (JSON.stringify(v) !== JSON.stringify((conf as Conf)[k])) body[k] = v;
+      }
       const r: any = await apiSend("/api/trading/settings", "PATCH", body);
       onSaved(r.settings);
       onClose();
