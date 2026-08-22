@@ -310,6 +310,15 @@ def _wrapped_evm(chain: str) -> str:
 
 # ── positions ───────────────────────────────────────────────────────────────
 
+async def _native_now(chain: str) -> Optional[float]:
+    """The coin's dollar price, from the cache when it is warm."""
+    try:
+        async with aiohttp.ClientSession() as s:
+            return await native_price(s, chain) or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _priced(spot: Optional[dict], price) -> Optional[dict]:
     """The venue answer with a price on it, or None when there is no venue."""
     if not (spot or {}).get("ok"):
@@ -553,12 +562,22 @@ async def close_position(user: str, pid: str, *, part: float = 100.0,
                              f"says {units}, wallet has {held} — selling the "
                              f"wallet's amount")
                 units = held
+        # The price is already in hand — it was read at the top of this
+        # function to work out the P&L. It has to travel with the trade for
+        # the same reason it does on a buy: a venue that came from the
+        # detector's record carries the pool but no dollar figure, and the
+        # slippage floor is worked out from one. Without this the sell fails
+        # at the quote, which is what it did the first time this ran.
+        from . import venue as _venue
+        spot = await _venue.best(chain, addr)
         res = await swapexec.trade(
             user=user, chain=chain, token=addr,
             amount=units, buying=False,
             slippage=float(cc.get("sell_slippage") or 0),
             gwei=float(cc.get("sell_gas_gwei") or 0),
-            protected=bool(cc.get("mev_protect")))
+            protected=bool(cc.get("mev_protect")),
+            v=_priced(spot, price),
+            native_usd=await _native_now(chain))
         if not res.get("ok"):
             await record_failure(user=user, chain=chain, address=addr,
                                  symbol=row.get("symbol", ""), side="sell",

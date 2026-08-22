@@ -273,6 +273,19 @@ async def quote(chain: str, token: str, amount_in: int, *, buying: bool,
     # comes from the pool; this only sets the floor beneath it.
     price = v.get("price_usd")
     native_usd = v.get("native_usd")
+    if not price:
+        # Last resort rather than the usual path. A venue that came from the
+        # detector's record carries the pool and no dollar figure, and every
+        # caller is supposed to hand the price down — but "supposed to" is how
+        # a sell came to fail at the quote, so this asks rather than refuses.
+        import aiohttp as _a
+        from . import trading as _t
+        async with _a.ClientSession() as _s:
+            got = await _t.prices(_s, [(chain, token)])
+        price = got.get((chain, _t._key(chain, token)))
+        if not native_usd:
+            async with _a.ClientSession() as _s:
+                native_usd = await _t.native_price(_s, chain)
     if not price or not native_usd:
         return {"ok": False, "why": "no price to size the slippage floor from"}
     decimals = v.get("decimals", 18)
