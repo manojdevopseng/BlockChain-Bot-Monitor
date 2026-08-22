@@ -687,6 +687,60 @@ async def _send(chain: str, user: str, tx: dict, *, protected: bool,
         raw = None
 
 
+async def estimate_gas(chain: str, tx: dict) -> Optional[int]:
+    """What this transaction actually costs, asked rather than assumed.
+
+    The constants below started as generous guesses and stopped being generous
+    the moment a route grew a second hop. An ALIEN buy through two Pancake
+    pools was given 550,000 and burnt 544,349 before running out — mined,
+    reverted, gas gone, nothing bought. A fee-on-transfer token makes every
+    hop cost more than the plain case, and no constant covers both.
+
+    So the node is asked. The sender's balance is overridden for the question,
+    the same way the simulation does it, so a route can be priced without the
+    wallet having to be funded first.
+    """
+    from web3 import Web3
+    w3 = _w3(chain)
+    call = {k: (hex(v) if isinstance(v, int) else v)
+            for k, v in tx.items() if k != "gas"}
+    override = {Web3.to_checksum_address(tx["from"]):
+                {"balance": hex(int(tx.get("value", 0) or 0) + 10 ** 18)}}
+
+    def ask(with_override: bool):
+        args = [call, "latest"] + ([override] if with_override else [])
+        return w3.provider.make_request("eth_estimateGas", args)
+
+    for with_override in (True, False):
+        try:
+            res = await asyncio.to_thread(ask, with_override)
+        except Exception:  # noqa: BLE001
+            continue
+        got = (res or {}).get("result")
+        if got:
+            return int(got, 16)
+    return None
+
+
+async def _succeeded(chain: str, tx_hash: str,
+                     timeout: float = 90.0) -> Optional[bool]:
+    """Mined and succeeded (True), mined and reverted (False), unknown (None).
+
+    A receipt is not a success. A reverted transaction has one too, with the
+    gas spent and nothing changed, and reading only its existence is how a
+    position came to be recorded for a buy that never happened — 5,283 tokens
+    the wallet has never held, and a sell that can only ever be refused.
+    """
+    try:
+        w3 = _w3(chain)
+        rcpt = await asyncio.to_thread(w3.eth.wait_for_transaction_receipt,
+                                       tx_hash, timeout)
+        return int(dict(rcpt).get("status", 1)) == 1
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[SWAP] no receipt for {tx_hash[:14]}: {type(exc).__name__}")
+        return None
+
+
 async def _mined(chain: str, tx_hash: str, timeout: float = 60.0) -> bool:
     """Wait until a transaction is in a block. False if it never arrives.
 
@@ -755,8 +809,8 @@ async def balance_of(chain: str, token: str, owner: str) -> Optional[int]:
         return None
 
 
-async def _received(chain: str, token: str, owner: str, before: Optional[int],
-                    tx_hash: str, timeout: float = 90.0) -> Optional[int]:
+async def _received(chain: str, token: str, owner: str,
+                    before: Optional[int]) -> Optional[int]:
     """What the wallet actually gained, measured rather than computed.
 
     The quantity a buy is worth is not `spend / price`. The pool fills at its
@@ -768,13 +822,6 @@ async def _received(chain: str, token: str, owner: str, before: Optional[int],
     So the balance is read before and after, and the difference is the truth.
     """
     if before is None:
-        return None
-    try:
-        w3 = _w3(chain)
-        await asyncio.to_thread(w3.eth.wait_for_transaction_receipt,
-                                tx_hash, timeout)
-    except Exception as exc:  # noqa: BLE001
-        log.warning(f"[SWAP] no receipt for {tx_hash[:14]}: {type(exc).__name__}")
         return None
     after = await balance_of(chain, token, owner)
     if after is None:
@@ -1024,23 +1071,51 @@ async def trade(*, user: str, chain: str, token: str, amount: int,
         to = r["v4"]
 
     # Each extra hop is another pool to touch. Under-estimating reverts after
-    # paying for the attempt, and unused gas comes back.
+    # paying for the attempt, and unused gas comes back — so the ceiling below
+    # is only a fallback for when the node will not price the call, and a
+    # measured figure with room on top is preferred to any constant.
     hops = max(1, len((v or {}).get("path") or []) - 1)
     tx = {"from": me, "to": Web3.to_checksum_address(to), "data": data,
           "value": int(value), "gas": GAS[version] + (hops - 1) * 150_000,
           "gasPrice": gas_price}
+    est = await estimate_gas(chain, tx)
+    if est:
+        # A third again. The estimate is taken against the chain as it is now
+        # and the transaction runs against it a block or two later, by which
+        # time a fee-on-transfer token can have a little more work to do.
+        tx["gas"] = min(max(int(est * 1.33), 120_000), 3_000_000)
 
     # Read the holding before sending, so the fill can be measured against it.
     before = None if (dry_run or not buying) else await balance_of(chain, token, owner)
 
     res = await _send(chain, user, tx, protected=protected, dry_run=dry_run)
 
-    if res.get("ok") and buying and not dry_run:
-        got = await _received(chain, token, owner, before, res["hash"])
-        if got:
-            res["received"] = got
-            log.info(f"[SWAP] filled {got} units of {token[:10]} "
-                     f"(expected {q['out']}, floor {min_out})")
+    if res.get("ok") and not dry_run and res.get("hash"):
+        # Sent is not done. A reverted transaction is mined like any other and
+        # its receipt looks like any other until the status is read — and a
+        # buy that reverted, recorded as a position, leaves a holding that
+        # cannot be sold because it was never there.
+        landed = await _succeeded(chain, res["hash"])
+        if landed is False:
+            log.warning(f"[SWAP] {user} {chain} {res['hash'][:14]} reverted "
+                        f"on chain — gas {tx['gas']:,}")
+            return {"ok": False, "stage": "reverted", "hash": res["hash"],
+                    "version": version, "dex": v.get("dex"),
+                    "why": ("the transaction was mined but reverted — nothing "
+                            "changed hands, and the gas is spent")}
+        if buying:
+            got = await _received(chain, token, owner, before)
+            if got:
+                res["received"] = got
+                log.info(f"[SWAP] filled {got} units of {token[:10]} "
+                         f"(expected {q['out']}, floor {min_out})")
+            elif landed:
+                # Mined, succeeded, and the wallet is no richer. Nothing here
+                # can be recorded as a holding.
+                return {"ok": False, "stage": "empty", "hash": res["hash"],
+                        "version": version, "dex": v.get("dex"),
+                        "why": ("the swap went through but no tokens arrived — "
+                                "the wallet holds none of it")}
 
     return {**res, "version": version, "dex": v.get("dex"),
             "liquidity": v.get("liquidity"), "expected_out": q["out"],
