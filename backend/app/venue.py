@@ -207,7 +207,26 @@ async def best(chain: str, token: str,
     if not pairs:
         return {"ok": False, "why": "no pool found for this token"}
 
-    pairs.sort(key=lambda p: -p["liquidity"])
+    # Only pools quoted in the coin being spent. INVEST's deepest V2 pool is
+    # against SPY, and a buy routed [WETH, INVEST] simply reverts — there is
+    # no such pair. Trading it would mean routing WETH -> SPY -> INVEST, two
+    # fees and two lots of slippage through a pool nobody checked, which is a
+    # worse answer than saying the token cannot be reached.
+    from .scanners import scfg
+    wn = str(getattr(scfg, "BNB_WBNB" if chain == "bnb"
+                     else f"{chain.upper()}_WETH", "") or "").lower()
+    quotable = {NATIVE, wn} - {""}
+    native_pairs = [p for p in pairs if p["quote"] in quotable]
+    if not native_pairs:
+        deep = max(pairs, key=lambda p: p["liquidity"])
+        return {"ok": False,
+                "why": (f"every pool for this token is quoted in "
+                        f"{deep['quote_symbol'] or 'another token'}, not "
+                        f"{'BNB' if chain == 'bnb' else 'ETH'} — reaching it "
+                        f"would need a second hop this does not route")}
+
+    native_pairs.sort(key=lambda p: -p["liquidity"])
+    pairs = native_pairs
     top = pairs[0]
     out = {"ok": True, "chain": chain, "token": token.lower(),
            "version": top["version"], "dex": top["dex"], "pair": top["pair"],
@@ -245,6 +264,12 @@ async def best(chain: str, token: str,
     # answer. The pair address for V3 is the pool contract itself, so it can
     # simply be asked — and a wrong tier would route into a different pool of
     # the same two tokens, which is a real pool with a real (worse) price.
+    if top["liquidity"] < MIN_LIQUIDITY:
+        return {"ok": False,
+                "why": (f"the deepest pool quoted in the coin holds only "
+                        f"${top['liquidity']:,.0f} — too thin to fill without "
+                        f"moving the price to nonsense")}
+
     if out["version"] == "v3":
         fee = await _v3_fee(chain, out["pair"])
         if fee is None:
