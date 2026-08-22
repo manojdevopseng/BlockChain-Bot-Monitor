@@ -891,7 +891,43 @@ async def _pool_is_empty(chain: str, pool: str, labels: list) -> bool:
                     "stateMutability": "view", "type": "function"}]
             c = w3.eth.contract(address=Web3.to_checksum_address(pool), abi=abi)
             got = await asyncio.to_thread(c.functions.getReserves().call)
-            return not (int(got[0]) and int(got[1]))
+            if not (int(got[0]) and int(got[1])):
+                return True
+
+            # Reserves are a number a contract chooses to report. A real pair
+            # holds the tokens it reports, and one that does not is not a pair
+            # at all — it is a shape worn so indexers will price it. One found
+            # on BSC reported $12,764 of reserves while holding nothing of
+            # either token: the money sat in a launchpad's vault and the
+            # address everybody was quoting was a 359-byte proxy.
+            #
+            # Only a confident zero counts here too. If the balances cannot be
+            # read, the reserves stand.
+            erc = [{"name": "balanceOf",
+                    "inputs": [{"type": "address"}],
+                    "outputs": [{"type": "uint256"}],
+                    "stateMutability": "view", "type": "function"}]
+            sides = [{"name": n, "inputs": [], "outputs": [{"type": "address"}],
+                      "stateMutability": "view", "type": "function"}
+                     for n in ("token0", "token1")]
+            try:
+                pc = w3.eth.contract(address=Web3.to_checksum_address(pool),
+                                     abi=sides)
+                held = 0
+                for side in (pc.functions.token0, pc.functions.token1):
+                    tok = await asyncio.to_thread(side().call)
+                    tc = w3.eth.contract(address=Web3.to_checksum_address(tok),
+                                         abi=erc)
+                    held += int(await asyncio.to_thread(
+                        tc.functions.balanceOf(
+                            Web3.to_checksum_address(pool)).call))
+                if held == 0:
+                    log.warning(f"[SELLABLE] {pool[:12]} reports reserves but "
+                                f"holds neither token — not a real pool")
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+            return False
 
         return int(await asyncio.to_thread(fn.call)) == 0
     except Exception as exc:  # noqa: BLE001
