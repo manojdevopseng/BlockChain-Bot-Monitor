@@ -45,10 +45,36 @@ const KIND_SHORT: Record<string, string> = {
 };
 
 const TABS = [
+  { id: "all", label: "All" },
   { id: "holdings", label: "Holdings" },
   { id: "history", label: "History" },
   { id: "failed", label: "Failed" },
 ] as const;
+
+/* The three lists are three shapes, and All has to show them in one table.
+   What they share is a token, a chain, a moment and an outcome — so that is
+   what the merged view is built from, with the outcome named in a column
+   rather than implied by which tab you happened to be on.
+
+   Sorted by when each thing last happened, not by when it started: a
+   position closed an hour ago is more recent news than one opened yesterday
+   and still running. */
+type Row = { kind: "open" | "closed" | "failed"; at: number; p?: any; f?: any };
+
+function merge(holdings: any[], history: any[], failures: any[]): Row[] {
+  const rows: Row[] = [
+    ...holdings.map((p) => ({ kind: "open" as const, at: p.opened_at || 0, p })),
+    ...history.map((p) => ({ kind: "closed" as const, at: p.closed_at || p.opened_at || 0, p })),
+    ...failures.map((f) => ({ kind: "failed" as const, at: f.at || 0, f })),
+  ];
+  return rows.sort((a, b) => b.at - a.at);
+}
+
+const STATUS: Record<string, { label: string; tone: Variant }> = {
+  open:   { label: "open",   tone: "blue" },
+  closed: { label: "closed", tone: "gray" },
+  failed: { label: "failed", tone: "red" },
+};
 
 function amount(n: number): string {
   if (!n) return "0";
@@ -92,7 +118,7 @@ function Stat({ label, children, hint }: {
 export default function PortfolioPage() {
   const { data, isLoading } = useApi<any>("/api/trading/portfolio",
     { refreshInterval: 0 });
-  const [tab, setTab] = useState<"holdings" | "history" | "failed">("holdings");
+  const [tab, setTab] = useState<"all" | "holdings" | "history" | "failed">("all");
   const [busy, setBusy] = useState(false);
 
   const s = data?.summary ?? {};
@@ -101,6 +127,7 @@ export default function PortfolioPage() {
   const rows: any[] = (tab === "holdings" ? data?.holdings
                        : tab === "history" ? data?.history : []) ?? [];
   const failures: any[] = data?.failures ?? [];
+  const all = merge(data?.holdings ?? [], data?.history ?? [], failures);
 
   async function reload() {
     setBusy(true);
@@ -223,7 +250,9 @@ export default function PortfolioPage() {
           <FilterTabs value={tab} options={TABS}
                       onChange={(v) => setTab(v)} />
           <p className="text-[11px] text-text-dim">
-            {tab === "holdings"
+            {tab === "all"
+              ? "Everything this account has done, newest first — open, closed and refused together."
+              : tab === "holdings"
               ? "Open positions this account opened. What the wallet holds is above."
               : tab === "history"
               ? "Every trade made through SightLine. Swaps made elsewhere are not here — this cannot see them."
@@ -231,7 +260,103 @@ export default function PortfolioPage() {
           </p>
         </div>
 
-        {tab === "failed" ? (
+        {tab === "all" ? (
+          <TableScroll>
+            <table className="w-full text-left text-xs">
+              <thead className={STICKY_HEAD}>
+                <tr className="text-text-dim">
+                  <th className="px-3 py-2 font-medium">Token</th>
+                  <th className="px-3 py-2 font-medium">Chain</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Size</th>
+                  <th className="px-3 py-2 font-medium">Result</th>
+                  <th className="px-3 py-2 font-medium">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-soft">
+                {all.map((r, i) => {
+                  const st = STATUS[r.kind];
+                  const p = r.p, f = r.f;
+                  return (
+                    <tr key={i} className="hover:bg-bg-soft/40">
+                      <td className="px-3 py-2.5">
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-medium text-text">
+                            {(p?.symbol || f?.symbol
+                              || (p?.address || f?.address || "").slice(0, 10))}
+                          </span>
+                          {p?.mev_protect && (
+                            <Shield size={10} className="text-accent-green"
+                                    aria-label="Routed away from the public mempool" />
+                          )}
+                          {p?.live && p.tx && (
+                            <a href={(EXPLORER[p.chain] || "") + p.tx}
+                               target="_blank" rel="noopener noreferrer"
+                               title={`Buy — ${p.tx}`}
+                               className="text-[10px] text-accent-green hover:underline">
+                              buy
+                            </a>
+                          )}
+                          {p?.live && p.sell_tx && (
+                            <a href={(EXPLORER[p.chain] || "") + p.sell_tx}
+                               target="_blank" rel="noopener noreferrer"
+                               title={`Sell — ${p.sell_tx}`}
+                               className="text-[10px] text-accent-red hover:underline">
+                              sell
+                            </a>
+                          )}
+                          {p && !p.live && <Badge variant="gray">paper</Badge>}
+                        </span>
+                        {(p?.caller) && (
+                          <span className="block text-[10px] text-text-dim">{p.caller}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant={CHAIN_TONE[p?.chain || f?.chain] ?? "gray"}>
+                          {CHAIN_LABEL[p?.chain || f?.chain] ?? (p?.chain || f?.chain)}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant={st.tone}>{st.label}</Badge>
+                        {f && (
+                          <span className="block text-[10px] text-text-dim">
+                            {f.side} · {f.stage}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 tabular-nums text-text-muted">
+                        {p ? (p.spent_native
+                              ? `${Number(p.spent_native)} ${p.native}`
+                              : fmtUsd(p.usd))
+                          : (f?.amount_native ? String(f.amount_native) : "—")}
+                      </td>
+                      {/* One column, two meanings — a number when there was a
+                          trade, and the reason when there was not. Merging
+                          them is the point of this view. */}
+                      <td className="px-3 py-2.5">
+                        {p ? <Money usd={p.pnl_usd ?? 0} pct={p.pnl_pct ?? 0} />
+                           : <span className="text-text-muted">{f?.why}</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-[11px] text-text-dim">
+                        {r.at ? new Date(r.at * 1000).toLocaleString("en-GB") : "—"}
+                        {p?.closed_reason && p.closed_reason !== "manual" && (
+                          <span className="block text-[10px]">{p.closed_reason}</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {all.length === 0 && !isLoading && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-8 text-center text-xs text-text-dim">
+                      Nothing yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </TableScroll>
+        ) : tab === "failed" ? (
           <TableScroll>
             <table className="w-full text-left text-xs">
               <thead className={STICKY_HEAD}>
